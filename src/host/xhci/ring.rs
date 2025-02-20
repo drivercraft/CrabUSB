@@ -116,18 +116,13 @@ impl Ring {
         self.i
     }
 
-    /// 完成一次循环返回true
-    pub fn inc_deque(&mut self) -> bool {
+    pub fn inc_deque(&mut self) {
         self.i += 1;
-        let mut is_cycle = false;
         let len = self.len();
         if self.i >= len {
             self.i = 0;
             self.cycle = !self.cycle;
-            is_cycle = true;
         }
-
-        is_cycle
     }
 
     pub fn trb_bus_addr(&self, i: usize) -> u64 {

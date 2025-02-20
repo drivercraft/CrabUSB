@@ -24,6 +24,7 @@ pub struct EventRingSte {
 pub struct EventRing {
     pub ring: Ring,
     pub ste: DVec<EventRingSte>,
+    // <Cmd trb addr, value>
     cmd_results: UnsafeCell<BTreeMap<u64, CmdResultCell>>,
 }
 
@@ -73,7 +74,7 @@ impl EventRing {
     pub fn clean_events(&mut self) -> usize {
         let mut count = 0;
 
-        while let Some((allowed, _cycle)) = self.next() {
+        while let Some(allowed) = self.next() {
             match allowed {
                 Allowed::CommandCompletion(c) => {
                     let addr = c.command_trb_pointer();
@@ -98,7 +99,7 @@ impl EventRing {
     }
 
     /// 完成一次循环返回 true
-    pub fn next(&mut self) -> Option<(Allowed, bool)> {
+    pub fn next(&mut self) -> Option<Allowed> {
         let (data, flag) = self.ring.current_data();
 
         let allowed = Allowed::try_from(data.to_raw()).ok()?;
@@ -106,11 +107,9 @@ impl EventRing {
         if flag != allowed.cycle_bit() {
             return None;
         }
-
         fence(Ordering::SeqCst);
-
-        let cycle = self.ring.inc_deque();
-        Some((allowed, cycle))
+        self.ring.inc_deque();
+        Some(allowed)
     }
 
     pub fn erdp(&self) -> u64 {
