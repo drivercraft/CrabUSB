@@ -1,0 +1,4 @@
+{
+    "rust-analyzer.cargo.target": "aarch64-unknown-none",
+    "rust-analyzer.cargo.allTargets": false,
+}
