@@ -12,7 +12,7 @@ mod tests {
         async_std::time,
         driver::{Descriptor, Device},
         fdt_parser::PciSpace,
-        globals::global_val,
+        globals::{PlatformInfoKind, global_val},
         irq::{IrqHandleResult, IrqInfo, IrqParam},
         mem::{
             Align,
@@ -21,7 +21,7 @@ mod tests {
         platform::fdt::GetPciIrqConfig,
         println,
     };
-    use core::{cell::UnsafeCell, time::Duration};
+    use core::time::Duration;
     use crab_usb::*;
     use futures::FutureExt;
     use log::*;
@@ -86,11 +86,7 @@ mod tests {
     }
 
     fn get_usb_host() -> XhciInfo {
-        let fdt = match &global_val().platform_info {
-            bare_test::globals::PlatformInfoKind::DeviceTree(fdt) => fdt,
-
-            _ => panic!("unsupported platform"),
-        };
+        let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
 
         let fdt = fdt.get();
         let pcie = fdt

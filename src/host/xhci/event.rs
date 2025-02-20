@@ -75,6 +75,9 @@ impl EventRing {
                     trace!("[EVENT] << {:?} @{:X}", allowed, addr);
                     self.cmd_results.set_result(addr, c);
                 }
+                Allowed::PortStatusChange(st) => {
+                    debug!("port change: {}", st.port_id());
+                }
                 _ => {
                     debug!("unhandled event {:?}", allowed);
                 }

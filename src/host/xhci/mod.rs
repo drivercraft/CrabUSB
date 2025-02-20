@@ -1,9 +1,9 @@
-use core::{num::NonZeroUsize, ptr::NonNull, time::Duration};
+use core::{hint::spin_loop, num::NonZeroUsize, ptr::NonNull, task::Poll, time::Duration};
 
 use alloc::vec::Vec;
 use context::ScratchpadBufferArray;
 use future::LocalBoxFuture;
-use futures::prelude::*;
+use futures::{prelude::*, task::AtomicWaker};
 use log::*;
 use ring::{Ring, TrbData};
 use xhci::{
@@ -28,6 +28,7 @@ type Registers = xhci::Registers<MemMapper>;
 pub struct Xhci {
     mmio_base: NonNull<u8>,
     data: Option<Data>,
+    port_wake: AtomicWaker,
 }
 
 unsafe impl Send for Xhci {}
@@ -44,7 +45,7 @@ impl Controller for Xhci {
             self.init_irq()?;
             self.setup_scratchpads()?;
             self.start().await?;
-            // self.reset_ports();
+            self.reset_ports();
 
             Ok(())
         }
@@ -86,6 +87,9 @@ impl Controller for Xhci {
         }
         if sts.port_change_detect() {
             debug!("Port Change Detected");
+            if let Some(data) = self.port_wake.take() {
+                data.wake();
+            }
 
             sts.clear_port_change_detect();
         }
@@ -104,6 +108,7 @@ impl Xhci {
         Self {
             mmio_base,
             data: None,
+            port_wake: AtomicWaker::new(),
         }
     }
 
@@ -319,29 +324,28 @@ impl Xhci {
         Ok(())
     }
 
-    // fn reset_ports(&mut self) -> LocalBoxFuture<'_, Result> {
-    //     let regs = &mut self.regs();
-    //     let port_len = regs.port_register_set.len();
+    fn reset_ports(&mut self) {
+        let regs = &mut self.regs();
+        let port_len = regs.port_register_set.len();
 
-    //     for i in 0..port_len {
-    //         debug!("Port {} start reset", i,);
-    //         regs.port_register_set.update_volatile_at(i, |port| {
-    //             port.portsc.set_0_port_enabled_disabled();
-    //             port.portsc.set_port_reset();
-    //         });
-
-    //         while regs
-    //             .port_register_set
-    //             .read_volatile_at(i)
-    //             .portsc
-    //             .port_reset()
-    //         {}
-
-    //         debug!("Port {} reset ok", i);
-    //     }
-        
-
-    // }
+        for i in 0..port_len {
+            debug!("Port {} start reset", i,);
+            regs.port_register_set.update_volatile_at(i, |port| {
+                port.portsc.set_0_port_enabled_disabled();
+                port.portsc.set_port_reset();
+            });
+        }
+        for i in 0..port_len {
+            while regs
+                .port_register_set
+                .read_volatile_at(i)
+                .portsc
+                .port_reset()
+            {
+                spin_loop();
+            }
+        }
+    }
 
     fn extended_capabilities(&self) -> Vec<ExtendedCapability<MemMapper>> {
         let hccparams1 = self.regs().capability.hccparams1.read_volatile();
@@ -445,4 +449,35 @@ impl Mapper for MemMapper {
         unsafe { NonZeroUsize::new_unchecked(phys_start) }
     }
     fn unmap(&mut self, _virt_start: usize, _bytes: usize) {}
+}
+
+struct FuturePortResetOk<'a> {
+    regs: Registers,
+    wait: &'a AtomicWaker,
+}
+
+impl Future for FuturePortResetOk<'_> {
+    type Output = ();
+
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Self::Output> {
+        let port_len = self.regs.port_register_set.len();
+
+        for i in 0..port_len {
+            if self
+                .regs
+                .port_register_set
+                .read_volatile_at(i)
+                .portsc
+                .port_reset()
+            {
+                self.wait.register(cx.waker());
+                return Poll::Pending;
+            }
+        }
+
+        Poll::Ready(())
+    }
 }
