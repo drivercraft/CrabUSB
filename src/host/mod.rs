@@ -33,19 +33,24 @@ impl USBHost<Xhci> {
     }
 
     pub async fn test_cmd(&mut self) -> Result {
-        // for _ in 0..300 {
+        for _ in 0..300 {
             self.ctrl.test_cmd().await?;
-        // }
+        }
 
         Ok(())
     }
 
+    /// 中断处理
+    ///
+    /// # Safety
+    ///
+    /// 只能在中断函数中调用.
     pub unsafe fn handle_irq(&mut self) {
         self.ctrl.handle_irq();
     }
 }
 
-pub trait Controller {
+pub trait Controller: Send {
     fn init(&mut self) -> LocalBoxFuture<'_, Result>;
 
     fn test_cmd(&mut self) -> LocalBoxFuture<'_, Result> {

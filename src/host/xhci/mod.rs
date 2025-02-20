@@ -1,20 +1,17 @@
-use core::{hint::spin_loop, num::NonZeroUsize, ptr::NonNull, time::Duration};
+use core::{num::NonZeroUsize, ptr::NonNull, time::Duration};
 
 use alloc::vec::Vec;
 use context::ScratchpadBufferArray;
 use future::LocalBoxFuture;
 use futures::prelude::*;
-use log::{debug, info, trace, warn};
+use log::*;
 use ring::{Ring, TrbData};
 use xhci::{
     ExtendedCapability,
     accessor::Mapper,
-    extended_capabilities::{
-        self,
-        usb_legacy_support_capability::{UsbLegacySupport, UsbLegacySupportControlStatus},
-    },
+    extended_capabilities::{self, usb_legacy_support_capability::UsbLegacySupport},
     registers::doorbell,
-    ring::trb::{self, command, event::CommandCompletion},
+    ring::trb::{command, event::CompletionCode},
 };
 
 mod context;
@@ -25,13 +22,15 @@ use super::Controller;
 use crate::{err::*, sleep};
 
 type Registers = xhci::Registers<MemMapper>;
-type RegistersExtList = xhci::extended_capabilities::List<MemMapper>;
-type SupportedProtocol = xhci::extended_capabilities::XhciSupportedProtocol<MemMapper>;
+// type RegistersExtList = xhci::extended_capabilities::List<MemMapper>;
+// type SupportedProtocol = xhci::extended_capabilities::XhciSupportedProtocol<MemMapper>;
 
 pub struct Xhci {
     mmio_base: NonNull<u8>,
     data: Option<Data>,
 }
+
+unsafe impl Send for Xhci {}
 
 impl Xhci {
     pub fn new(mmio_base: NonNull<u8>) -> Self {
@@ -237,13 +236,19 @@ impl Xhci {
             .doorbell
             .write_volatile_at(0, doorbell::Register::default());
 
-        let res = self.data()?.event.wait_result(trb_addr).await;
+        let res = self.data()?.event.wait_cmd_completion(trb_addr).await;
 
-        if let trb::event::Allowed::CommandCompletion(c) = res {
-        } else {
-            panic!("Invalid event type")
+        let r = res.completion_code();
+        match r {
+            Ok(code) => {
+                if !matches!(code, CompletionCode::Success) {
+                    return Err(USBError::TransferEventError(code));
+                }
+            }
+            Err(_e) => {
+                return Err(USBError::Unknown);
+            }
         }
-
         Ok(())
     }
 
@@ -273,16 +278,8 @@ impl Xhci {
         debug!("Extended capabilities: {:?}", caps.len());
 
         for cap in self.extended_capabilities() {
-            match cap {
-                ExtendedCapability::UsbLegacySupport(usb_legacy_support) => {
-                    self.legacy_init(usb_legacy_support).await?;
-                }
-                ExtendedCapability::XhciSupportedProtocol(xhci_supported_protocol) => {}
-                ExtendedCapability::HciExtendedPowerManagementCapability(generic) => {}
-                ExtendedCapability::XhciMessageInterrupt(xhci_message_interrupt) => {}
-                ExtendedCapability::XhciLocalMemory(xhci_local_memory) => {}
-                ExtendedCapability::Debug(debug) => {}
-                ExtendedCapability::XhciExtendedMessageInterrupt(generic) => {}
+            if let ExtendedCapability::UsbLegacySupport(usb_legacy_support) = cap {
+                self.legacy_init(usb_legacy_support).await?;
             }
         }
 

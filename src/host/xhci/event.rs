@@ -1,16 +1,15 @@
 use core::{
     cell::UnsafeCell,
     future::Future,
-    sync::atomic::{AtomicBool, Ordering, fence},
-    task::{Poll, Waker},
+    sync::atomic::{Ordering, fence},
+    task::Poll,
 };
 
-use alloc::{collections::btree_map::BTreeMap, sync::Arc};
+use alloc::collections::btree_map::BTreeMap;
 use dma_api::DVec;
 use futures::{FutureExt, future::LocalBoxFuture, task::AtomicWaker};
 use log::{debug, trace};
-use spin::{mutex::Mutex, rwlock::RwLock};
-use xhci::ring::trb::event::{Allowed, CompletionCode};
+use xhci::ring::trb::event::{Allowed, CommandCompletion};
 
 use super::ring::Ring;
 use crate::err::*;
@@ -25,7 +24,7 @@ pub struct EventRingSte {
 pub struct EventRing {
     pub ring: Ring,
     pub ste: DVec<EventRingSte>,
-    cmd_results: UnsafeCell<BTreeMap<u64, ResultCell>>,
+    cmd_results: UnsafeCell<BTreeMap<u64, CmdResultCell>>,
 }
 
 unsafe impl Send for EventRing {}
@@ -50,7 +49,7 @@ impl EventRing {
 
         for i in 0..cmd_ring.len() {
             let addr = cmd_ring.trb_bus_addr(i);
-            results.insert(addr, ResultCell::default());
+            results.insert(addr, CmdResultCell::default());
         }
 
         Ok(Self {
@@ -60,9 +59,12 @@ impl EventRing {
         })
     }
 
-    pub fn wait_result(&mut self, trb_addr: u64) -> LocalBoxFuture<'_, Allowed> {
+    pub fn wait_cmd_completion(
+        &mut self,
+        cmd_trb_addr: u64,
+    ) -> LocalBoxFuture<'_, CommandCompletion> {
         EventWaiter {
-            trb_addr,
+            trb_addr: cmd_trb_addr,
             ring: self,
         }
         .boxed_local()
@@ -78,7 +80,7 @@ impl EventRing {
                     trace!("[EVENT] << {:?} @{:X}", allowed, addr);
 
                     if let Some(res) = unsafe { &mut *self.cmd_results.get() }.get_mut(&addr) {
-                        res.result.replace(allowed);
+                        res.result.replace(c);
 
                         if let Some(wake) = res.waker.take() {
                             wake.wake();
@@ -124,8 +126,8 @@ impl EventRing {
 }
 
 #[derive(Default)]
-struct ResultCell {
-    result: Option<Allowed>,
+struct CmdResultCell {
+    result: Option<CommandCompletion>,
     waker: AtomicWaker,
 }
 
@@ -135,7 +137,7 @@ struct EventWaiter<'a> {
 }
 
 impl Future for EventWaiter<'_> {
-    type Output = Allowed;
+    type Output = CommandCompletion;
 
     fn poll(
         self: core::pin::Pin<&mut Self>,

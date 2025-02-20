@@ -13,7 +13,7 @@ const TRB_SIZE: usize = size_of::<TrbData>();
 pub struct TrbData([u32; TRB_LEN]);
 
 impl TrbData {
-    pub fn to_raw(self) -> [u32; TRB_LEN] {
+    pub fn to_raw(&self) -> [u32; TRB_LEN] {
         self.0
     }
 }
@@ -89,7 +89,6 @@ impl Ring {
 
     fn next_index(&mut self) -> usize {
         self.i += 1;
-        let mut need_link = false;
         let len = self.len();
 
         // link模式下，最后一个是Link
@@ -132,7 +131,7 @@ impl Ring {
     }
 
     pub fn trb_bus_addr(&self, i: usize) -> u64 {
-        let base = self.trbs.bus_addr();
+        let base = self.bus_addr();
         base + (i * size_of::<TrbData>()) as u64
     }
 
