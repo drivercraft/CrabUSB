@@ -33,9 +33,9 @@ impl USBHost<Xhci> {
     }
 
     pub async fn test_cmd(&mut self) -> Result {
-        for _ in 0..300 {
+        // for _ in 0..300 {
             self.ctrl.test_cmd().await?;
-        }
+        // }
 
         Ok(())
     }

@@ -7,6 +7,7 @@ use core::time::Duration;
 
 pub mod err;
 mod host;
+pub(crate) mod wait;
 
 pub use futures::future::LocalBoxFuture;
 pub use host::*;

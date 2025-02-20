@@ -1,18 +1,16 @@
 use core::{
-    cell::UnsafeCell,
     future::Future,
     sync::atomic::{Ordering, fence},
-    task::Poll,
 };
 
-use alloc::collections::btree_map::BTreeMap;
+use alloc::vec::Vec;
 use dma_api::DVec;
-use futures::{FutureExt, future::LocalBoxFuture, task::AtomicWaker};
+use futures::{FutureExt, future::LocalBoxFuture};
 use log::{debug, trace};
 use xhci::ring::trb::event::{Allowed, CommandCompletion};
 
 use super::ring::Ring;
-use crate::err::*;
+use crate::{err::*, wait::WaitMap};
 
 #[repr(C)]
 pub struct EventRingSte {
@@ -24,8 +22,7 @@ pub struct EventRingSte {
 pub struct EventRing {
     pub ring: Ring,
     pub ste: DVec<EventRingSte>,
-    // <Cmd trb addr, value>
-    cmd_results: UnsafeCell<BTreeMap<u64, CmdResultCell>>,
+    cmd_results: WaitMap<CommandCompletion>,
 }
 
 unsafe impl Send for EventRing {}
@@ -46,17 +43,14 @@ impl EventRing {
 
         ste.set(0, ste0);
 
-        let mut results = BTreeMap::new();
-
-        for i in 0..cmd_ring.len() {
-            let addr = cmd_ring.trb_bus_addr(i);
-            results.insert(addr, CmdResultCell::default());
-        }
+        let cmd_addr_list = (0..cmd_ring.len())
+            .map(|i| cmd_ring.trb_bus_addr(i))
+            .collect::<Vec<_>>();
 
         Ok(Self {
             ring,
             ste,
-            cmd_results: UnsafeCell::new(results),
+            cmd_results: WaitMap::new(&cmd_addr_list),
         })
     }
 
@@ -66,7 +60,7 @@ impl EventRing {
     ) -> LocalBoxFuture<'_, CommandCompletion> {
         EventWaiter {
             trb_addr: cmd_trb_addr,
-            ring: self,
+            wait: &mut self.cmd_results,
         }
         .boxed_local()
     }
@@ -79,14 +73,7 @@ impl EventRing {
                 Allowed::CommandCompletion(c) => {
                     let addr = c.command_trb_pointer();
                     trace!("[EVENT] << {:?} @{:X}", allowed, addr);
-
-                    if let Some(res) = unsafe { &mut *self.cmd_results.get() }.get_mut(&addr) {
-                        res.result.replace(c);
-
-                        if let Some(wake) = res.waker.take() {
-                            wake.wake();
-                        }
-                    }
+                    self.cmd_results.set_result(addr, c);
                 }
                 _ => {
                     debug!("unhandled event {:?}", allowed);
@@ -124,15 +111,9 @@ impl EventRing {
     }
 }
 
-#[derive(Default)]
-struct CmdResultCell {
-    result: Option<CommandCompletion>,
-    waker: AtomicWaker,
-}
-
 struct EventWaiter<'a> {
     trb_addr: u64,
-    ring: &'a EventRing,
+    wait: &'a WaitMap<CommandCompletion>,
 }
 
 impl Future for EventWaiter<'_> {
@@ -143,18 +124,6 @@ impl Future for EventWaiter<'_> {
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
         let addr = self.trb_addr;
-        let entry = {
-            unsafe { &mut *self.ring.cmd_results.get() }
-                .get_mut(&addr)
-                .unwrap()
-        };
-
-        match entry.result.take() {
-            Some(v) => Poll::Ready(v),
-            None => {
-                entry.waker.register(cx.waker());
-                Poll::Pending
-            }
-        }
+        self.wait.poll(addr, cx)
     }
 }

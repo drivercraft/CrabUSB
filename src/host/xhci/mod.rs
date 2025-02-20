@@ -32,6 +32,73 @@ pub struct Xhci {
 
 unsafe impl Send for Xhci {}
 
+impl Controller for Xhci {
+    fn init(&mut self) -> LocalBoxFuture<'_, Result> {
+        async {
+            self.init_ext_caps().await?;
+            self.chip_hardware_reset().await?;
+            let max_slots = self.setup_max_device_slots();
+            self.data = Some(Data::new(max_slots as _)?);
+            self.setup_dcbaap()?;
+            self.set_cmd_ring()?;
+            self.init_irq()?;
+            self.setup_scratchpads()?;
+            self.start().await?;
+            // self.reset_ports();
+
+            Ok(())
+        }
+        .boxed_local()
+    }
+
+    fn test_cmd(&mut self) -> LocalBoxFuture<'_, Result> {
+        async {
+            self.post_cmd(command::Allowed::Noop(command::Noop::new()))
+                .await?;
+            Ok(())
+        }
+        .boxed_local()
+    }
+
+    fn handle_irq(&mut self) {
+        let mut sts = self.regs().operational.usbsts.read_volatile();
+        if sts.event_interrupt() {
+            let erdp = {
+                let event = &mut self.data().unwrap().event;
+                event.clean_events();
+                event.erdp()
+            };
+            {
+                let mut regs = self.regs();
+                let mut irq = regs.interrupter_register_set.interrupter_mut(0);
+
+                irq.erdp.update_volatile(|r| {
+                    r.set_event_ring_dequeue_pointer(erdp);
+                    r.clear_event_handler_busy();
+                });
+
+                irq.iman.update_volatile(|r| {
+                    r.clear_interrupt_pending();
+                });
+            }
+
+            sts.clear_event_interrupt();
+        }
+        if sts.port_change_detect() {
+            debug!("Port Change Detected");
+
+            sts.clear_port_change_detect();
+        }
+
+        if sts.host_system_error() {
+            debug!("Host System Error");
+            sts.clear_host_system_error();
+        }
+
+        self.regs().operational.usbsts.write_volatile(sts);
+    }
+}
+
 impl Xhci {
     pub fn new(mmio_base: NonNull<u8>) -> Self {
         Self {
@@ -252,6 +319,30 @@ impl Xhci {
         Ok(())
     }
 
+    // fn reset_ports(&mut self) -> LocalBoxFuture<'_, Result> {
+    //     let regs = &mut self.regs();
+    //     let port_len = regs.port_register_set.len();
+
+    //     for i in 0..port_len {
+    //         debug!("Port {} start reset", i,);
+    //         regs.port_register_set.update_volatile_at(i, |port| {
+    //             port.portsc.set_0_port_enabled_disabled();
+    //             port.portsc.set_port_reset();
+    //         });
+
+    //         while regs
+    //             .port_register_set
+    //             .read_volatile_at(i)
+    //             .portsc
+    //             .port_reset()
+    //         {}
+
+    //         debug!("Port {} reset ok", i);
+    //     }
+        
+
+    // }
+
     fn extended_capabilities(&self) -> Vec<ExtendedCapability<MemMapper>> {
         let hccparams1 = self.regs().capability.hccparams1.read_volatile();
         let mapper = MemMapper {};
@@ -344,72 +435,6 @@ impl Data {
             event,
             scratchpad_buf_arr: None,
         })
-    }
-}
-
-impl Controller for Xhci {
-    fn init(&mut self) -> LocalBoxFuture<'_, Result> {
-        async {
-            self.init_ext_caps().await?;
-            self.chip_hardware_reset().await?;
-            let max_slots = self.setup_max_device_slots();
-            self.data = Some(Data::new(max_slots as _)?);
-            self.setup_dcbaap()?;
-            self.set_cmd_ring()?;
-            self.init_irq()?;
-            self.setup_scratchpads()?;
-            self.start().await?;
-
-            Ok(())
-        }
-        .boxed_local()
-    }
-
-    fn test_cmd(&mut self) -> LocalBoxFuture<'_, Result> {
-        async {
-            self.post_cmd(command::Allowed::Noop(command::Noop::new()))
-                .await?;
-            Ok(())
-        }
-        .boxed_local()
-    }
-
-    fn handle_irq(&mut self) {
-        let mut sts = self.regs().operational.usbsts.read_volatile();
-        if sts.event_interrupt() {
-            let erdp = {
-                let event = &mut self.data().unwrap().event;
-                event.clean_events();
-                event.erdp()
-            };
-            {
-                let mut regs = self.regs();
-                let mut irq = regs.interrupter_register_set.interrupter_mut(0);
-
-                irq.erdp.update_volatile(|r| {
-                    r.set_event_ring_dequeue_pointer(erdp);
-                    r.clear_event_handler_busy();
-                });
-
-                irq.iman.update_volatile(|r| {
-                    r.clear_interrupt_pending();
-                });
-            }
-
-            sts.clear_event_interrupt();
-        }
-        if sts.port_change_detect() {
-            debug!("Port Change Detected");
-
-            sts.clear_port_change_detect();
-        }
-
-        if sts.host_system_error() {
-            debug!("Host System Error");
-            sts.clear_host_system_error();
-        }
-
-        self.regs().operational.usbsts.write_volatile(sts);
     }
 }
 
