@@ -38,7 +38,7 @@ impl<T> WaitMap<T> {
         }
     }
 
-    pub fn poll(&self, id: u64, cx: &mut core::task::Context<'_>) -> Poll<T> {
+    fn poll(&self, id: u64, cx: &mut core::task::Context<'_>) -> Poll<T> {
         let entry = { unsafe { &mut *self.0.get() }.get_mut(&id).unwrap() };
 
         match entry.result.take() {
@@ -48,5 +48,26 @@ impl<T> WaitMap<T> {
                 Poll::Pending
             }
         }
+    }
+
+    pub fn wait_for_result(&self, id: u64) -> Waiter<'_, T> {
+        Waiter { id, wait: self }
+    }
+}
+
+pub struct Waiter<'a, T> {
+    id: u64,
+    wait: &'a WaitMap<T>,
+}
+
+impl<T> Future for Waiter<'_, T> {
+    type Output = T;
+
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Self::Output> {
+        let addr = self.id;
+        self.wait.poll(addr, cx)
     }
 }

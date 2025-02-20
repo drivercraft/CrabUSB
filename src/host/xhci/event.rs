@@ -1,7 +1,4 @@
-use core::{
-    future::Future,
-    sync::atomic::{Ordering, fence},
-};
+use core::sync::atomic::{Ordering, fence};
 
 use alloc::vec::Vec;
 use dma_api::DVec;
@@ -58,11 +55,7 @@ impl EventRing {
         &mut self,
         cmd_trb_addr: u64,
     ) -> LocalBoxFuture<'_, CommandCompletion> {
-        EventWaiter {
-            trb_addr: cmd_trb_addr,
-            wait: &mut self.cmd_results,
-        }
-        .boxed_local()
+        self.cmd_results.wait_for_result(cmd_trb_addr).boxed_local()
     }
 
     pub fn clean_events(&mut self) -> usize {
@@ -111,22 +104,5 @@ impl EventRing {
 
     pub fn len(&self) -> usize {
         self.ste.len()
-    }
-}
-
-struct EventWaiter<'a> {
-    trb_addr: u64,
-    wait: &'a WaitMap<CommandCompletion>,
-}
-
-impl Future for EventWaiter<'_> {
-    type Output = CommandCompletion;
-
-    fn poll(
-        self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<Self::Output> {
-        let addr = self.trb_addr;
-        self.wait.poll(addr, cx)
     }
 }
