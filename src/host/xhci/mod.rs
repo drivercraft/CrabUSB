@@ -1,7 +1,13 @@
-use core::{hint::spin_loop, num::NonZeroUsize, ptr::NonNull, task::Poll, time::Duration};
+use core::{
+    hint::spin_loop,
+    num::NonZeroUsize,
+    ptr::NonNull,
+    sync::atomic::{Ordering, fence},
+    time::Duration,
+};
 
-use alloc::vec::Vec;
-use context::ScratchpadBufferArray;
+use alloc::{boxed::Box, vec::Vec};
+use context::{ScratchpadBufferArray, XhciSlot};
 use future::LocalBoxFuture;
 use futures::{prelude::*, task::AtomicWaker};
 use log::*;
@@ -9,16 +15,20 @@ use ring::{Ring, TrbData};
 use xhci::{
     ExtendedCapability,
     accessor::Mapper,
+    context::InputHandler,
     extended_capabilities::{self, usb_legacy_support_capability::UsbLegacySupport},
     registers::doorbell,
-    ring::trb::{command, event::CompletionCode},
+    ring::trb::{
+        command,
+        event::{CommandCompletion, CompletionCode},
+    },
 };
 
 mod context;
 mod event;
 mod ring;
 
-use super::Controller;
+use super::{Controller, Slot};
 use crate::{err::*, sleep};
 
 type Registers = xhci::Registers<MemMapper>;
@@ -100,6 +110,21 @@ impl Controller for Xhci {
         }
 
         self.regs().operational.usbsts.write_volatile(sts);
+    }
+
+    fn probe(&mut self) -> LocalBoxFuture<'_, Result<Vec<Box<dyn Slot>>>> {
+        async {
+            let mut slots = Vec::new();
+            let port_idx_list = self.port_idx_list();
+
+            for idx in port_idx_list {
+                let slot = self.new_slot(idx).await?;
+                slots.push(slot);
+            }
+
+            Ok(slots)
+        }
+        .boxed_local()
     }
 }
 
@@ -301,9 +326,9 @@ impl Xhci {
         Ok(())
     }
 
-    async fn post_cmd(&mut self, trb: command::Allowed) -> Result {
+    async fn post_cmd(&mut self, trb: command::Allowed) -> Result<CommandCompletion> {
         let trb_addr = self.data()?.cmd.enque_command(trb);
-
+        fence(Ordering::Release);
         self.regs()
             .doorbell
             .write_volatile_at(0, doorbell::Register::default());
@@ -321,7 +346,7 @@ impl Xhci {
                 return Err(USBError::Unknown);
             }
         }
-        Ok(())
+        Ok(res)
     }
 
     fn reset_ports(&mut self) {
@@ -412,6 +437,122 @@ impl Xhci {
         Ok(())
     }
 
+    fn port_idx_list(&self) -> Vec<usize> {
+        let mut port_idx_list = Vec::new();
+        let port_len = self.regs().port_register_set.len();
+        for i in 0..port_len {
+            let portsc = &self.regs().port_register_set.read_volatile_at(i).portsc;
+            info!(
+                "Port {}: Enabled: {}, Connected: {}, Speed {}, Power {}",
+                i,
+                portsc.port_enabled_disabled(),
+                portsc.current_connect_status(),
+                portsc.port_speed(),
+                portsc.port_power()
+            );
+
+            if !portsc.port_enabled_disabled() {
+                continue;
+            }
+
+            port_idx_list.push(i);
+        }
+
+        port_idx_list
+    }
+    async fn device_slot_assignment(&mut self) -> Result<usize> {
+        // enable slot
+        let result = self
+            .post_cmd(command::Allowed::EnableSlot(command::EnableSlot::default()))
+            .await?;
+
+        let slot_id = result.slot_id();
+        trace!("assigned slot id: {slot_id}");
+        Ok(slot_id as usize)
+    }
+
+    async fn new_slot(&mut self, port_idx: usize) -> Result<Box<dyn Slot>> {
+        let slot_id = self.device_slot_assignment().await?;
+        debug!("Slot {} assigned", slot_id);
+
+        let ctx = self.data()?.dev_list.new_ctx(slot_id, 32)?;
+        let mut slot = XhciSlot::new(slot_id, ctx);
+
+        self.address(&mut slot, port_idx).await?;
+
+        Ok(Box::new(slot))
+    }
+    fn port_speed(&self, port: usize) -> u8 {
+        self.regs()
+            .port_register_set
+            .read_volatile_at(port)
+            .portsc
+            .port_speed()
+    }
+
+    pub async fn address(&mut self, slot: &mut XhciSlot, port_idx: usize) -> Result {
+        let port_speed = self.port_speed(port_idx);
+        let max_packet_size = parse_default_max_packet_size_from_port_speed(port_speed);
+
+        let port_id = port_idx + 1;
+        let dci = 1;
+
+        let transfer_ring_0_addr = slot.ep_ring_ref(dci).bus_addr();
+        let ring_cycle_bit = slot.ep_ring_ref(dci).cycle;
+
+        slot.modify_input(|input| {
+            let control_context = input.control_mut();
+            control_context.set_add_context_flag(0);
+            control_context.set_add_context_flag(1);
+            for i in 2..32 {
+                control_context.clear_drop_context_flag(i);
+            }
+
+            let slot_context = input.device_mut().slot_mut();
+            slot_context.clear_multi_tt();
+            slot_context.clear_hub();
+            slot_context.set_route_string(append_port_to_route_string(0, port_id)); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
+            slot_context.set_context_entries(1);
+            slot_context.set_max_exit_latency(0);
+            slot_context.set_root_hub_port_number(port_id as _); //todo: to use port number
+            slot_context.set_number_of_ports(0);
+            slot_context.set_parent_hub_slot_id(0);
+            slot_context.set_tt_think_time(0);
+            slot_context.set_interrupter_target(0);
+            slot_context.set_speed(port_speed);
+
+            let endpoint_0 = input.device_mut().endpoint_mut(dci as _);
+            endpoint_0.set_endpoint_type(xhci::context::EndpointType::Control);
+            endpoint_0.set_max_packet_size(max_packet_size);
+            endpoint_0.set_max_burst_size(0);
+            endpoint_0.set_error_count(3);
+            endpoint_0.set_tr_dequeue_pointer(transfer_ring_0_addr);
+            if ring_cycle_bit {
+                endpoint_0.set_dequeue_cycle_state();
+            } else {
+                endpoint_0.clear_dequeue_cycle_state();
+            }
+            endpoint_0.set_interval(0);
+            endpoint_0.set_max_primary_streams(0);
+            endpoint_0.set_mult(0);
+            endpoint_0.set_error_count(3);
+        });
+
+        fence(Ordering::Release);
+
+        let result = self
+            .post_cmd(command::Allowed::AddressDevice(
+                *command::AddressDevice::new()
+                    .set_slot_id(slot.id as _)
+                    .set_input_context_pointer(slot.input_bus_addr()),
+            ))
+            .await?;
+
+        debug!("Address slot ok {:?}", result);
+
+        Ok(())
+    }
+
     fn data(&mut self) -> Result<&mut Data> {
         self.data.as_mut().ok_or(USBError::NotInitialized)
     }
@@ -451,33 +592,22 @@ impl Mapper for MemMapper {
     fn unmap(&mut self, _virt_start: usize, _bytes: usize) {}
 }
 
-struct FuturePortResetOk<'a> {
-    regs: Registers,
-    wait: &'a AtomicWaker,
-}
-
-impl Future for FuturePortResetOk<'_> {
-    type Output = ();
-
-    fn poll(
-        self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<Self::Output> {
-        let port_len = self.regs.port_register_set.len();
-
-        for i in 0..port_len {
-            if self
-                .regs
-                .port_register_set
-                .read_volatile_at(i)
-                .portsc
-                .port_reset()
-            {
-                self.wait.register(cx.waker());
-                return Poll::Pending;
-            }
-        }
-
-        Poll::Ready(())
+fn parse_default_max_packet_size_from_port_speed(speed: u8) -> u16 {
+    match speed {
+        1 | 3 => 64,
+        2 => 8,
+        4 => 512,
+        v => unimplemented!("PSI: {}", v),
     }
+}
+fn append_port_to_route_string(route_string: u32, port_id: usize) -> u32 {
+    let mut route_string = route_string;
+    for tier in 0..5 {
+        if route_string & (0x0f << (tier * 4)) == 0 && tier < 5 {
+            route_string |= (port_id as u32) << (tier * 4);
+            return route_string;
+        }
+    }
+
+    route_string
 }

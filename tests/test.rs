@@ -30,7 +30,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cmd() {
+    fn test_all() {
         let info = get_usb_host();
         let host = Device::new(Descriptor::default(), info.usb);
 
@@ -63,6 +63,12 @@ mod tests {
             host.test_cmd().await.unwrap();
 
             debug!("usb cmd ok");
+
+            let ls = host.probe().await.unwrap();
+
+            for slot in ls{
+                println!("slot");
+            }
         });
     }
 
