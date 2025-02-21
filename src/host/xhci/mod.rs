@@ -511,7 +511,7 @@ impl Xhci {
         let slot_context = input.device_mut().slot_mut();
         slot_context.clear_multi_tt();
         slot_context.clear_hub();
-        slot_context.set_route_string(append_port_to_route_string(0, port_id)); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
+        slot_context.set_route_string(append_port_to_route_string(0, 0)); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
         slot_context.set_context_entries(1);
         slot_context.set_max_exit_latency(0);
         slot_context.set_root_hub_port_number(port_id as _); //todo: to use port number
