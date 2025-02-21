@@ -2,7 +2,7 @@ use core::{cell::UnsafeCell, sync::atomic::fence};
 
 use alloc::{sync::Arc, vec::Vec};
 use dma_api::{DBox, DVec};
-use xhci::context::{Device, Device64Byte, Input64Byte, InputHandler};
+use xhci::context::{Device, Device64Byte, Input32Byte, Input64Byte, InputHandler};
 
 use super::ring::Ring;
 use crate::{Slot, err::*};
@@ -15,7 +15,7 @@ pub struct DeviceContextList {
 
 struct ContextData {
     out: DBox<Device64Byte>,
-    input: DBox<Input64Byte>,
+    input: DBox<Input32Byte>,
     transfer_rings: Vec<Ring>,
 }
 
@@ -40,14 +40,14 @@ impl XhciSlot {
         }
     }
 
-    pub fn modify_input(&self, f: impl FnOnce(&mut Input64Byte)) {
+    pub fn modify_input(&self, f: impl FnOnce(&mut Input32Byte)) {
         unsafe {
             let data = &mut *self.ctx.data.get();
             data.input.modify(f);
         }
     }
 
-    pub fn set_input(&self, input: Input64Byte) {
+    pub fn set_input(&self, input: Input32Byte) {
         unsafe {
             let data = &mut *self.ctx.data.get();
             data.input.write(input);

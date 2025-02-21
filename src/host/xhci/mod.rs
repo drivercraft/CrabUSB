@@ -15,7 +15,7 @@ use ring::{Ring, TrbData};
 use xhci::{
     ExtendedCapability,
     accessor::Mapper,
-    context::{Input64Byte, InputHandler},
+    context::{Input32Byte, Input64Byte, InputHandler},
     extended_capabilities::{self, usb_legacy_support_capability::UsbLegacySupport},
     registers::doorbell,
     ring::trb::{
@@ -500,7 +500,7 @@ impl Xhci {
         let transfer_ring_0_addr = slot.ep_ring_ref(dci).bus_addr();
         let ring_cycle_bit = slot.ep_ring_ref(dci).cycle;
 
-        let mut input = Input64Byte::default();
+        let mut input = Input32Byte::default();
         let control_context = input.control_mut();
         control_context.set_add_context_flag(0);
         control_context.set_add_context_flag(1);
