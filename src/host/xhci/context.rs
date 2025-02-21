@@ -47,6 +47,13 @@ impl XhciSlot {
         }
     }
 
+    pub fn set_input(&self, input: Input64Byte) {
+        unsafe {
+            let data = &mut *self.ctx.data.get();
+            data.input.write(input);
+        }
+    }
+
     pub fn input_bus_addr(&self) -> u64 {
         unsafe {
             let data = &*self.ctx.data.get();

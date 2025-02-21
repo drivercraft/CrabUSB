@@ -15,7 +15,7 @@ use ring::{Ring, TrbData};
 use xhci::{
     ExtendedCapability,
     accessor::Mapper,
-    context::InputHandler,
+    context::{Input64Byte, InputHandler},
     extended_capabilities::{self, usb_legacy_support_capability::UsbLegacySupport},
     registers::doorbell,
     ring::trb::{
@@ -500,43 +500,44 @@ impl Xhci {
         let transfer_ring_0_addr = slot.ep_ring_ref(dci).bus_addr();
         let ring_cycle_bit = slot.ep_ring_ref(dci).cycle;
 
-        slot.modify_input(|input| {
-            let control_context = input.control_mut();
-            control_context.set_add_context_flag(0);
-            control_context.set_add_context_flag(1);
-            for i in 2..32 {
-                control_context.clear_drop_context_flag(i);
-            }
+        let mut input = Input64Byte::default();
+        let control_context = input.control_mut();
+        control_context.set_add_context_flag(0);
+        control_context.set_add_context_flag(1);
+        for i in 2..32 {
+            control_context.clear_drop_context_flag(i);
+        }
 
-            let slot_context = input.device_mut().slot_mut();
-            slot_context.clear_multi_tt();
-            slot_context.clear_hub();
-            slot_context.set_route_string(append_port_to_route_string(0, port_id)); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
-            slot_context.set_context_entries(1);
-            slot_context.set_max_exit_latency(0);
-            slot_context.set_root_hub_port_number(port_id as _); //todo: to use port number
-            slot_context.set_number_of_ports(0);
-            slot_context.set_parent_hub_slot_id(0);
-            slot_context.set_tt_think_time(0);
-            slot_context.set_interrupter_target(0);
-            slot_context.set_speed(port_speed);
+        let slot_context = input.device_mut().slot_mut();
+        slot_context.clear_multi_tt();
+        slot_context.clear_hub();
+        slot_context.set_route_string(append_port_to_route_string(0, port_id)); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
+        slot_context.set_context_entries(1);
+        slot_context.set_max_exit_latency(0);
+        slot_context.set_root_hub_port_number(port_id as _); //todo: to use port number
+        slot_context.set_number_of_ports(0);
+        slot_context.set_parent_hub_slot_id(0);
+        slot_context.set_tt_think_time(0);
+        slot_context.set_interrupter_target(0);
+        slot_context.set_speed(port_speed);
 
-            let endpoint_0 = input.device_mut().endpoint_mut(dci as _);
-            endpoint_0.set_endpoint_type(xhci::context::EndpointType::Control);
-            endpoint_0.set_max_packet_size(max_packet_size);
-            endpoint_0.set_max_burst_size(0);
-            endpoint_0.set_error_count(3);
-            endpoint_0.set_tr_dequeue_pointer(transfer_ring_0_addr);
-            if ring_cycle_bit {
-                endpoint_0.set_dequeue_cycle_state();
-            } else {
-                endpoint_0.clear_dequeue_cycle_state();
-            }
-            endpoint_0.set_interval(0);
-            endpoint_0.set_max_primary_streams(0);
-            endpoint_0.set_mult(0);
-            endpoint_0.set_error_count(3);
-        });
+        let endpoint_0 = input.device_mut().endpoint_mut(dci as _);
+        endpoint_0.set_endpoint_type(xhci::context::EndpointType::Control);
+        endpoint_0.set_max_packet_size(max_packet_size);
+        endpoint_0.set_max_burst_size(0);
+        endpoint_0.set_error_count(3);
+        endpoint_0.set_tr_dequeue_pointer(transfer_ring_0_addr);
+        if ring_cycle_bit {
+            endpoint_0.set_dequeue_cycle_state();
+        } else {
+            endpoint_0.clear_dequeue_cycle_state();
+        }
+        endpoint_0.set_interval(0);
+        endpoint_0.set_max_primary_streams(0);
+        endpoint_0.set_mult(0);
+        endpoint_0.set_error_count(3);
+
+        slot.set_input(input);
 
         fence(Ordering::Release);
 
