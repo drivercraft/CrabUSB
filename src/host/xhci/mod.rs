@@ -15,7 +15,7 @@ use ring::{Ring, TrbData};
 use xhci::{
     ExtendedCapability,
     accessor::Mapper,
-    context::{Input32Byte, Input64Byte, InputHandler},
+    context::{Input32Byte, InputHandler},
     extended_capabilities::{self, usb_legacy_support_capability::UsbLegacySupport},
     registers::doorbell,
     ring::trb::{
@@ -552,6 +552,14 @@ impl Xhci {
         debug!("Address slot ok {:?}", result);
 
         Ok(())
+    }
+
+    fn is_64_byte(&self) -> bool {
+        self.regs()
+            .capability
+            .hccparams1
+            .read_volatile()
+            .addressing_capability()
     }
 
     fn data(&mut self) -> Result<&mut Data> {

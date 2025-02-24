@@ -1,8 +1,8 @@
-use core::{cell::UnsafeCell, sync::atomic::fence};
+use core::cell::UnsafeCell;
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use dma_api::{DBox, DVec};
-use xhci::context::{Device, Device64Byte, Input32Byte, Input64Byte, InputHandler};
+use xhci::context::{Device64Byte, Input32Byte, InputHandler};
 
 use super::ring::Ring;
 use crate::{Slot, err::*};
