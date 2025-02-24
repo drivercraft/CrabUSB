@@ -1,8 +1,8 @@
 use core::cell::UnsafeCell;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use dma_api::{DBox, DVec};
-use xhci::context::{Device64Byte, Input32Byte, InputHandler};
+use xhci::context::{Device32Byte, Input32Byte};
 
 use super::ring::Ring;
 use crate::{Slot, err::*};
@@ -14,7 +14,7 @@ pub struct DeviceContextList {
 }
 
 struct ContextData {
-    out: DBox<Device64Byte>,
+    out: DBox<Device32Byte>,
     input: DBox<Input32Byte>,
     transfer_rings: Vec<Ring>,
 }

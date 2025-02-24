@@ -173,6 +173,7 @@ impl Xhci {
         }
         debug!("Reset finish");
 
+        debug!("Is 64 bit {}", self.is_64_byte());
         Ok(())
     }
 
