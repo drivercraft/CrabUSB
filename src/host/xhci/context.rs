@@ -2,10 +2,17 @@ use core::cell::UnsafeCell;
 
 use alloc::{sync::Arc, vec::Vec};
 use dma_api::{DBox, DVec};
-use xhci::context::{Device32Byte, Input32Byte};
+use xhci::{
+    context::{Device32Byte, Input32Byte},
+    ring::trb::transfer::{self, TransferType},
+};
 
 use super::ring::Ring;
-use crate::{Slot, err::*};
+use crate::{
+    Slot,
+    err::*,
+    standard::trans::{self, control::ControlTransfer},
+};
 
 pub struct DeviceContextList {
     pub dcbaa: DVec<u64>,
@@ -40,6 +47,13 @@ impl XhciSlot {
         }
     }
 
+    fn ctrl_ring_mut(&mut self) -> &mut Ring {
+        unsafe {
+            let data = &mut *self.ctx.data.get();
+            &mut data.transfer_rings[0]
+        }
+    }
+
     pub fn modify_input(&self, f: impl FnOnce(&mut Input32Byte)) {
         unsafe {
             let data = &mut *self.ctx.data.get();
@@ -59,6 +73,65 @@ impl XhciSlot {
             let data = &*self.ctx.data.get();
             data.input.bus_addr()
         }
+    }
+
+    pub fn control_transfer(&mut self, urb: ControlTransfer) {
+        let mut trbs: Vec<transfer::Allowed> = Vec::new();
+        let mut setup = transfer::SetupStage::default();
+
+        setup
+            .set_request_type(urb.request_type.clone().into())
+            .set_request(urb.request.into())
+            .set_value(urb.value)
+            .set_index(urb.index)
+            .set_transfer_type(TransferType::No);
+
+        let mut data = None;
+
+        if let Some((addr, len)) = urb.data {
+            setup
+                .set_transfer_type({
+                    match urb.request_type.direction {
+                        trans::Direction::Out => TransferType::Out,
+                        trans::Direction::In => TransferType::In,
+                    }
+                })
+                .set_length(len);
+
+            let mut raw_data = transfer::DataStage::default();
+            raw_data
+                .set_data_buffer_pointer(addr as _)
+                .set_trb_transfer_length(len as _)
+                .set_direction(match urb.request_type.direction {
+                    trans::Direction::Out => transfer::Direction::Out,
+                    trans::Direction::In => transfer::Direction::In,
+                });
+
+            data = Some(raw_data)
+        }
+
+        let mut status = transfer::StatusStage::default();
+        status.set_interrupt_on_completion();
+
+        if matches!(urb.request_type.direction, trans::Direction::In) {
+            status.set_direction();
+        }
+
+        trbs.push(setup.into());
+        if let Some(data) = data {
+            trbs.push(data.into());
+        }
+        trbs.push(status.into());
+
+        let ring = self.ctrl_ring_mut();
+
+        let mut trb_ptr = 0;
+
+        for trb in trbs {
+            trb_ptr = ring.enque_trb(trb.into());
+        }
+
+        
     }
 }
 

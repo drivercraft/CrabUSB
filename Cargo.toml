@@ -2,11 +2,11 @@
 name = "crab-usb"
 version = "0.1.0"
 edition = "2024"
-authors = ["周睿 <zrufo747@outlook.com>"]
+authors = ["dbydd <dbydd@outlook.com>", "周睿 <zrufo747@outlook.com>"]
 description = "A simple usb host"
-repository = "https://github.com/qclic/igb-driver"
+repository = "https://github.com/drivercraft/CrabUSB"
 license = "MIT"
-keywords = ["os", "nic", "igb", "driver"]
+keywords = ["os", "usb", "xhci", "driver"]
 categories = ["embedded", "no-std"]
 
 [dependencies]
@@ -23,6 +23,7 @@ crossbeam-skiplist = { version = "0.1", features = [
     "alloc",
 ], default-features = false }
 spin = { version = "0.9" }
+num_enum = { version = "0.7", default-features = false }
 
 [dev-dependencies]
 bare-test = "0.4"

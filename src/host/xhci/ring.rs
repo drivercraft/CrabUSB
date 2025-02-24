@@ -1,7 +1,7 @@
 use dma_api::DVec;
 pub use dma_api::Direction;
 use log::trace;
-use xhci::ring::trb::{Link, command};
+use xhci::ring::trb::{Link, command, transfer};
 
 use crate::{err::*, page_size};
 
@@ -20,6 +20,13 @@ impl TrbData {
 
 impl From<command::Allowed> for TrbData {
     fn from(value: command::Allowed) -> Self {
+        let raw = value.into_raw();
+        Self(raw)
+    }
+}
+
+impl From<transfer::Allowed> for TrbData {
+    fn from(value: transfer::Allowed) -> Self {
         let raw = value.into_raw();
         Self(raw)
     }

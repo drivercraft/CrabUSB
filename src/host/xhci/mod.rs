@@ -481,6 +481,11 @@ impl Xhci {
 
         self.address(&mut slot, port_idx).await?;
 
+        debug!("Slot {} address complete", slot_id);
+
+        
+
+
         Ok(Box::new(slot))
     }
     fn port_speed(&self, port: usize) -> u8 {
