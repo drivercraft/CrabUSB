@@ -28,6 +28,17 @@ impl<T> WaitMap<T> {
         Self(UnsafeCell::new(map))
     }
 
+    pub fn insert(&mut self, id: u64) {
+        let map = unsafe { &mut *self.0.get() };
+        map.insert(
+            id,
+            Elem {
+                result: None,
+                waker: AtomicWaker::new(),
+            },
+        );
+    }
+
     pub fn set_result(&mut self, id: u64, result: T) {
         let entry = self.0.get_mut().get_mut(&id).unwrap();
 

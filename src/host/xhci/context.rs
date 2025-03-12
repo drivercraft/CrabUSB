@@ -1,13 +1,21 @@
-use core::cell::UnsafeCell;
+use core::{
+    cell::UnsafeCell,
+    sync::atomic::{Ordering, fence},
+};
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{
+    sync::{Arc, Weak},
+    vec::Vec,
+};
 use dma_api::{DBox, DVec};
+use log::trace;
 use xhci::{
     context::{Device32Byte, Input32Byte},
+    registers::doorbell,
     ring::trb::transfer::{self, TransferType},
 };
 
-use super::ring::Ring;
+use super::{XhciRegisters, event::RingWait, ring::Ring};
 use crate::{
     Slot,
     err::*,
@@ -33,11 +41,23 @@ pub struct DeviceContext {
 pub struct XhciSlot {
     pub id: usize,
     ctx: Arc<DeviceContext>,
+    reg: XhciRegisters,
+    ring_wait: Weak<RingWait>,
 }
 
 impl XhciSlot {
-    pub fn new(slot_id: usize, ctx: Arc<DeviceContext>) -> Self {
-        Self { id: slot_id, ctx }
+    pub(crate) fn new(
+        slot_id: usize,
+        ctx: Arc<DeviceContext>,
+        reg: XhciRegisters,
+        ring_wait: Weak<RingWait>,
+    ) -> Self {
+        Self {
+            id: slot_id,
+            ctx,
+            reg,
+            ring_wait,
+        }
     }
 
     pub fn ep_ring_ref(&self, dci: u8) -> &Ring {
@@ -47,7 +67,7 @@ impl XhciSlot {
         }
     }
 
-    fn ctrl_ring_mut(&mut self) -> &mut Ring {
+    pub fn ctrl_ring_mut(&mut self) -> &mut Ring {
         unsafe {
             let data = &mut *self.ctx.data.get();
             &mut data.transfer_rings[0]
@@ -75,7 +95,7 @@ impl XhciSlot {
         }
     }
 
-    pub fn control_transfer(&mut self, urb: ControlTransfer) {
+    pub async fn control_transfer(&mut self, urb: ControlTransfer) -> Result {
         let mut trbs: Vec<transfer::Allowed> = Vec::new();
         let mut setup = transfer::SetupStage::default();
 
@@ -131,7 +151,22 @@ impl XhciSlot {
             trb_ptr = ring.enque_trb(trb.into());
         }
 
-        
+        trace!("trb : {:#x}", trb_ptr);
+
+        fence(Ordering::Release);
+
+        let bell = doorbell::Register::default();
+
+        self.reg.reg().doorbell.write_volatile_at(self.id, bell);
+
+        let ret = self
+            .ring_wait
+            .upgrade()
+            .ok_or(USBError::ControllerClosed)?
+            .wait_for_result(trb_ptr)
+            .await?;
+
+        Ok(())
     }
 }
 

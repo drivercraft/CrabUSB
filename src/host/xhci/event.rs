@@ -1,13 +1,19 @@
-use core::sync::atomic::{Ordering, fence};
+use core::{
+    cell::UnsafeCell,
+    sync::atomic::{Ordering, fence},
+};
 
-use alloc::vec::Vec;
+use alloc::sync::{Arc, Weak};
 use dma_api::DVec;
 use futures::{FutureExt, future::LocalBoxFuture};
 use log::{debug, trace};
-use xhci::ring::trb::event::{Allowed, CommandCompletion};
+use xhci::ring::trb::event::{Allowed, CommandCompletion, CompletionCode};
 
-use super::ring::Ring;
-use crate::{err::*, wait::WaitMap};
+use super::{XhciRegisters, ring::Ring};
+use crate::{
+    err::*,
+    wait::{WaitMap, Waiter},
+};
 
 #[repr(C)]
 pub struct EventRingSte {
@@ -16,17 +22,39 @@ pub struct EventRingSte {
     _reserved: [u8; 6],
 }
 
+pub struct RingWait(UnsafeCell<WaitMap<Result<CommandCompletion>>>);
+
+unsafe impl Send for RingWait {}
+unsafe impl Sync for RingWait {}
+
+impl RingWait {
+    fn new() -> Self {
+        RingWait(UnsafeCell::new(WaitMap::new(&[])))
+    }
+
+    unsafe fn insert(&self, id: u64) {
+        unsafe {
+            (*self.0.get()).insert(id);
+        }
+    }
+
+    pub(crate) fn wait_for_result(&self, id: u64) -> Waiter<'_, Result<CommandCompletion>> {
+        unsafe { (*self.0.get()).wait_for_result(id) }
+    }
+}
+
 pub struct EventRing {
     pub ring: Ring,
     pub ste: DVec<EventRingSte>,
-    cmd_results: WaitMap<CommandCompletion>,
+    cmd_results: Arc<RingWait>,
+    reg: XhciRegisters,
 }
 
 unsafe impl Send for EventRing {}
 unsafe impl Sync for EventRing {}
 
 impl EventRing {
-    pub fn new(cmd_ring: &Ring) -> Result<Self> {
+    pub fn new(reg: XhciRegisters) -> Result<Self> {
         let ring = Ring::new(true, dma_api::Direction::Bidirectional)?;
 
         let mut ste =
@@ -40,21 +68,30 @@ impl EventRing {
 
         ste.set(0, ste0);
 
-        let cmd_addr_list = (0..cmd_ring.len())
-            .map(|i| cmd_ring.trb_bus_addr(i))
-            .collect::<Vec<_>>();
-
         Ok(Self {
             ring,
             ste,
-            cmd_results: WaitMap::new(&cmd_addr_list),
+            cmd_results: Arc::new(RingWait::new()),
+            reg,
         })
+    }
+
+    pub fn ring_wait(&self) -> Weak<RingWait> {
+        Arc::downgrade(&self.cmd_results)
+    }
+
+    pub fn listen_ring(&mut self, ring: &Ring) {
+        let g = self.reg.disable_irq_guard();
+        for id in (0..ring.len()).map(|i| ring.trb_bus_addr(i)) {
+            unsafe { self.cmd_results.insert(id) };
+        }
+        drop(g);
     }
 
     pub fn wait_cmd_completion(
         &mut self,
         cmd_trb_addr: u64,
-    ) -> LocalBoxFuture<'_, CommandCompletion> {
+    ) -> LocalBoxFuture<'_, Result<CommandCompletion>> {
         self.cmd_results.wait_for_result(cmd_trb_addr).boxed_local()
     }
 
@@ -66,7 +103,21 @@ impl EventRing {
                 Allowed::CommandCompletion(c) => {
                     let addr = c.command_trb_pointer();
                     trace!("[EVENT] << {:?} @{:X}", allowed, addr);
-                    self.cmd_results.set_result(addr, c);
+
+                    let r = match c.completion_code() {
+                        Ok(code) => {
+                            if matches!(code, CompletionCode::Success) {
+                                Ok(c)
+                            } else {
+                                Err(USBError::TransferEventError(code))
+                            }
+                        }
+                        Err(_e) => Err(USBError::Unknown),
+                    };
+
+                    unsafe {
+                        (*self.cmd_results.0.get()).set_result(addr, r);
+                    }
                 }
                 Allowed::PortStatusChange(st) => {
                     debug!("port change: {}", st.port_id());

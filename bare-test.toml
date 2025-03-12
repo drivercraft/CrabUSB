@@ -2,5 +2,5 @@
 machine = "virt"
 cpu = "cortex-a53"
 graphic = false
-args = "-usb -drive if=none,id=stick,format=raw,file=test.img -d trace:*usb*,trace:*xhci*,guest_errors -device qemu-xhci,id=xhci -device usb-storage,bus=xhci.0,drive=stick"
+args = "-usb -drive if=none,id=stick,format=raw,file=test.img -d trace:*usb*,trace:*xhci* -device qemu-xhci,id=xhci -device usb-storage,bus=xhci.0,drive=stick"
 # args = "-usb -drive if=none,id=stick,format=raw,file=test.img  -device qemu-xhci,id=xhci -device usb-storage,bus=xhci.0,drive=stick"

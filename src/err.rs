@@ -12,6 +12,8 @@ pub enum USBError {
     SlotLimitReached,
     #[error("transfer event error: {0:?}")]
     TransferEventError(xhci::ring::trb::event::CompletionCode),
+    #[error("controller closed")]
+    ControllerClosed,
 }
 
 pub type Result<T = ()> = core::result::Result<T, USBError>;

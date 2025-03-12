@@ -29,14 +29,62 @@ mod event;
 mod ring;
 
 use super::{Controller, Slot};
-use crate::{err::*, sleep};
+use crate::{
+    err::*,
+    sleep,
+    standard::trans::{
+        Direction,
+        control::{ControlTransfer, Recipient, Request, RequestType, TransferType},
+    },
+};
 
 type Registers = xhci::Registers<MemMapper>;
 // type RegistersExtList = xhci::extended_capabilities::List<MemMapper>;
 // type SupportedProtocol = xhci::extended_capabilities::XhciSupportedProtocol<MemMapper>;
 
+#[derive(Clone)]
+pub(crate) struct XhciRegisters {
+    mmio_base: usize,
+}
+impl XhciRegisters {
+    pub fn new(mmio_base: NonNull<u8>) -> Self {
+        Self {
+            mmio_base: mmio_base.as_ptr() as usize,
+        }
+    }
+
+    pub fn reg(&self) -> Registers {
+        let mapper = MemMapper {};
+        unsafe { Registers::new(self.mmio_base, mapper) }
+    }
+
+    pub fn disable_irq_guard(&self) -> DisableIrqGuard {
+        let mut reg = self.reg();
+        let mut enable = true;
+        reg.operational.usbcmd.update_volatile(|r| {
+            enable = r.interrupter_enable();
+            r.clear_interrupter_enable();
+        });
+        DisableIrqGuard { reg, enable }
+    }
+}
+
+pub struct DisableIrqGuard {
+    reg: Registers,
+    enable: bool,
+}
+impl Drop for DisableIrqGuard {
+    fn drop(&mut self) {
+        if self.enable {
+            self.reg.operational.usbcmd.update_volatile(|r| {
+                r.set_interrupter_enable();
+            });
+        }
+    }
+}
+
 pub struct Xhci {
-    mmio_base: NonNull<u8>,
+    reg_base: XhciRegisters,
     data: Option<Data>,
     port_wake: AtomicWaker,
 }
@@ -49,7 +97,7 @@ impl Controller for Xhci {
             self.init_ext_caps().await?;
             self.chip_hardware_reset().await?;
             let max_slots = self.setup_max_device_slots();
-            self.data = Some(Data::new(max_slots as _)?);
+            self.data = Some(Data::new(max_slots as _, self.reg_base.clone())?);
             self.setup_dcbaap()?;
             self.set_cmd_ring()?;
             self.init_irq()?;
@@ -131,15 +179,14 @@ impl Controller for Xhci {
 impl Xhci {
     pub fn new(mmio_base: NonNull<u8>) -> Self {
         Self {
-            mmio_base,
+            reg_base: XhciRegisters::new(mmio_base),
             data: None,
             port_wake: AtomicWaker::new(),
         }
     }
 
     fn regs(&self) -> Registers {
-        let mapper = MemMapper {};
-        unsafe { Registers::new(self.mmio_base.as_ptr() as usize, mapper) }
+        self.reg_base.reg()
     }
 
     async fn chip_hardware_reset(&mut self) -> Result {
@@ -334,20 +381,7 @@ impl Xhci {
             .doorbell
             .write_volatile_at(0, doorbell::Register::default());
 
-        let res = self.data()?.event.wait_cmd_completion(trb_addr).await;
-
-        let r = res.completion_code();
-        match r {
-            Ok(code) => {
-                if !matches!(code, CompletionCode::Success) {
-                    return Err(USBError::TransferEventError(code));
-                }
-            }
-            Err(_e) => {
-                return Err(USBError::Unknown);
-            }
-        }
-        Ok(res)
+        self.data()?.event.wait_cmd_completion(trb_addr).await
     }
 
     fn reset_ports(&mut self) {
@@ -378,7 +412,7 @@ impl Xhci {
         let mapper = MemMapper {};
         let mut out = Vec::new();
         let mut l = match unsafe {
-            extended_capabilities::List::new(self.mmio_base.as_ptr() as usize, hccparams1, mapper)
+            extended_capabilities::List::new(self.reg_base.mmio_base, hccparams1, mapper)
         } {
             Some(v) => v,
             None => return out,
@@ -477,14 +511,29 @@ impl Xhci {
         debug!("Slot {} assigned", slot_id);
 
         let ctx = self.data()?.dev_list.new_ctx(slot_id, 32)?;
-        let mut slot = XhciSlot::new(slot_id, ctx);
+
+        let ring_wait = self.data()?.event.ring_wait();
+
+        let mut slot = XhciSlot::new(slot_id, ctx, self.reg_base.clone(), ring_wait);
 
         self.address(&mut slot, port_idx).await?;
 
         debug!("Slot {} address complete", slot_id);
 
-        
+        self.data()?.event.listen_ring(slot.ctrl_ring_mut());
 
+        slot.control_transfer(ControlTransfer {
+            request_type: RequestType::new(
+                Direction::In,
+                TransferType::Standard,
+                Recipient::Device,
+            ),
+            request: Request::GetDescriptor,
+            index: 0,
+            value: 0,
+            data: None,
+        })
+        .await?;
 
         Ok(Box::new(slot))
     }
@@ -581,13 +630,15 @@ struct Data {
 }
 
 impl Data {
-    fn new(max_slots: usize) -> Result<Self> {
+    fn new(max_slots: usize, reg: XhciRegisters) -> Result<Self> {
         let cmd = Ring::new_with_len(
             0x1000 / size_of::<TrbData>(),
             true,
             dma_api::Direction::Bidirectional,
         )?;
-        let event = event::EventRing::new(&cmd)?;
+        let mut event = event::EventRing::new(reg)?;
+
+        event.listen_ring(&cmd);
 
         Ok(Self {
             dev_list: context::DeviceContextList::new(max_slots)?,
