@@ -7,7 +7,7 @@ use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
-use dma_api::{DBox, DVec};
+use dma_api::{DBox, DSliceMut, DVec, Direction};
 use log::trace;
 use xhci::{
     context::{Device32Byte, Input32Byte},
@@ -109,6 +109,15 @@ impl XhciSlot {
         let mut data = None;
 
         if let Some((addr, len)) = urb.data {
+            let data_slice =
+                unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };
+
+            let dm = DSliceMut::from(data_slice, Direction::Bidirectional);
+
+            if matches!(urb.request_type.direction, trans::Direction::Out) {
+                dm.preper_write_all();
+            }
+
             setup
                 .set_transfer_type({
                     match urb.request_type.direction {
@@ -120,7 +129,7 @@ impl XhciSlot {
 
             let mut raw_data = transfer::DataStage::default();
             raw_data
-                .set_data_buffer_pointer(addr as _)
+                .set_data_buffer_pointer(dm.bus_addr() as _)
                 .set_trb_transfer_length(len as _)
                 .set_direction(match urb.request_type.direction {
                     trans::Direction::Out => transfer::Direction::Out,
@@ -148,24 +157,35 @@ impl XhciSlot {
         let mut trb_ptr = 0;
 
         for trb in trbs {
-            trb_ptr = ring.enque_trb(trb.into());
+            trb_ptr = ring.enque_transfer(trb);
         }
 
         trace!("trb : {:#x}", trb_ptr);
 
         fence(Ordering::Release);
 
-        let bell = doorbell::Register::default();
+        let mut bell = doorbell::Register::default();
+        bell.set_doorbell_target(1);
 
         self.reg.reg().doorbell.write_volatile_at(self.id, bell);
 
-        let ret = self
+        let _ret = self
             .ring_wait
             .upgrade()
             .ok_or(USBError::ControllerClosed)?
             .wait_for_result(trb_ptr)
             .await?;
 
+        if let Some((addr, len)) = urb.data {
+            let data_slice =
+                unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };
+
+            let dm = DSliceMut::from(data_slice, Direction::Bidirectional);
+
+            if matches!(urb.request_type.direction, trans::Direction::In) {
+                dm.preper_read_all();
+            }
+        }
         Ok(())
     }
 }

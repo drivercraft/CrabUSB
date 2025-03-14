@@ -12,7 +12,7 @@ categories = ["embedded", "no-std"]
 [dependencies]
 tock-registers = "0.9"
 log = "0.4"
-dma-api = { version = "0.2", features = ["alloc"] }
+dma-api = { version = "0.3", features = ["alloc"] }
 nb = "1.1"
 bitflags = "2.8"
 thiserror = { version = "2", default-features = false }
@@ -38,3 +38,4 @@ bare-test-macros = "0.2"
 [[test]]
 name = "test"
 harness = false
+

@@ -79,13 +79,20 @@ impl Ring {
         addr
     }
 
+    pub fn enque_transfer(&mut self, mut trb: transfer::Allowed) -> u64 {
+        if self.cycle {
+            trb.set_cycle_bit();
+        } else {
+            trb.clear_cycle_bit();
+        }
+        let addr = self.enque_trb(trb.into());
+        trace!("[Transfer] >> {:?} @{:X}", trb, addr);
+        addr
+    }
+
     pub fn enque_trb(&mut self, trb: TrbData) -> u64 {
         self.trbs.set(self.i, trb);
         let addr = self.trb_bus_addr(self.i);
-        trace!(
-            "enqueued {} @{:#X}------------------------------------------------",
-            self.i, addr
-        );
         self.next_index();
         addr
     }

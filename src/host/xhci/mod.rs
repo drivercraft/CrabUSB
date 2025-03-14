@@ -8,6 +8,7 @@ use core::{
 
 use alloc::{boxed::Box, vec::Vec};
 use context::{ScratchpadBufferArray, XhciSlot};
+use dma_api::DVec;
 use future::LocalBoxFuture;
 use futures::{prelude::*, task::AtomicWaker};
 use log::*;
@@ -18,10 +19,7 @@ use xhci::{
     context::{Input32Byte, InputHandler},
     extended_capabilities::{self, usb_legacy_support_capability::UsbLegacySupport},
     registers::doorbell,
-    ring::trb::{
-        command,
-        event::{CommandCompletion, CompletionCode},
-    },
+    ring::trb::{command, event::CommandCompletion},
 };
 
 mod context;
@@ -522,6 +520,10 @@ impl Xhci {
 
         self.data()?.event.listen_ring(slot.ctrl_ring_mut());
 
+        trace!("control_fetch_control_point_packet_size");
+
+        let data = [0u8; 8];
+
         slot.control_transfer(ControlTransfer {
             request_type: RequestType::new(
                 Direction::In,
@@ -530,10 +532,13 @@ impl Xhci {
             ),
             request: Request::GetDescriptor,
             index: 0,
-            value: 0,
-            data: None,
+            value: 1 << 8,
+            data: Some((data.as_ptr() as usize, data.len() as _)),
         })
         .await?;
+
+        let packet_size = data
+            .last().map(|&len| if len == 0 { 8u8 } else { len });
 
         Ok(Box::new(slot))
     }
@@ -553,6 +558,9 @@ impl Xhci {
         let dci = 1;
 
         let transfer_ring_0_addr = slot.ep_ring_ref(dci).bus_addr();
+
+        trace!("ring0: {:#x}", transfer_ring_0_addr);
+
         let ring_cycle_bit = slot.ep_ring_ref(dci).cycle;
 
         let mut input = Input32Byte::default();

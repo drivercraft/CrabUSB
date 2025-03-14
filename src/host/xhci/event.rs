@@ -122,6 +122,9 @@ impl EventRing {
                 Allowed::PortStatusChange(st) => {
                     debug!("port change: {}", st.port_id());
                 }
+                Allowed::TransferEvent(c)=>{
+                    
+                }
                 _ => {
                     debug!("unhandled event {:?}", allowed);
                 }

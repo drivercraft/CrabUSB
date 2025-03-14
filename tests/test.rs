@@ -14,10 +14,7 @@ mod tests {
         fdt_parser::PciSpace,
         globals::{PlatformInfoKind, global_val},
         irq::{IrqHandleResult, IrqInfo, IrqParam},
-        mem::{
-            Align,
-            mmu::{iomap, page_size},
-        },
+        mem::mmu::{iomap, page_size},
         platform::fdt::GetPciIrqConfig,
         println,
     };
@@ -66,7 +63,7 @@ mod tests {
 
             let ls = host.probe().await.unwrap();
 
-            for slot in ls{
+            for slot in ls {
                 println!("slot");
             }
         });
@@ -223,5 +220,19 @@ mod tests {
         }
 
         panic!("no xhci found");
+    }
+}
+
+trait Align {
+    fn align_up(&self, align: usize) -> usize;
+}
+
+impl Align for usize {
+    fn align_up(&self, align: usize) -> usize {
+        if *self % align == 0 {
+            *self
+        } else {
+            *self + align - *self % align
+        }
     }
 }
