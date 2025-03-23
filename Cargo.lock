@@ -45,9 +45,9 @@ checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
 
 [[package]]
 name = "arm-gic-driver"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89c6858a856f5376a59472cd97a2c8155e4a4e40baf3321b2c072970d98374d6"
+checksum = "685276fc52d3d6b4834d1d0d0c4a25feeea216a2cd069ad1e0b53e3d61d37a7f"
 dependencies = [
  "aarch64-cpu",
  "bitflags",
@@ -55,28 +55,6 @@ dependencies = [
  "log",
  "rdif-intc",
  "tock-registers",
-]
-
-[[package]]
-name = "arm-pl011-rs"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876d8b1707dc1e8b07936ef9a8177a59eec7d0c850d54e0eb5fec705e3de05fa"
-dependencies = [
- "bitflags",
- "embedded-io",
- "embedded-io-async",
- "spin_on",
- "tock-registers",
-]
-
-[[package]]
-name = "arm_pl031"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13696b1c2b59992f4223e0ae5bb173c81c63039367ca90eee845346ad2a13421"
-dependencies = [
- "chrono",
 ]
 
 [[package]]
@@ -93,14 +71,14 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
 name = "bare-test"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba45dd3a6a924749393fad3fd2d307615a3b9b1aa008314ea515f6e29ea3c95e"
+checksum = "f7dfcf95987c500af4665d8a18adbc5e7d3177a2537964f48002b88e28fb055e"
 dependencies = [
  "bare-test-macros",
  "log",
  "sparreal-kernel",
- "sparreal-macros 0.8.1",
+ "sparreal-macros 0.9.0",
  "sparreal-rt",
 ]
 
@@ -153,15 +131,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6b1fc10dbac614ebc03540c9dbd60e83887fda27794998c6528f1782047d540"
 
 [[package]]
-name = "chrono"
-version = "0.4.40"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a7964611d71df112cb1730f2ee67324fcf4d0fc6606acbbe9bfe06df124637c"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "crab-usb"
 version = "0.1.0"
 dependencies = [
@@ -171,7 +140,7 @@ dependencies = [
  "byte-unit",
  "crossbeam",
  "crossbeam-skiplist",
- "dma-api 0.3.0",
+ "dma-api",
  "futures",
  "log",
  "nb",
@@ -266,30 +235,9 @@ dependencies = [
 
 [[package]]
 name = "dma-api"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "624f4a84cc1031cfceb56780b82570a785f6cfdcee4f34c06c4e8f1fba25c970"
-
-[[package]]
-name = "dma-api"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc2af71bef611a9b47e76fb7844ab348b172aa3649ebdfdcb854a5d30cd47be5"
-
-[[package]]
-name = "embedded-io"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
-
-[[package]]
-name = "embedded-io-async"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff09972d4073aa8c299395be75161d582e7629cd663171d62af73c8d50dba3f"
-dependencies = [
- "embedded-io",
-]
 
 [[package]]
 name = "enum_dispatch"
@@ -460,6 +408,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "numeric-enum-macro"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "300e4bdb6b46b592948e700ea1ef24a4296491f6a0ee722b258040abd15a3714"
+
+[[package]]
 name = "once_cell"
 version = "1.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -560,9 +514,18 @@ checksum = "f1525e2b3fb72098cb2b882ded25829fb68f153f6408fa4a27fbba5098f890ac"
 
 [[package]]
 name = "rdif-intc"
-version = "0.1.3"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4ee8e9f033c304ef421162ef6daddf6144c00c3e99e65cb0d9e1ccc2cca752f"
+checksum = "b99ea6f537664cb853acf4f265a3167edab285e866fc596fca52796d2ce8b114"
+dependencies = [
+ "rdif-base",
+]
+
+[[package]]
+name = "rdif-power"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "721dd69b714b814f8df2cc7005ca29fabcffa82a2188a318db06bb8e1bcab25c"
 dependencies = [
  "rdif-base",
 ]
@@ -578,14 +541,15 @@ dependencies = [
 
 [[package]]
 name = "rdrive"
-version = "0.1.6"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "650a841bcc84985163fa416e608836e4366912e6d330344be50486ddd028d389"
+checksum = "36f6c638be6cb2f75c62217300cb9631fd65ee14f8016ed3a3b4ef77d66bd74a"
 dependencies = [
  "fdt-parser",
  "log",
  "rdif-base",
  "rdif-intc",
+ "rdif-power",
  "rdif-timer",
  "spin",
  "thiserror",
@@ -593,9 +557,9 @@ dependencies = [
 
 [[package]]
 name = "rdrive-macro-utils"
-version = "0.1.1"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56608f659dc99a1bdcf648c0f84c2bfe2bce40e0a3d8ab704291db5f822705fc"
+checksum = "977fcecf5b5fe8d7189d497d8754d27a4ffaedeac904cce1b7ea7bdfb5280934"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -613,9 +577,9 @@ dependencies = [
 
 [[package]]
 name = "rust_decimal"
-version = "1.36.0"
+version = "1.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b082d80e3e3cc52b2ed634388d436fe1f4de6af5786cc2de9ba9737527bdf555"
+checksum = "faa7de2ba56ac291bd90c6b9bece784a52ae1411f9506544b3eae36dd2356d50"
 dependencies = [
  "arrayvec",
  "num-traits",
@@ -628,16 +592,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
-name = "sparreal-kernel"
-version = "0.8.2"
+name = "smccc"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e4eb21eeb18963f153442a7d99de8bd5e19c4e9e8e654ff974337f30b54e88"
+checksum = "617d17f088ec733e5a6b86da6ce4cce1414e6e856d6061c16dda51cceae6f68c"
+
+[[package]]
+name = "sparreal-kernel"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "202c8e1b212fc1f31b9ee5b144688c72de079f79d2d05ab7d36a8f6d2102033e"
 dependencies = [
  "ansi_rgb",
  "anyhow",
+ "arrayvec",
  "buddy_system_allocator",
  "byte-unit",
- "dma-api 0.3.0",
+ "dma-api",
  "fdt-parser",
  "lazy_static",
  "lock_api",
@@ -647,7 +618,7 @@ dependencies = [
  "pasts",
  "rdrive",
  "rgb",
- "sparreal-macros 0.8.1",
+ "sparreal-macros 0.9.0",
  "spin",
  "thiserror",
 ]
@@ -665,9 +636,9 @@ dependencies = [
 
 [[package]]
 name = "sparreal-macros"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9e07124b554303aa9e00744ed8506c73c28508b77907319409311fbad8f9992"
+checksum = "da4f16f75e1de73a3a88ac7d7fa61b8f5c567bdb845ce6504f4086baa4902956"
 dependencies = [
  "abi-singleton",
  "darling",
@@ -679,25 +650,26 @@ dependencies = [
 
 [[package]]
 name = "sparreal-rt"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f568c5ea0022227d7271560a4de2c45f3ded2952dff0460f205e9ff5a4541d2"
+checksum = "b174978e693d6812369e244af4fd712cabc14f0af4a3fbe12a9b314a1b7ff396"
 dependencies = [
  "aarch64-cpu",
+ "ansi_rgb",
  "arm-gic-driver",
- "arm-pl011-rs",
- "arm_pl031",
- "bitflags",
+ "arrayvec",
  "buddy_system_allocator",
- "dma-api 0.2.2",
  "fdt-parser",
- "futures",
  "log",
+ "memory_addr",
+ "numeric-enum-macro",
  "page-table-arm",
  "page-table-generic",
+ "rgb",
+ "smccc",
  "sparreal-kernel",
- "sparreal-macros 0.8.1",
- "tock-registers",
+ "sparreal-macros 0.9.0",
+ "spin",
 ]
 
 [[package]]

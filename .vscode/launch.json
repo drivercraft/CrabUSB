@@ -5,19 +5,29 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug test",
-            "type": "lldb",
-            "request": "custom",
-            "initCommands": [
-                "platform select remote-gdb-server"
-            ],
-            "targetCreateCommands": [
-                "target create ${workspaceFolder}/target/aarch64-unknown-none/debug/deps/test.elf"
-            ],
-            "processCreateCommands": [
-                "gdb-remote localhost:1234" // Connect to the GDB Server
-            ],
+            "type": "cppdbg",
+            "name": "KDebug cppdbg",
+            "request": "launch",
+            "miDebuggerServerAddress": "localhost:1234",
+            "program": "${workspaceFolder}/target/aarch64-unknown-none/debug/deps/test.elf",
+            "miDebuggerPath": "gdb-multiarch",
+            "cwd": "${workspaceRoot}",
             "preLaunchTask": "debug test"
-        }
+        },
+        // {
+        //     "name": "Debug test",
+        //     "type": "lldb",
+        //     "request": "custom",
+        //     "initCommands": [
+        //         "platform select remote-gdb-server"
+        //     ],
+        //     "targetCreateCommands": [
+        //         "target create ${workspaceFolder}/target/aarch64-unknown-none/debug/deps/test.elf"
+        //     ],
+        //     "processCreateCommands": [
+        //         "gdb-remote localhost:1234" // Connect to the GDB Server
+        //     ],
+        //     "preLaunchTask": "debug test"
+        // }
     ]
 }
