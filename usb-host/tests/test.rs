@@ -23,12 +23,12 @@ mod tests {
             direction::In,
             kind::{Bulk, Isochronous},
         },
-        standard::{descriptors::EndpointType, transfer::Direction},
         *,
     };
     use futures::FutureExt;
     use log::*;
     use pcie::*;
+    use usb_if::{descriptor::EndpointType, transfer::Direction};
 
     use super::*;
 
@@ -55,7 +55,7 @@ mod tests {
             for mut device in ls {
                 let desc = device.descriptor().await.unwrap();
                 info!("device: {desc:?}");
-                if let Some(index) = desc.product_string_index() {
+                if let Some(index) = desc.product_string_index {
                     let product = device.string_descriptor(index, 0).await.unwrap();
                     info!("product: {product}");
                 }

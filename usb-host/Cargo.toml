@@ -24,6 +24,7 @@ num_enum = {version = "0.7", default-features = false}
 spin = {version = "0.10"}
 thiserror = {workspace = true}
 tock-registers = "0.10"
+usb-if = {workspace = true}
 xhci = "0.9"
 
 [dev-dependencies]

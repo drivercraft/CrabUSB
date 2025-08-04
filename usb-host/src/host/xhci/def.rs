@@ -1,6 +1,6 @@
 use xhci::ring::trb::transfer;
 
-use crate::standard::transfer::Direction;
+use usb_if::transfer::Direction;
 
 define_int_type!(SlotId, u8);
 
@@ -28,19 +28,23 @@ impl Dci {
     }
 }
 
-impl From<Direction> for transfer::TransferType {
-    fn from(value: Direction) -> Self {
-        match value {
-            Direction::In => transfer::TransferType::In,
-            Direction::Out => transfer::TransferType::Out,
+pub(crate) trait DirectionExt {
+    fn to_xhci_direction(&self) -> transfer::Direction;
+    fn to_xhci_transfer_type(&self) -> transfer::TransferType;
+}
+
+impl DirectionExt for Direction {
+    fn to_xhci_direction(&self) -> transfer::Direction {
+        match self {
+            Direction::Out => transfer::Direction::Out,
+            Direction::In => transfer::Direction::In,
         }
     }
-}
-impl From<Direction> for transfer::Direction {
-    fn from(value: Direction) -> Self {
-        match value {
-            Direction::In => transfer::Direction::In,
-            Direction::Out => transfer::Direction::Out,
+
+    fn to_xhci_transfer_type(&self) -> transfer::TransferType {
+        match self {
+            Direction::Out => transfer::TransferType::Out,
+            Direction::In => transfer::TransferType::In,
         }
     }
 }

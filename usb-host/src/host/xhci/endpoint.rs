@@ -1,6 +1,10 @@
 use dma_api::{DSlice, DSliceMut};
 use log::trace;
 use mbarrier::mb;
+use usb_if::{
+    descriptor::{self, EndpointDescriptor, EndpointType},
+    transfer::Direction,
+};
 use xhci::{
     registers::doorbell,
     ring::trb::{
@@ -13,11 +17,6 @@ use crate::{
     BusAddr,
     endpoint::{direction, kind},
     err::USBError,
-    standard::{
-        self,
-        descriptors::{EndpointDescriptor, EndpointType},
-        transfer::Direction,
-    },
     xhci::{def::Dci, device::DeviceState, ring::Ring},
 };
 
@@ -41,7 +40,7 @@ impl EndpointRaw {
     pub fn enque(
         &mut self,
         trbs: impl Iterator<Item = transfer::Allowed>,
-        direction: Direction,
+        direction: usb_if::transfer::Direction,
         buff_addr: usize,
         buff_len: usize,
     ) -> impl Future<Output = Result<usize, USBError>> {
@@ -80,8 +79,8 @@ impl EndpointRaw {
                 let dm = DSliceMut::from(
                     data_slice,
                     match direction {
-                        Direction::Out => dma_api::Direction::ToDevice,
-                        Direction::In => dma_api::Direction::FromDevice,
+                        usb_if::transfer::Direction::Out => dma_api::Direction::ToDevice,
+                        usb_if::transfer::Direction::In => dma_api::Direction::FromDevice,
                     },
                 );
                 dm.preper_read_all();
@@ -95,21 +94,25 @@ impl EndpointRaw {
     }
 }
 
-impl EndpointDescriptor {
-    pub(crate) fn endpoint_type(&self) -> xhci::context::EndpointType {
+pub(crate) trait EndpointDescriptorExt {
+    fn endpoint_type(&self) -> xhci::context::EndpointType;
+}
+
+impl EndpointDescriptorExt for EndpointDescriptor {
+    fn endpoint_type(&self) -> xhci::context::EndpointType {
         match self.transfer_type {
-            standard::descriptors::EndpointType::Control => xhci::context::EndpointType::Control,
-            standard::descriptors::EndpointType::Isochronous => match self.direction {
-                standard::transfer::Direction::Out => xhci::context::EndpointType::IsochOut,
-                standard::transfer::Direction::In => xhci::context::EndpointType::IsochIn,
+            descriptor::EndpointType::Control => xhci::context::EndpointType::Control,
+            descriptor::EndpointType::Isochronous => match self.direction {
+                usb_if::transfer::Direction::Out => xhci::context::EndpointType::IsochOut,
+                usb_if::transfer::Direction::In => xhci::context::EndpointType::IsochIn,
             },
-            standard::descriptors::EndpointType::Bulk => match self.direction {
-                standard::transfer::Direction::Out => xhci::context::EndpointType::BulkOut,
-                standard::transfer::Direction::In => xhci::context::EndpointType::BulkIn,
+            descriptor::EndpointType::Bulk => match self.direction {
+                usb_if::transfer::Direction::Out => xhci::context::EndpointType::BulkOut,
+                usb_if::transfer::Direction::In => xhci::context::EndpointType::BulkIn,
             },
-            standard::descriptors::EndpointType::Interrupt => match self.direction {
-                standard::transfer::Direction::Out => xhci::context::EndpointType::InterruptOut,
-                standard::transfer::Direction::In => xhci::context::EndpointType::InterruptIn,
+            descriptor::EndpointType::Interrupt => match self.direction {
+                usb_if::transfer::Direction::Out => xhci::context::EndpointType::InterruptOut,
+                usb_if::transfer::Direction::In => xhci::context::EndpointType::InterruptIn,
             },
         }
     }
@@ -133,8 +136,8 @@ impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
     /// 验证端点方向和传输类型
     fn validate_endpoint(
         &self,
-        expected_direction: Direction,
-        expected_type: EndpointType,
+        expected_direction: usb_if::transfer::Direction,
+        expected_type: usb_if::descriptor::EndpointType,
     ) -> Result<(), USBError> {
         if self.desc.direction != expected_direction {
             return Err(USBError::Unknown);
@@ -214,7 +217,7 @@ impl Endpoint<kind::Bulk, direction::In> {
         &mut self,
         data: &mut [u8],
     ) -> Result<impl Future<Output = Result<usize, USBError>>, USBError> {
-        self.validate_endpoint(Direction::In, EndpointType::Bulk)?;
+        self.validate_endpoint(Direction::In, usb_if::descriptor::EndpointType::Bulk)?;
 
         let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
         let trb = self.create_normal_trb(addr_bus, len);
@@ -228,7 +231,7 @@ impl Endpoint<kind::Bulk, direction::Out> {
         &mut self,
         data: &[u8],
     ) -> Result<impl Future<Output = Result<usize, USBError>>, USBError> {
-        self.validate_endpoint(Direction::Out, EndpointType::Bulk)?;
+        self.validate_endpoint(Direction::Out, usb_if::descriptor::EndpointType::Bulk)?;
 
         let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
         let trb = self.create_normal_trb(addr_bus, len);
@@ -242,7 +245,7 @@ impl Endpoint<kind::Interrupt, direction::In> {
         &mut self,
         data: &mut [u8],
     ) -> Result<impl Future<Output = Result<usize, USBError>>, USBError> {
-        self.validate_endpoint(Direction::In, EndpointType::Interrupt)?;
+        self.validate_endpoint(Direction::In, usb_if::descriptor::EndpointType::Interrupt)?;
 
         let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
         let trb = self.create_normal_trb(addr_bus, len);

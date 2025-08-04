@@ -1,0 +1,9 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "usb-if"
+repository.workspace = true
+version = "0.1.0"
+
+[dependencies]
+log = {workspace = true}

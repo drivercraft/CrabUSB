@@ -8,6 +8,13 @@ use dma_api::DSliceMut;
 use log::{debug, trace};
 use mbarrier::mb;
 use spin::Mutex;
+use usb_if::{
+    descriptor::{
+        self, ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor,
+        InterfaceDescriptor, decode_string_descriptor,
+    },
+    transfer::Direction,
+};
 use xhci::{
     registers::doorbell,
     ring::trb::{command, transfer},
@@ -16,25 +23,14 @@ use xhci::{
 use crate::{
     IDevice, PortId,
     err::USBError,
-    standard::{
-        descriptors::{
-            self, ConfigurationDescriptor, EndpointDescriptor, InterfaceDescriptor,
-            parser::{
-                self, DESCRIPTOR_LEN_CONFIGURATION, DESCRIPTOR_LEN_DEVICE,
-                DESCRIPTOR_TYPE_CONFIGURATION, DESCRIPTOR_TYPE_DEVICE, DESCRIPTOR_TYPE_STRING,
-                DeviceDescriptor, decode_string_descriptor,
-            },
-        },
-        transfer::{
-            Direction,
-            control::{Control, ControlRaw, ControlType, Recipient, Request, RequestType},
-        },
+    standard::transfer::control::{
+        Control, ControlRaw, ControlType, Recipient, Request, RequestType,
     },
     xhci::{
         append_port_to_route_string,
         context::ContextData,
-        def::{Dci, SlotId},
-        endpoint::EndpointRaw,
+        def::{Dci, DirectionExt, SlotId},
+        endpoint::{EndpointDescriptorExt, EndpointRaw},
         interface::Interface,
         parse_default_max_packet_size_from_port_speed,
         reg::XhciRegisters,
@@ -93,10 +89,9 @@ impl Device {
         self.set_ep_packet_size(Dci::CTRL, max_packet_size).await?;
 
         let desc = self.descriptor().await?;
-        for i in 0..desc.num_configurations() {
+        for i in 0..desc.num_configurations {
             let config = self.read_configuration_descriptor(i).await?;
-            let parsed_config =
-                parser::ConfigurationDescriptor::new(&config).ok_or(USBError::Unknown)?;
+            let parsed_config = ConfigurationDescriptor::parse(&config).ok_or(USBError::Unknown)?;
             self.config_desc.push(parsed_config.into());
         }
 
@@ -262,14 +257,14 @@ impl Device {
             }
 
             setup
-                .set_transfer_type(urb.request_type.direction.into())
+                .set_transfer_type(urb.request_type.direction.to_xhci_transfer_type())
                 .set_length(len);
 
             let mut raw_data = transfer::DataStage::default();
             raw_data
                 .set_data_buffer_pointer(dm.bus_addr() as _)
                 .set_trb_transfer_length(len as _)
-                .set_direction(urb.request_type.direction.into());
+                .set_direction(urb.request_type.direction.to_xhci_direction());
 
             data = Some(raw_data)
         }
@@ -302,7 +297,7 @@ impl Device {
 
         let mut data = alloc::vec![0u8; 8];
 
-        self.get_descriptor(DESCRIPTOR_TYPE_DEVICE, 0, 0, &mut data)
+        self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
             .await?;
 
         // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
@@ -346,17 +341,17 @@ impl Device {
         if let Some(desc) = &self.desc {
             return Ok(desc.clone());
         }
-        let mut buff = alloc::vec![0u8; DESCRIPTOR_LEN_DEVICE as usize];
-        self.get_descriptor(DESCRIPTOR_TYPE_DEVICE, 0, 0, &mut buff)
+        let mut buff = alloc::vec![0u8; DeviceDescriptor::LEN];
+        self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut buff)
             .await?;
-        let desc = DeviceDescriptor::new(&buff).ok_or(USBError::Unknown)?;
+        let desc = DeviceDescriptor::parse(&buff).ok_or(USBError::Unknown)?;
         self.desc = Some(desc.clone());
         Ok(desc)
     }
 
     async fn get_descriptor(
         &mut self,
-        desc_type: u8,
+        desc_type: DescriptorType,
         desc_index: u8,
         language_id: u16,
         buff: &mut [u8],
@@ -365,7 +360,7 @@ impl Device {
             Control {
                 request: Request::GetDescriptor,
                 index: language_id,
-                value: ((desc_type as u16) << 8) | desc_index as u16,
+                value: ((desc_type.0 as u16) << 8) | desc_index as u16,
                 transfer_type: ControlType::Standard,
                 recipient: Recipient::Device,
             },
@@ -381,21 +376,21 @@ impl Device {
         language_id: u16,
     ) -> Result<String, USBError> {
         let mut data = alloc::vec![0u8; 256];
-        self.get_descriptor(DESCRIPTOR_TYPE_STRING, index.get(), language_id, &mut data)
+        self.get_descriptor(DescriptorType::STRING, index.get(), language_id, &mut data)
             .await?;
         decode_string_descriptor(&data).map_err(|_| USBError::Unknown)
     }
 
     async fn read_configuration_descriptor(&mut self, index: u8) -> Result<Vec<u8>, USBError> {
-        let mut header = alloc::vec![0u8; DESCRIPTOR_LEN_CONFIGURATION as usize]; // 配置描述符头部固定为9字节
-        self.get_descriptor(DESCRIPTOR_TYPE_CONFIGURATION, index, 0, &mut header)
+        let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN]; // 配置描述符头部固定为9字节
+        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut header)
             .await?;
 
         let total_length = u16::from_le_bytes(header[2..4].try_into().unwrap()) as usize;
         // 获取完整的配置描述符（包括接口和端点描述符）
         let mut full_data = alloc::vec![0u8; total_length];
         debug!("Reading configuration descriptor for index {index}, total length: {total_length}");
-        self.get_descriptor(DESCRIPTOR_TYPE_CONFIGURATION, index, 0, &mut full_data)
+        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut full_data)
             .await?;
 
         Ok(full_data)
@@ -487,8 +482,7 @@ impl Device {
                 ep_mut.set_dequeue_cycle_state();
 
                 match ep.transfer_type {
-                    descriptors::EndpointType::Isochronous
-                    | descriptors::EndpointType::Interrupt => {
+                    descriptor::EndpointType::Isochronous | descriptor::EndpointType::Interrupt => {
                         //init for isoch/interrupt
                         ep_mut.set_max_packet_size(ep.max_packet_size & 0x7ff); //refer xhci page 162
                         ep_mut.set_max_burst_size(
@@ -500,7 +494,7 @@ impl Device {
                     _ => {}
                 }
 
-                if let descriptors::EndpointType::Isochronous = ep.transfer_type {
+                if let descriptor::EndpointType::Isochronous = ep.transfer_type {
                     ep_mut.set_error_count(0);
                 }
             });

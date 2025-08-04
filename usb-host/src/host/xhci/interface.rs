@@ -1,9 +1,9 @@
 use alloc::collections::btree_map::BTreeMap;
+use usb_if::descriptor::{EndpointDescriptor, InterfaceDescriptor};
 
 use crate::{
     endpoint::{direction, kind},
     err::USBError,
-    standard::descriptors::{EndpointDescriptor, InterfaceDescriptor},
     xhci::{
         def::Dci,
         endpoint::{Endpoint, EndpointRaw},

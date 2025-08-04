@@ -1,6 +1,5 @@
 use num_enum::{FromPrimitive, IntoPrimitive};
-
-use super::Direction;
+use usb_if::transfer::Direction;
 
 pub struct Control {
     pub transfer_type: ControlType,
