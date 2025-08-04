@@ -92,7 +92,7 @@ impl Device {
         for i in 0..desc.num_configurations {
             let config = self.read_configuration_descriptor(i).await?;
             let parsed_config = ConfigurationDescriptor::parse(&config).ok_or(USBError::Unknown)?;
-            self.config_desc.push(parsed_config.into());
+            self.config_desc.push(parsed_config);
         }
 
         Ok(())

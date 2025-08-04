@@ -704,15 +704,24 @@ pub(crate) fn parse_concatenated_config_descriptors(
     })
 }
 
-// pub(crate) fn validate_string_descriptor(data: &[u8]) -> bool {
-//     data.len() >= 2 && data[0] as usize == data.len() && data[1] == DESCRIPTOR_TYPE_STRING
-// }
+pub(crate) fn validate_string_descriptor(data: &[u8]) -> Result<(), &'static str> {
+    if data.len() < 2 {
+        return Err("string descriptor too short");
+    }
 
-pub fn decode_string_descriptor(data: &[u8]) -> Result<String, ()> {
-    // if !validate_string_descriptor(data) {
-    //     warn!("invalid string descriptor");
-    //     return Err(());
-    // }
+    if data[0] as usize > data.len() {
+        return Err("string descriptor bLength exceeds buffer length");
+    }
+
+    if data[1] != DESCRIPTOR_TYPE_STRING {
+        return Err("invalid string descriptor type");
+    }
+
+    Ok(())
+}
+
+pub fn decode_string_descriptor(data: &[u8]) -> Result<String, &'static str> {
+    validate_string_descriptor(data)?;
 
     Ok(char::decode_utf16(
         data[2..]
