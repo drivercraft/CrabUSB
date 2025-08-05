@@ -1,4 +1,4 @@
-use crate::{Controller, USBHost};
+use crate::{Controller, Host};
 
 macro_rules! usb {
     ($e:expr) => {
@@ -39,12 +39,11 @@ impl Controller for Libusb {
 
     async fn probe(&mut self) -> crate::err::Result<Vec<Self::Device>> {
         let ls = self.ctx.device_list()?;
-        debug!("Found {} devices", ls.count());
-        Ok(Vec::new())
+        Ok(ls.map(device::Device::new).collect())
     }
 }
 
-impl USBHost<Libusb> {
+impl Host<Libusb> {
     pub fn new_libusb() -> Self {
         Self {
             ctrl: Libusb {

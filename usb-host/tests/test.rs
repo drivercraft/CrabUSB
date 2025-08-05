@@ -140,7 +140,7 @@ mod tests {
     set_impl!(KernelImpl);
 
     struct XhciInfo {
-        usb: USBHost<Xhci>,
+        usb: Host<Xhci>,
         irq: Option<IrqInfo>,
     }
 
@@ -248,7 +248,7 @@ mod tests {
                     println!("irq: {irq:?}");
 
                     return XhciInfo {
-                        usb: USBHost::new_xhci(addr),
+                        usb: Host::new_xhci(addr),
                         irq,
                     };
                 }
@@ -269,7 +269,7 @@ mod tests {
                 let irq = node.irq_info();
 
                 return XhciInfo {
-                    usb: USBHost::new(addr),
+                    usb: Host::new(addr),
                     irq,
                 };
             }
@@ -278,8 +278,8 @@ mod tests {
         panic!("no xhci found");
     }
 
-    fn register_irq(irq: IrqInfo, host: &mut Pin<Box<USBHost<Xhci>>>) {
-        let ptr: *mut USBHost<Xhci> = host.as_mut().get_mut() as *mut _;
+    fn register_irq(irq: IrqInfo, host: &mut Pin<Box<Host<Xhci>>>) {
+        let ptr: *mut Host<Xhci> = host.as_mut().get_mut() as *mut _;
 
         for one in &irq.cfgs {
             IrqParam {

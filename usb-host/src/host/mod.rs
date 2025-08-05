@@ -1,5 +1,3 @@
-use core::ptr::NonNull;
-
 use alloc::vec::Vec;
 
 #[cfg(feature = "libusb")]
@@ -11,14 +9,14 @@ pub use xhci::Xhci;
 
 define_int_type!(PortId, usize);
 
-pub struct USBHost<C>
+pub struct Host<C>
 where
     C: Controller,
 {
     ctrl: C,
 }
 
-impl<C> From<C> for USBHost<C>
+impl<C> From<C> for Host<C>
 where
     C: Controller,
 {
@@ -27,7 +25,7 @@ where
     }
 }
 
-impl<T: Controller> USBHost<T> {
+impl<T: Controller> Host<T> {
     pub async fn init(&mut self) -> Result {
         self.ctrl.init().await
     }
