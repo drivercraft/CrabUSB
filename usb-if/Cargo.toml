@@ -1,4 +1,5 @@
 [package]
+description = "USB Interface definitions for CrabUSB"
 edition.workspace = true
 license.workspace = true
 name = "usb-if"
