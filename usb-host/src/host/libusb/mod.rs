@@ -20,7 +20,6 @@ mod device;
 pub(crate) mod err;
 
 pub use device::DeviceInfo;
-use log::debug;
 
 pub struct Libusb {
     ctx: context::Context,
