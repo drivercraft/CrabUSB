@@ -3,31 +3,29 @@ use core::{mem::MaybeUninit, num::NonZero};
 use libusb1_sys::*;
 use usb_if::descriptor::DeviceDescriptor;
 
-use crate::{libusb, IDevice};
+use crate::IDevice;
 
-pub struct Device {
+pub struct DeviceInfo {
     pub(crate) raw: *mut libusb_device,
-    handle: Option<*mut libusb_device_handle>,
 }
 
-unsafe impl Send for Device {}
+unsafe impl Send for DeviceInfo {}
 
-impl Device {
+impl DeviceInfo {
     pub(crate) fn new(raw: *mut libusb_device) -> Self {
         let raw = unsafe { libusb_ref_device(raw) };
-        Self { raw, handle: None }
+        Self { raw }
     }
 
     pub fn raw(&self) -> *mut libusb_device {
         self.raw
     }
 
-    pub fn open(&mut self) -> crate::err::Result<()> {
+    pub fn open(&mut self) -> crate::err::Result<Device> {
         let mut handle = std::ptr::null_mut();
         usb!(libusb_open(self.raw, &mut handle))?;
-        self.handle = Some(handle);
-
-        Ok(())
+        let desc = self.descriptor()?;
+        Ok(Device::new(handle, desc))
     }
 
     pub fn descriptor(&self) -> crate::err::Result<DeviceDescriptor> {
@@ -36,9 +34,11 @@ impl Device {
         let desc = unsafe { desc.assume_init() };
         libusb_device_desc_to_desc(&desc)
     }
+
+    
 }
 
-impl Drop for Device {
+impl Drop for DeviceInfo {
     fn drop(&mut self) {
         unsafe {
             libusb_unref_device(self.raw);
@@ -46,7 +46,34 @@ impl Drop for Device {
     }
 }
 
-impl IDevice for Device {}
+impl IDevice for DeviceInfo {}
+
+pub struct Device {
+    raw: *mut libusb_device_handle,
+    desc: DeviceDescriptor,
+}
+
+impl Device {
+    pub(crate) fn new(raw: *mut libusb_device_handle, desc: DeviceDescriptor) -> Self {
+        Self { raw, desc }
+    }
+
+    pub fn raw(&self) -> *mut libusb_device_handle {
+        self.raw
+    }
+
+    pub fn descriptor(&self) -> &DeviceDescriptor {
+        &self.desc
+    }
+}
+
+impl Drop for Device {
+    fn drop(&mut self) {
+        unsafe {
+            libusb_close(self.raw);
+        }
+    }
+}
 
 fn libusb_device_desc_to_desc(
     desc: &libusb_device_descriptor,

@@ -19,7 +19,7 @@ mod device;
 #[macro_use]
 pub(crate) mod err;
 
-pub use device::Device;
+pub use device::DeviceInfo;
 use log::debug;
 
 pub struct Libusb {
@@ -27,7 +27,7 @@ pub struct Libusb {
 }
 
 impl Controller for Libusb {
-    type Device = device::Device;
+    type Device = device::DeviceInfo;
 
     async fn init(&mut self) -> crate::err::Result {
         Ok(())
@@ -39,7 +39,7 @@ impl Controller for Libusb {
 
     async fn probe(&mut self) -> crate::err::Result<Vec<Self::Device>> {
         let ls = self.ctx.device_list()?;
-        Ok(ls.map(device::Device::new).collect())
+        Ok(ls.map(device::DeviceInfo::new).collect())
     }
 }
 
