@@ -1,0 +1,40 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main  # Triggers after PR merge to main
+  pull_request:
+    branches:
+      - main  # Triggers on PR creation/update
+
+env:
+  qemu-version: 9.2.4
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cargo-bin-cache
+          cache-targets: false
+        
+      - run: cargo install cargo-binutils
+      - uses: arceos-org/setup-qemu@v1
+        with:
+          version: ${{ env.qemu-version }}
+          arch_list: aarch64
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libudev-dev
+          version: 1.0
+      - run: cargo install ostool
+      - name: Test no-std
+        run: cargo test -p crab-usb --test test -- --show-output
+
