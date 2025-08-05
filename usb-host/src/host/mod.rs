@@ -2,6 +2,8 @@ use core::ptr::NonNull;
 
 use alloc::vec::Vec;
 
+#[cfg(feature = "libusb")]
+pub mod libusb;
 pub mod xhci;
 
 use crate::err::*;
@@ -25,11 +27,7 @@ where
     }
 }
 
-impl USBHost<Xhci> {
-    pub fn new(reg_base: NonNull<u8>) -> Self {
-        Self::from(Xhci::new(reg_base))
-    }
-
+impl<T: Controller> USBHost<T> {
     pub async fn init(&mut self) -> Result {
         self.ctrl.init().await
     }
@@ -42,7 +40,7 @@ impl USBHost<Xhci> {
         Ok(())
     }
 
-    pub async fn probe(&mut self) -> Result<Vec<xhci::Device>> {
+    pub async fn probe(&mut self) -> Result<Vec<T::Device>> {
         self.ctrl.probe().await
     }
 

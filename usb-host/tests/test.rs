@@ -248,7 +248,7 @@ mod tests {
                     println!("irq: {irq:?}");
 
                     return XhciInfo {
-                        usb: USBHost::new(addr),
+                        usb: USBHost::new_xhci(addr),
                         irq,
                     };
                 }

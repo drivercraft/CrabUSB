@@ -22,6 +22,7 @@ mod root;
 
 use super::Controller;
 use crate::{
+    USBHost,
     err::*,
     sleep,
     xhci::{reg::XhciRegisters, root::RootHub},
@@ -36,6 +37,12 @@ pub struct Xhci {
 }
 
 unsafe impl Send for Xhci {}
+
+impl USBHost<Xhci> {
+    pub fn new_xhci(reg_base: NonNull<u8>) -> Self {
+        Self::from(Xhci::new(reg_base))
+    }
+}
 
 impl Controller for Xhci {
     async fn init(&mut self) -> Result {

@@ -35,5 +35,5 @@ jobs:
           version: 1.0
       - run: cargo install ostool
       - name: Test no-std
-        run: cargo test -p crab-usb --test test -- --show-output
+        run: cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat -- --show-output
 
