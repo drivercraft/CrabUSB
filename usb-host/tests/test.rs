@@ -269,7 +269,7 @@ mod tests {
                 let irq = node.irq_info();
 
                 return XhciInfo {
-                    usb: Host::new(addr),
+                    usb: Host::new_xhci(addr),
                     irq,
                 };
             }
