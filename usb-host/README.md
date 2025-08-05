@@ -143,8 +143,6 @@ check if the device is accessible:
 ls -l /dev/bus/usb/003/038
 ```
 
-
-
 ## Supported USB Features
 
 - **USB 1.1/2.0/3.x**: Full speed, High speed, and SuperSpeed devices
