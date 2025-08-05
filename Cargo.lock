@@ -2410,6 +2410,7 @@ name = "usb-if"
 version = "0.1.0"
 dependencies = [
  "log",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

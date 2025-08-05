@@ -17,3 +17,8 @@ impl Direction {
     }
     pub(crate) const MASK: u8 = 0x80;
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum TransferError {
+    
+}
