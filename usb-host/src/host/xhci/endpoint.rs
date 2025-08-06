@@ -2,8 +2,8 @@ use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use core::pin::Pin;
 
 use dma_api::{DSlice, DSliceMut};
-use futures::{future::BoxFuture, FutureExt};
-use log::trace;
+use futures::{FutureExt, future::BoxFuture};
+use log::{info, trace};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
@@ -95,9 +95,7 @@ impl EndpointRaw {
             Ok(ret.trb_transfer_length() as usize)
         }
         .boxed();
-        let box_fur = Box::pin( FutureTransfer {
-            fut: fur,
-        });
+        let box_fur = Box::pin(FutureTransfer { fut: fur });
         Ok(box_fur)
     }
 
@@ -136,7 +134,7 @@ impl Future for TransferWait<'_> {
     }
 }
 
-impl <'a>Transfer<'a> for FutureTransfer<'a> {}
+impl<'a> Transfer<'a> for FutureTransfer<'a> {}
 
 impl<'a> Transfer<'a> for TransferWait<'a> {}
 
@@ -240,16 +238,42 @@ impl EndpointControl {
         }
         trbs.push(status.into());
 
-       self
-            .0
+        self.0
             .lock()
             .enque(trbs.into_iter(), dir, buff_data, buff_len)
-       
     }
 
     pub fn listen(&self, root: &mut Root) {
         let ring = self.0.lock();
         root.litsen_transfer(&ring.ring);
+    }
+
+    pub fn control_in<'a>(
+        &mut self,
+        param: ControlSetup,
+        buff: &'a mut [u8],
+    ) -> ResultTransfer<'a> {
+        self.transfer(
+            param,
+            Direction::In,
+            if buff.is_empty() {
+                None
+            } else {
+                Some((buff.as_ptr() as usize, buff.len() as _))
+            },
+        )
+    }
+
+    pub fn control_out<'a>(&mut self, param: ControlSetup, buff: &'a [u8]) -> ResultTransfer<'a> {
+        self.transfer(
+            param,
+            Direction::Out,
+            if buff.is_empty() {
+                None
+            } else {
+                Some((buff.as_ptr() as usize, buff.len() as _))
+            },
+        )
     }
 }
 
@@ -348,10 +372,7 @@ impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
 }
 
 impl Endpoint<kind::Bulk, direction::In> {
-    pub fn transfer<'a>(
-        &mut self,
-        data: &'a mut [u8],
-    ) -> ResultTransfer<'a> {
+    pub fn transfer<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
         self.validate_endpoint(Direction::In, usb_if::descriptor::EndpointType::Bulk)?;
 
         let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
@@ -362,71 +383,80 @@ impl Endpoint<kind::Bulk, direction::In> {
 }
 
 impl Endpoint<kind::Bulk, direction::Out> {
-    pub fn transfer<'a>(
-        &mut self,
-        data: &'a [u8],
-    ) -> ResultTransfer<'a>{
+    pub fn transfer<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
         self.validate_endpoint(Direction::Out, usb_if::descriptor::EndpointType::Bulk)?;
 
         let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
         let trb = self.create_normal_trb(addr_bus, len);
 
-       self.execute_transfer(trb, addr_virt, len)
+        self.execute_transfer(trb, addr_virt, len)
     }
 }
 
-// impl Endpoint<kind::Interrupt, direction::In> {
-//     pub fn transfer(
-//         &mut self,
-//         data: &mut [u8],
-//     ) -> Result<impl Future<Output = Result<usize, TransferError>>, USBError> {
-//         self.validate_endpoint(Direction::In, usb_if::descriptor::EndpointType::Interrupt)?;
+impl Endpoint<kind::Interrupt, direction::In> {
+    pub fn transfer<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
+        self.validate_endpoint(Direction::In, usb_if::descriptor::EndpointType::Interrupt)?;
 
-//         let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
-//         let trb = self.create_normal_trb(addr_bus, len);
+        let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
+        let trb = self.create_normal_trb(addr_bus, len);
 
-//         Ok(self.execute_transfer(trb, addr_virt, len))
-//     }
-// }
+        self.execute_transfer(trb, addr_virt, len)
+    }
+}
 
-// impl Endpoint<kind::Interrupt, direction::Out> {
-//     pub fn transfer(
-//         &mut self,
-//         data: &[u8],
-//     ) -> Result<impl Future<Output = Result<usize, TransferError>>, USBError> {
-//         self.validate_endpoint(Direction::Out, EndpointType::Interrupt)?;
+impl Endpoint<kind::Interrupt, direction::Out> {
+    pub fn transfer<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
+        self.validate_endpoint(Direction::Out, EndpointType::Interrupt)?;
 
-//         let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
-//         let trb = self.create_normal_trb(addr_bus, len);
+        let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
+        let trb = self.create_normal_trb(addr_bus, len);
 
-//         Ok(self.execute_transfer(trb, addr_virt, len))
-//     }
-// }
+        self.execute_transfer(trb, addr_virt, len)
+    }
+}
 
-// impl Endpoint<kind::Isochronous, direction::In> {
-//     pub fn transfer(
-//         &mut self,
-//         data: &mut [u8],
-//     ) -> Result<impl Future<Output = Result<usize, TransferError>>, USBError> {
-//         self.validate_endpoint(Direction::In, EndpointType::Isochronous)?;
+impl Endpoint<kind::Isochronous, direction::In> {
+    pub fn transfer<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
+        self.validate_endpoint(Direction::In, EndpointType::Isochronous)?;
 
-//         let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
-//         let trb = self.create_isoch_trb(addr_bus, len);
+        let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
+        let trb = self.create_isoch_trb(addr_bus, len);
 
-//         Ok(self.execute_transfer(trb, addr_virt, len))
-//     }
-// }
+        self.execute_transfer(trb, addr_virt, len)
+    }
+}
 
-// impl Endpoint<kind::Isochronous, direction::Out> {
-//     pub fn transfer(
-//         &mut self,
-//         data: &[u8],
-//     ) -> Result<impl Future<Output = Result<usize, TransferError>>, USBError> {
-//         self.validate_endpoint(Direction::Out, EndpointType::Isochronous)?;
+impl Endpoint<kind::Isochronous, direction::Out> {
+    pub fn transfer<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
+        self.validate_endpoint(Direction::Out, EndpointType::Isochronous)?;
 
-//         let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
-//         let trb = self.create_isoch_trb(addr_bus, len);
+        let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
+        let trb = self.create_isoch_trb(addr_bus, len);
 
-//         Ok(self.execute_transfer(trb, addr_virt, len))
-//     }
-// }
+        self.execute_transfer(trb, addr_virt, len)
+    }
+}
+
+impl usb_if::host::EndpointBulkIn for Endpoint<kind::Bulk, direction::In> {
+    fn submit<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
+        self.transfer(data)
+    }
+}
+
+impl usb_if::host::EndpointBulkOut for Endpoint<kind::Bulk, direction::Out> {
+    fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
+        self.transfer(data)
+    }
+}
+
+impl usb_if::host::EndpointInterruptIn for Endpoint<kind::Interrupt, direction::In> {
+    fn submit<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
+        self.transfer(data)
+    }
+}
+
+impl usb_if::host::EndpointInterruptOut for Endpoint<kind::Interrupt, direction::Out> {
+    fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
+        self.transfer(data)
+    }
+}

@@ -14,9 +14,7 @@ impl ConvertXhciError for CompletionCode {
         match self {
             CompletionCode::Success => Ok(()),
             CompletionCode::StallError => Err(TransferError::Stall),
-            _ => Err(TransferError::Other(
-                format!("XHCI error: {:?}", self).into(),
-            )),
+            _ => Err(TransferError::Other(format!("XHCI error: {self:?}").into())),
         }
     }
 }

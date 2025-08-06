@@ -14,7 +14,7 @@ use usb_if::{
         InterfaceDescriptor, decode_string_descriptor,
     },
     host::{ControlSetup, ResultTransfer},
-    transfer::{Direction, Recipient, Request, RequestType},
+    transfer::{Recipient, Request, RequestType},
 };
 use xhci::{registers::doorbell, ring::trb::command};
 
@@ -150,9 +150,18 @@ impl usb_if::host::Device for Device {
     fn claim_interface(
         &mut self,
         interface: u8,
+        alternate: u8,
     ) -> futures::future::LocalBoxFuture<'_, Result<Box<dyn usb_if::host::Interface>, USBError>>
     {
-        todo!()
+        async move {
+            trace!("Claiming interface {interface}, alternate {alternate}");
+            self.set_interface(interface, alternate);
+            let ep_map = self.set_interface(interface, alternate).await?;
+            let desc = self.find_interface_desc(interface, alternate)?;
+            let interface = Interface::new(desc, ep_map, self.ctrl_ep.clone());
+            Ok(Box::new(interface) as Box<dyn usb_if::host::Interface>)
+        }
+        .boxed_local()
     }
 
     fn configuration_descriptors(
@@ -307,132 +316,13 @@ impl Device {
         param: ControlSetup,
         buff: &'a mut [u8],
     ) -> ResultTransfer<'a> {
-        // self.control_transfer(ControlRaw {
-        //     request_type: RequestType {
-        //         direction: Direction::In,
-        //         control_type: param.transfer_type,
-        //         recipient: param.recipient,
-        //     },
-        //     request: param.request,
-        //     index: param.index,
-        //     value: param.value,
-        //     data: if buff.is_empty() {
-        //         None
-        //     } else {
-        //         Some((buff.as_mut_ptr() as usize, buff.len() as _))
-        //     },
-        // })
-        // .await
-        self.control_transfer(
-            param,
-            Direction::In,
-            if buff.is_empty() {
-                None
-            } else {
-                Some((buff.as_ptr() as usize, buff.len() as _))
-            },
-        )
+        self.ctrl_ep.control_in(param, buff)
     }
 
     pub fn control_out<'a>(&mut self, param: ControlSetup, buff: &'a [u8]) -> ResultTransfer<'a> {
-        self.control_transfer(
-            param,
-            Direction::Out,
-            if buff.is_empty() {
-                None
-            } else {
-                Some((buff.as_ptr() as usize, buff.len() as _))
-            },
-        )
-
-        // self.control_transfer(ControlRaw {
-        //     request_type: RequestType {
-        //         direction: Direction::Out,
-        //         control_type: param.transfer_type,
-        //         recipient: param.recipient,
-        //     },
-        //     request: param.request,
-        //     index: param.index,
-        //     value: param.value,
-        //     data: if buff.is_empty() {
-        //         None
-        //     } else {
-        //         Some((buff.as_ptr() as usize, buff.len() as _))
-        //     },
-        // })
-        // .await
+        self.ctrl_ep.control_out(param, buff)
     }
 
-    // async fn control_transfer(&mut self, urb: ControlRaw) -> Result<usize, USBError> {
-    //     let mut trbs: Vec<transfer::Allowed> = Vec::new();
-    //     let mut setup = transfer::SetupStage::default();
-    //     let mut buff_data = 0;
-    //     let mut buff_len = 0;
-
-    //     setup
-    //         .set_request_type(urb.request_type.clone().into())
-    //         .set_request(urb.request.into())
-    //         .set_value(urb.value)
-    //         .set_index(urb.index)
-    //         .set_transfer_type(transfer::TransferType::No);
-
-    //     let mut data = None;
-
-    //     if let Some((addr, len)) = urb.data {
-    //         buff_data = addr;
-    //         buff_len = len as usize;
-    //         let data_slice =
-    //             unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };
-
-    //         let dm = DSliceMut::from(data_slice, dma_api::Direction::Bidirectional);
-
-    //         if matches!(urb.request_type.direction, Direction::Out) {
-    //             dm.confirm_write_all();
-    //         }
-
-    //         setup
-    //             .set_transfer_type(urb.request_type.direction.to_xhci_transfer_type())
-    //             .set_length(len);
-
-    //         let mut raw_data = transfer::DataStage::default();
-    //         raw_data
-    //             .set_data_buffer_pointer(dm.bus_addr() as _)
-    //             .set_trb_transfer_length(len as _)
-    //             .set_direction(urb.request_type.direction.to_xhci_direction());
-
-    //         data = Some(raw_data)
-    //     }
-
-    //     let mut status = transfer::StatusStage::default();
-    //     status.set_interrupt_on_completion();
-
-    //     if matches!(urb.request_type.direction, Direction::In) {
-    //         status.set_direction();
-    //     }
-
-    //     trbs.push(setup.into());
-    //     if let Some(data) = data {
-    //         trbs.push(data.into());
-    //     }
-    //     trbs.push(status.into());
-
-    //     self.ctrl_ep
-    //         .enque(
-    //             trbs.into_iter(),
-    //             urb.request_type.direction,
-    //             buff_data,
-    //             buff_len,
-    //         )
-    //         .await
-    // }
-    fn control_transfer<'a>(
-        &mut self,
-        urb: ControlSetup,
-        dir: Direction,
-        buff: Option<(usize, u16)>,
-    ) -> ResultTransfer<'a> {
-        self.ctrl_ep.transfer(urb, dir, buff)
-    }
     async fn control_max_packet_size(&mut self) -> Result<u16, USBError> {
         trace!("control_fetch_control_point_packet_size");
 
@@ -545,39 +435,6 @@ impl Device {
 
         Ok(full_data)
     }
-
-    // async fn set_configuration(&mut self, config_value: u8) -> Result<(), USBError> {
-    //     trace!("Setting device configuration to {config_value}");
-
-    //     self.control_out(
-    //         ControlSetup {
-    //             request_type: RequestType::Standard,
-    //             recipient: Recipient::Device,
-    //             request: Request::SetConfiguration,
-    //             value: config_value as u16,
-    //             index: 0,
-    //         },
-    //         // Control {
-    //         //     request: Request::SetConfiguration,
-    //         //     index: 0,
-    //         //     value: config_value as u16,
-    //         //     transfer_type: ControlType::Standard,
-    //         //     recipient: Recipient::Device,
-    //         // },
-    //         &[],
-    //     )?
-    //     .await?;
-
-    //     self.current_config_value = Some(config_value);
-
-    //     self.ctx.with_input(|input| {
-    //         let c = input.control_mut();
-    //         c.set_configuration_value(config_value);
-    //     });
-
-    //     debug!("Device configuration set to {config_value}");
-    //     Ok(())
-    // }
 
     /// 配置端点（为指定配置设置端点上下文）
     async fn configure_endpoints_internal(
@@ -697,12 +554,6 @@ impl Device {
                 value: interface as _,
                 index: alternate as _,
             },
-            //     request: Request::SetInterface,
-            //     index: interface as _,
-            //     value: alternate as _,
-            //     transfer_type: ControlType::Standard,
-            //     recipient: Recipient::Interface,
-            // },
             &[],
         )?
         .await?;

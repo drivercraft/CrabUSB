@@ -13,7 +13,7 @@ async fn test() {
     let ls = host.probe().await.unwrap();
 
     println!("Found {} devices", ls.len());
-             
+
     for device in &ls {
         println!("Device: {:?}", device.descriptor());
     }

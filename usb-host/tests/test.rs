@@ -17,14 +17,8 @@ mod tests {
         platform::fdt::GetPciIrqConfig,
         println,
     };
-    use core::{pin::Pin, time::Duration};
-    use crab_usb::{
-        endpoint::{
-            direction::In,
-            kind::{Bulk, Isochronous},
-        },
-        *,
-    };
+    use core::time::Duration;
+    use crab_usb::*;
     use futures::FutureExt;
     use log::*;
     use pcie::*;
@@ -95,44 +89,42 @@ mod tests {
                 let config_value = device.current_configuration_descriptor().await.unwrap();
                 info!("get configuration: {config_value:?}");
 
-                // device.claim_interface(interface_desc.interface_number).await.unwrap();
-                // info!("claim interface ok");
+                let mut interface = device
+                    .claim_interface(
+                        interface_desc.interface_number,
+                        interface_desc.alternate_setting,
+                    )
+                    .await
+                    .unwrap();
+                info!("claim interface ok");
 
-                // let mut interface = device
-                //     .claim_interface(
-                //         interface_desc.interface_number,
-                //         interface_desc.interface_number,
-                //     )
-                //     .await
-                //     .unwrap();
-                // info!("set interface ok");
+                for ep_desc in &interface_desc.endpoints {
+                    info!("endpoint: {ep_desc:?}");
 
-                // for ep_desc in &interface_desc.endpoints {
-                //     info!("endpoint: {ep_desc:?}");
-
-                //     match (ep_desc.transfer_type, ep_desc.direction) {
-                //         (EndpointType::Bulk, Direction::In) => {
-                //             let _bulk_in = interface.endpoint::<Bulk, In>(ep_desc.address).unwrap();
-                //             // You can use bulk_in to transfer data
-                //             // let mut buff = alloc::vec![0u8; 64];
-                //             // while let Ok(n) = bulk_in.transfer(&mut buff).await {
-                //             //     let data = &buff[..n];
-
-                //             //     info!("bulk in data: {data:?}",);
-                //             // }
-                //         }
-                //         (EndpointType::Isochronous, Direction::In) => {
-                //             let _iso_in = interface
-                //                 .endpoint::<Isochronous, In>(ep_desc.address)
-                //                 .unwrap();
-                //             // You can use iso_in to transfer data
-                //         }
-
-                //         _ => {
-                //             info!("unsupported endpoint type");
-                //         }
-                //     }
-                // }
+                    match (ep_desc.transfer_type, ep_desc.direction) {
+                        (EndpointType::Bulk, Direction::In) => {
+                            let mut bulk_in = interface.endpoint_bulk_in(ep_desc.address).unwrap();
+                            // You can use bulk_in to transfer data
+                            let mut buff = alloc::vec![0u8; 64];
+                            while let Ok(n) = bulk_in.submit(&mut buff).unwrap().await {
+                                let data = &buff[..n];
+                                info!("bulk in data: {data:?}",);
+                            }
+                        }
+                        // (EndpointType::Isochronous, Direction::In) => {
+                        //     let _iso_in = interface
+                        //         .endpoint::<Isochronous, In>(ep_desc.address)
+                        //         .unwrap();
+                        //     // You can use iso_in to transfer data
+                        // }
+                        _ => {
+                            info!(
+                                "unsupported {:?} {:?}",
+                                ep_desc.transfer_type, ep_desc.direction
+                            );
+                        }
+                    }
+                }
 
                 // let mut _bulk_in = interface.endpoint::<Bulk, In>(0x81).unwrap();
 

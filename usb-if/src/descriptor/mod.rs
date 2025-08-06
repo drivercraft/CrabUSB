@@ -10,7 +10,6 @@ mod parser;
 pub use class_code::*;
 pub use parser::decode_string_descriptor;
 
-
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct DescriptorType(pub u8);

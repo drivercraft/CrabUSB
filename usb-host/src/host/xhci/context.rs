@@ -1,8 +1,6 @@
 use alloc::vec::Vec;
 use dma_api::{DBox, DVec};
-use xhci::context::{
-    Device32Byte, Device64Byte, DeviceHandler, Input32Byte, Input64Byte, InputHandler,
-};
+use xhci::context::{Device32Byte, Device64Byte, Input32Byte, Input64Byte, InputHandler};
 
 use crate::{err::*, xhci::SlotId};
 

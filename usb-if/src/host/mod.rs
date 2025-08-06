@@ -1,6 +1,6 @@
 use core::pin::Pin;
 
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use futures::{FutureExt, future::LocalBoxFuture};
 
 use crate::{
@@ -31,6 +31,7 @@ pub trait Device: Send + 'static {
     fn claim_interface(
         &mut self,
         interface: u8,
+        alternate: u8,
     ) -> LocalBoxFuture<'_, Result<Box<dyn Interface>, USBError>>;
 
     fn configuration_descriptors(
@@ -61,13 +62,33 @@ pub trait Device: Send + 'static {
 pub trait Interface: Send + 'static {
     fn set_alt_setting(&mut self, alt_setting: u8) -> Result<(), USBError>;
     fn get_alt_setting(&self) -> Result<u8, USBError>;
-    fn control_in(&mut self, setup: ControlSetup, data: &'_ mut [u8]) -> ResultTransfer<'_>;
-    fn control_out(&mut self, setup: ControlSetup, data: &'_ [u8]) -> ResultTransfer<'_>;
+    fn control_in<'a>(&mut self, setup: ControlSetup, data: &'a mut [u8]) -> ResultTransfer<'a>;
+    fn control_out<'a>(&mut self, setup: ControlSetup, data: &'a [u8]) -> ResultTransfer<'a>;
     fn endpoint_bulk_in(&mut self, endpoint: u8) -> Result<Box<dyn EndpointBulkIn>, USBError>;
+    fn endpoint_bulk_out(&mut self, endpoint: u8) -> Result<Box<dyn EndpointBulkOut>, USBError>;
+    fn endpoint_interrupt_in(
+        &mut self,
+        endpoint: u8,
+    ) -> Result<Box<dyn EndpointInterruptIn>, USBError>;
+    fn endpoint_interrupt_out(
+        &mut self,
+        endpoint: u8,
+    ) -> Result<Box<dyn EndpointInterruptOut>, USBError>;
 }
 
 pub trait EndpointBulkIn: Send + 'static {
-    fn submit(&mut self, data: &'_ mut [u8]) -> ResultTransfer<'_>;
+    fn submit<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a>;
+}
+pub trait EndpointBulkOut: Send + 'static {
+    fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a>;
+}
+
+pub trait EndpointInterruptIn: Send + 'static {
+    fn submit<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a>;
+}
+
+pub trait EndpointInterruptOut: Send + 'static {
+    fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a>;
 }
 
 pub type BoxTransfer<'a> = Pin<Box<dyn Transfer<'a> + Send>>;
