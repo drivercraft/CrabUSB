@@ -78,7 +78,7 @@ mod tests {
 
                 let mut device = device_info.open().await.unwrap();
 
-                info!("open device ok");
+                info!("open device ok: {device}");
 
                 device
                     .set_configuration(config_desc.configuration_value)
@@ -96,7 +96,10 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                info!("claim interface ok");
+                info!(
+                    "claim interface ok: {interface}  class {:?} subclass {:?}",
+                    interface.descriptor.class, interface.descriptor.subclass
+                );
 
                 for ep_desc in &interface_desc.endpoints {
                     info!("endpoint: {ep_desc:?}");
@@ -106,7 +109,6 @@ mod tests {
                             let mut bulk_in = interface.endpoint_bulk_in(ep_desc.address).unwrap();
                             // You can use bulk_in to transfer data
 
-                            bulk_in.descriptor();
                             let mut buff = alloc::vec![0u8; 64];
                             while let Ok(n) = bulk_in.submit(&mut buff).unwrap().await {
                                 let data = &buff[..n];

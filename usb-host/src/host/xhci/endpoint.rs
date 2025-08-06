@@ -407,9 +407,6 @@ where
     T: kind::Sealed,
     D: direction::Sealed,
 {
-    fn descriptor(&self) -> &EndpointDescriptor {
-        &self.desc
-    }
 }
 
 impl usb_if::host::EndpointBulkIn for Endpoint<kind::Bulk, direction::In> {

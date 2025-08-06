@@ -55,11 +55,8 @@ pub struct DeviceDescriptor {
     pub product_id: u16,
     pub device_version: u16,
     pub manufacturer_string_index: Option<NonZero<u8>>,
-    pub manufacturer_string: Option<String>,
     pub product_string_index: Option<NonZero<u8>>,
-    pub product_string: Option<String>,
     pub serial_number_string_index: Option<NonZero<u8>>,
-    pub serial_number_string: Option<String>,
     pub num_configurations: u8,
 }
 
@@ -175,9 +172,6 @@ impl From<parser::DeviceDescriptor> for DeviceDescriptor {
             product_string_index: desc.product_string_index(),
             serial_number_string_index: desc.serial_number_string_index(),
             num_configurations: desc.num_configurations(),
-            manufacturer_string: None,
-            product_string: None,
-            serial_number_string: None,
         }
     }
 }

@@ -1,10 +1,8 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use futures::{FutureExt, future::LocalBoxFuture};
 
 use crate::{
-    descriptor::{
-        ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor, InterfaceDescriptor,
-    },
+    descriptor::{ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor},
     err::TransferError,
     transfer::{Recipient, Request, RequestType, wait::Waiter},
 };
@@ -57,6 +55,12 @@ pub trait Device: Send + 'static {
         }
         .boxed_local()
     }
+
+    fn string_descriptor(
+        &mut self,
+        index: u8,
+        language_id: u16,
+    ) -> LocalBoxFuture<'_, Result<String, USBError>>;
 }
 
 pub trait Interface: Send + 'static {
@@ -74,12 +78,9 @@ pub trait Interface: Send + 'static {
         &mut self,
         endpoint: u8,
     ) -> Result<Box<dyn EndpointInterruptOut>, USBError>;
-    fn descriptor(&self) -> &InterfaceDescriptor;
 }
 
-pub trait TEndpint: Send + 'static {
-    fn descriptor(&self) -> &EndpointDescriptor;
-}
+pub trait TEndpint: Send + 'static {}
 
 pub trait EndpointBulkIn: TEndpint {
     fn submit<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a>;

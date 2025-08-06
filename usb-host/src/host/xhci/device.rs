@@ -1,8 +1,5 @@
 use alloc::{boxed::Box, collections::btree_map::BTreeMap, string::String, sync::Arc, vec::Vec};
-use core::{
-    num::NonZero,
-    ops::{Deref, DerefMut},
-};
+use core::ops::{Deref, DerefMut};
 
 use futures::FutureExt;
 use log::{debug, trace};
@@ -168,6 +165,21 @@ impl usb_if::host::Device for Device {
         &mut self,
     ) -> futures::future::LocalBoxFuture<'_, Result<Vec<ConfigurationDescriptor>, USBError>> {
         async { Ok(self.config_desc.to_vec()) }.boxed_local()
+    }
+
+    fn string_descriptor(
+        &mut self,
+        index: u8,
+        language_id: u16,
+    ) -> futures::future::LocalBoxFuture<'_, Result<String, USBError>> {
+        async move {
+            let mut data = alloc::vec![0u8; 256];
+            self.get_descriptor(DescriptorType::STRING, index, language_id, &mut data)
+                .await?;
+            let res = decode_string_descriptor(&data).map_err(|e| USBError::Other(e.into()))?;
+            Ok(res)
+        }
+        .boxed_local()
     }
 }
 
@@ -396,30 +408,23 @@ impl Device {
                 value: ((desc_type.0 as u16) << 8) | desc_index as u16,
                 index: language_id,
             },
-            // Control {
-            //     request: Request::GetDescriptor,
-            //     index: language_id,
-            //     value: ((desc_type.0 as u16) << 8) | desc_index as u16,
-            //     transfer_type: ControlType::Standard,
-            //     recipient: Recipient::Device,
-            // },
             buff,
         )?
         .await?;
         Ok(())
     }
 
-    pub async fn string_descriptor(
-        &mut self,
-        index: NonZero<u8>,
-        language_id: u16,
-    ) -> Result<String, USBError> {
-        let mut data = alloc::vec![0u8; 256];
-        self.get_descriptor(DescriptorType::STRING, index.get(), language_id, &mut data)
-            .await?;
-        let res = decode_string_descriptor(&data).map_err(|e| USBError::Other(e.into()))?;
-        Ok(res)
-    }
+    // pub async fn string_descriptor(
+    //     &mut self,
+    //     index: NonZero<u8>,
+    //     language_id: u16,
+    // ) -> Result<String, USBError> {
+    //     let mut data = alloc::vec![0u8; 256];
+    //     self.get_descriptor(DescriptorType::STRING, index.get(), language_id, &mut data)
+    //         .await?;
+    //     let res = decode_string_descriptor(&data).map_err(|e| USBError::Other(e.into()))?;
+    //     Ok(res)
+    // }
 
     async fn read_configuration_descriptor(&mut self, index: u8) -> Result<Vec<u8>, USBError> {
         let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN]; // 配置描述符头部固定为9字节

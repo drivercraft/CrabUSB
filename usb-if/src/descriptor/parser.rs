@@ -729,7 +729,9 @@ pub fn decode_string_descriptor(data: &[u8]) -> Result<String, &'static str> {
             .map(|c| u16::from_le_bytes(c.try_into().unwrap())),
     )
     .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
-    .collect::<String>())
+    .collect::<String>()
+    .trim_end_matches('\0')
+    .into())
 }
 
 // /// Make public when fuzzing
