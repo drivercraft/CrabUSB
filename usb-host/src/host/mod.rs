@@ -1,67 +1,12 @@
 // #[cfg(feature = "libusb")]
 // pub mod libusb;
+mod common;
 pub mod xhci;
 
+pub use common::*;
 pub use xhci::Xhci;
 
 define_int_type!(PortId, usize);
-
-// pub struct Host<C>
-// where
-//     C: Controller,
-// {
-//     ctrl: C,
-// }
-
-// impl<C> From<C> for Host<C>
-// where
-//     C: Controller,
-// {
-//     fn from(value: C) -> Self {
-//         Self { ctrl: value }
-//     }
-// }
-
-// impl<T: Controller> Host<T> {
-//     pub async fn init(&mut self) -> Result {
-//         self.ctrl.init().await
-//     }
-
-//     pub async fn test_cmd(&mut self) -> Result {
-//         // for _ in 0..300 {
-//         self.ctrl.test_cmd().await?;
-//         // }
-
-//         Ok(())
-//     }
-
-//     pub async fn probe(&mut self) -> Result<Vec<T::Device>> {
-//         self.ctrl.probe().await
-//     }
-
-//     /// 中断处理
-//     ///
-//     /// # Safety
-//     ///
-//     /// 只能在中断函数中调用.
-//     pub unsafe fn handle_irq(&mut self) {
-//         self.ctrl.handle_irq();
-//     }
-// }
-
-// pub trait Controller: Send {
-//     type Device: IDevice;
-
-//     fn init(&mut self) -> impl Future<Output = Result> + Send;
-
-//     fn test_cmd(&mut self) -> impl Future<Output = Result> + Send;
-
-//     fn probe(&mut self) -> impl Future<Output = Result<Vec<Self::Device>>> + Send;
-
-//     fn handle_irq(&mut self) {}
-// }
-
-// pub trait IDevice: Send {}
 
 pub mod endpoint {
     pub mod kind {
