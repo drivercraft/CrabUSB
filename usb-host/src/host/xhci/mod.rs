@@ -7,7 +7,6 @@ use xhci::{
     ExtendedCapability,
     accessor::Mapper,
     extended_capabilities::{self, usb_legacy_support_capability::UsbLegacySupport},
-    ring::trb::{command, event::CommandCompletion},
 };
 
 mod context;
@@ -243,11 +242,6 @@ impl Xhci {
         debug!("Max device slots: {max_slots}");
 
         max_slots
-    }
-
-    async fn post_cmd(&mut self, trb: command::Allowed) -> Result<CommandCompletion> {
-        let res = self.root()?.post_cmd(trb).await?;
-        Ok(res)
     }
 
     fn extended_capabilities(&self) -> Vec<ExtendedCapability<MemMapper>> {

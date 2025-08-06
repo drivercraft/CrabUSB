@@ -10,7 +10,6 @@ mod _macros;
 
 pub mod err;
 mod host;
-pub mod standard;
 mod sync;
 pub(crate) mod wait;
 

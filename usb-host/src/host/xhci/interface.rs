@@ -49,7 +49,7 @@ impl Interface {
 }
 
 impl usb_if::host::Interface for Interface {
-    fn set_alt_setting(&mut self, alt_setting: u8) -> Result<(), USBError> {
+    fn set_alt_setting(&mut self, _alt_setting: u8) -> Result<(), USBError> {
         todo!()
     }
 

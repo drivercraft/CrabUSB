@@ -155,7 +155,7 @@ impl usb_if::host::Device for Device {
     {
         async move {
             trace!("Claiming interface {interface}, alternate {alternate}");
-            self.set_interface(interface, alternate);
+            self.set_interface(interface, alternate).await?;
             let ep_map = self.set_interface(interface, alternate).await?;
             let desc = self.find_interface_desc(interface, alternate)?;
             let interface = Interface::new(desc, ep_map, self.ctrl_ep.clone());
@@ -577,31 +577,6 @@ impl Device {
                             return Ok(alt.endpoints.clone());
                         }
                     }
-                }
-            }
-        }
-        Err(USBError::NotFound)
-    }
-
-    // pub async fn claim_interface(
-    //     &mut self,
-    //     interface: u8,
-    //     alternate: u8,
-    // ) -> Result<Interface, USBError> {
-    //     trace!("Claiming interface {interface}, alternate {alternate}");
-    //     let config = self.find_interface_config(interface)?;
-    //     self.set_configuration(config.configuration_value).await?;
-    //     let ep_map = self.set_interface(interface, alternate).await?;
-    //     let desc = self.find_interface_desc(interface, alternate)?;
-    //     let interface = Interface::new(desc, ep_map);
-    //     Ok(interface)
-    // }
-
-    fn find_interface_config(&self, interface: u8) -> Result<&ConfigurationDescriptor, USBError> {
-        for config in &self.config_desc {
-            for iface in &config.interfaces {
-                if iface.interface_number == interface {
-                    return Ok(config);
                 }
             }
         }

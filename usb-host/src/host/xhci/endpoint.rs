@@ -1,15 +1,14 @@
-use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
-use core::pin::Pin;
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use dma_api::{DSlice, DSliceMut};
 use futures::{FutureExt, future::BoxFuture};
-use log::{info, trace};
+use log::trace;
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
     descriptor::{self, EndpointDescriptor, EndpointType},
     err::TransferError,
-    host::{BoxTransfer, ControlSetup, ResultTransfer, Transfer},
+    host::{ControlSetup, ResultTransfer, Transfer},
     transfer::{BmRequestType, Direction},
 };
 use xhci::{
