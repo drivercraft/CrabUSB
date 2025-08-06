@@ -2,6 +2,7 @@ use alloc::collections::BTreeMap;
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt::Display, ptr::NonNull};
 use log::debug;
+use usb_if::descriptor::Class;
 
 use usb_if::{
     descriptor::{
@@ -59,6 +60,22 @@ pub struct DeviceInfo {
     pub configurations: Vec<ConfigurationDescriptor>,
 }
 
+impl Display for DeviceInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DeviceInfo")
+            .field(
+                "id",
+                &alloc::format!(
+                    "{:04x}:{:04x}",
+                    self.descriptor.vendor_id,
+                    self.descriptor.product_id
+                ),
+            )
+            .field("class", &self.class())
+            .finish()
+    }
+}
+
 impl DeviceInfo {
     async fn from_box(mut raw: Box<dyn usb_if::host::DeviceInfo>) -> Result<Self, USBError> {
         let desc = raw.descriptor().await?;
@@ -111,8 +128,16 @@ impl DeviceInfo {
         })
     }
 
-    pub async fn descriptor(&self) -> Result<usb_if::descriptor::DeviceDescriptor, USBError> {
-        self.raw.descriptor().await
+    pub fn class(&self) -> Class {
+        self.descriptor.class()
+    }
+
+    pub fn vendor_id(&self) -> u16 {
+        self.descriptor.vendor_id
+    }
+
+    pub fn product_id(&self) -> u16 {
+        self.descriptor.product_id
     }
 
     pub fn interface_descriptors(&self) -> Vec<usb_if::descriptor::InterfaceDescriptor> {
@@ -138,6 +163,15 @@ pub struct Device {
 impl Display for Device {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Device")
+            .field(
+                "id",
+                &alloc::format!(
+                    "{:04x}:{:04x}",
+                    self.descriptor.vendor_id,
+                    self.descriptor.product_id
+                ),
+            )
+            .field("class", &self.class())
             .field("manufacturer_string", &self.manufacturer_string)
             .field("product_string", &self.product_string)
             .field("serial_number_string", &self.serial_number_string)
@@ -206,6 +240,18 @@ impl Device {
         }
         Err(USBError::NotFound)
     }
+
+    pub fn class(&self) -> Class {
+        self.descriptor.class()
+    }
+
+    pub fn vendor_id(&self) -> u16 {
+        self.descriptor.vendor_id
+    }
+
+    pub fn product_id(&self) -> u16 {
+        self.descriptor.product_id
+    }
 }
 
 pub struct Interface {
@@ -222,6 +268,10 @@ impl Display for Interface {
 }
 
 impl Interface {
+    pub fn class(&self) -> Class {
+        self.descriptor.class()
+    }
+
     pub fn control_in<'a>(
         &mut self,
         setup: usb_if::host::ControlSetup,

@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use crab_usb::{BaseClass, DeviceInfo, USBHost};
+use crab_usb::{Class, DeviceInfo, USBHost};
 use log::info;
 
 #[tokio::test]
@@ -16,12 +16,13 @@ async fn test() {
     let mut info: Option<DeviceInfo> = None;
 
     for device in ls {
-        println!("Device: {:?}", device.descriptor().await.unwrap());
+        println!("{device}");
 
         for iface in device.interface_descriptors() {
             println!("  Interface: {iface:?}",);
 
-            if iface.class == BaseClass::VIDEO {
+            if matches!(iface.class(), Class::Video | Class::AudioVideo(_)) {
+                info!("Found video interface: {iface:?}");
                 info = Some(device);
                 break;
             }

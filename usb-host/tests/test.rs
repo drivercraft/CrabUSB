@@ -48,23 +48,22 @@ mod tests {
 
             let ls = host.device_list().await.unwrap();
 
-            for mut device_info in ls {
-                let desc = device_info.descriptor().await.unwrap();
-                info!("device: {desc:?}");
-                // if let Some(index) = desc.product_string_index {
-                // let product = device.string_descriptor(index, 0).await.unwrap();
-                // info!("product: {product}");
-                // }
+            for mut info in ls {
+                info!("{info}");
 
                 let mut interface_desc = None;
                 let mut config_desc: Option<ConfigurationDescriptor> = None;
-                for config in &device_info.configurations {
+                for config in &info.configurations {
                     info!("config: {:?}", config.configuration_value);
 
                     for interface in &config.interfaces {
-                        info!("interface: {:?}", interface.interface_number);
                         for alt in &interface.alt_settings {
-                            info!("alternate: {alt:?}");
+                            info!(
+                                "interface[{}.{}] class {:?}",
+                                alt.interface_number,
+                                alt.alternate_setting,
+                                alt.class()
+                            );
                             if interface_desc.is_none() {
                                 interface_desc = Some(alt.clone());
                                 config_desc = Some(config.clone());
@@ -75,7 +74,7 @@ mod tests {
                 let interface_desc = interface_desc.unwrap();
                 let config_desc = config_desc.unwrap();
 
-                let mut device = device_info.open().await.unwrap();
+                let mut device = info.open().await.unwrap();
 
                 info!("open device ok: {device}");
 

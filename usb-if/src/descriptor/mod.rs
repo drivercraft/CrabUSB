@@ -47,7 +47,7 @@ impl From<DescriptorType> for u8 {
 #[derive(Debug, Clone)]
 pub struct DeviceDescriptor {
     pub usb_version: u16,
-    pub class: BaseClass,
+    pub class: u8,
     pub subclass: u8,
     pub protocol: u8,
     pub max_packet_size_0: u8,
@@ -66,19 +66,29 @@ impl DeviceDescriptor {
     }
 
     pub const LEN: usize = 18;
+
+    pub fn class(&self) -> Class {
+        Class::from_class_and_subclass(self.class, self.subclass, self.protocol)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct InterfaceDescriptor {
     pub interface_number: u8,
     pub alternate_setting: u8,
-    pub class: BaseClass,
+    pub class: u8,
     pub subclass: u8,
     pub protocol: u8,
     pub string_index: Option<NonZero<u8>>,
     pub string: Option<String>,
     pub num_endpoints: u8,
     pub endpoints: Vec<EndpointDescriptor>,
+}
+
+impl InterfaceDescriptor {
+    pub fn class(&self) -> Class {
+        Class::from_class_and_subclass(self.class, self.subclass, self.protocol)
+    }
 }
 
 /// Endpoint type.
