@@ -86,8 +86,8 @@ mod tests {
                     .unwrap();
                 info!("set configuration ok");
 
-                let config_value = device.current_configuration_descriptor().await.unwrap();
-                info!("get configuration: {config_value:?}");
+                // let config_value = device.current_configuration_descriptor().await.unwrap();
+                // info!("get configuration: {config_value:?}");
 
                 let mut interface = device
                     .claim_interface(
@@ -105,10 +105,13 @@ mod tests {
                         (EndpointType::Bulk, Direction::In) => {
                             let mut bulk_in = interface.endpoint_bulk_in(ep_desc.address).unwrap();
                             // You can use bulk_in to transfer data
+
+                            bulk_in.descriptor();
                             let mut buff = alloc::vec![0u8; 64];
                             while let Ok(n) = bulk_in.submit(&mut buff).unwrap().await {
                                 let data = &buff[..n];
                                 info!("bulk in data: {data:?}",);
+                                break; // For testing, break after first transfer
                             }
                         }
                         // (EndpointType::Isochronous, Direction::In) => {

@@ -134,7 +134,6 @@ impl Future for TransferWait<'_> {
 }
 
 impl<'a> Transfer<'a> for FutureTransfer<'a> {}
-
 impl<'a> Transfer<'a> for TransferWait<'a> {}
 
 pub(crate) trait EndpointDescriptorExt {
@@ -433,6 +432,16 @@ impl Endpoint<kind::Isochronous, direction::Out> {
         let trb = self.create_isoch_trb(addr_bus, len);
 
         self.execute_transfer(trb, addr_virt, len)
+    }
+}
+
+impl<T, D> usb_if::host::TEndpint for Endpoint<T, D>
+where
+    T: kind::Sealed,
+    D: direction::Sealed,
+{
+    fn descriptor(&self) -> &EndpointDescriptor {
+        &self.desc
     }
 }
 

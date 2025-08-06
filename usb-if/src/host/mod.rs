@@ -4,7 +4,9 @@ use alloc::{boxed::Box, vec::Vec};
 use futures::{FutureExt, future::LocalBoxFuture};
 
 use crate::{
-    descriptor::{ConfigurationDescriptor, DeviceDescriptor},
+    descriptor::{
+        ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor, InterfaceDescriptor,
+    },
     err::TransferError,
     transfer::{Recipient, Request, RequestType},
 };
@@ -74,20 +76,25 @@ pub trait Interface: Send + 'static {
         &mut self,
         endpoint: u8,
     ) -> Result<Box<dyn EndpointInterruptOut>, USBError>;
+    fn descriptor(&self) -> &InterfaceDescriptor;
 }
 
-pub trait EndpointBulkIn: Send + 'static {
+pub trait TEndpint: Send + 'static {
+    fn descriptor(&self) -> &EndpointDescriptor;
+}
+
+pub trait EndpointBulkIn: TEndpint {
     fn submit<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a>;
 }
-pub trait EndpointBulkOut: Send + 'static {
+pub trait EndpointBulkOut: TEndpint {
     fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a>;
 }
 
-pub trait EndpointInterruptIn: Send + 'static {
+pub trait EndpointInterruptIn: TEndpint {
     fn submit<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a>;
 }
 
-pub trait EndpointInterruptOut: Send + 'static {
+pub trait EndpointInterruptOut: TEndpint {
     fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a>;
 }
 

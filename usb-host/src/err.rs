@@ -13,6 +13,7 @@ impl ConvertXhciError for CompletionCode {
     fn to_result(self) -> core::result::Result<(), TransferError> {
         match self {
             CompletionCode::Success => Ok(()),
+            CompletionCode::ShortPacket => Ok(()),
             CompletionCode::StallError => Err(TransferError::Stall),
             _ => Err(TransferError::Other(format!("XHCI error: {self:?}").into())),
         }

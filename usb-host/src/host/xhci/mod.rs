@@ -25,7 +25,9 @@ use crate::{
     xhci::{reg::XhciRegisters, root::RootHub},
 };
 use def::*;
-pub use device::Device;
+pub use device::{Device, DeviceInfo};
+pub use endpoint::Endpoint;
+pub use interface::Interface;
 
 pub struct Xhci {
     reg: XhciRegisters,

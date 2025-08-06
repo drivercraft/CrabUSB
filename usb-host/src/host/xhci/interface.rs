@@ -104,4 +104,8 @@ impl usb_if::host::Interface for Interface {
         let ep = self.endpoint::<kind::Interrupt, direction::Out>(endpoint)?;
         Ok(Box::new(ep))
     }
+
+    fn descriptor(&self) -> &InterfaceDescriptor {
+        &self.desc
+    }
 }

@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, string::String};
+use alloc::boxed::Box;
 
 #[derive(thiserror::Error, Debug)]
 pub enum TransferError {

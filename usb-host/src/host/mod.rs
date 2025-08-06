@@ -76,7 +76,7 @@ pub mod endpoint {
 
         impl Sealed for Interrupt {}
 
-        pub trait Sealed {}
+        pub trait Sealed: Send + 'static {}
     }
 
     pub mod direction {
@@ -86,6 +86,6 @@ pub mod endpoint {
         pub struct Out;
 
         impl Sealed for Out {}
-        pub trait Sealed {}
+        pub trait Sealed: Send + 'static {}
     }
 }
