@@ -11,10 +11,10 @@ mod _macros;
 pub mod err;
 mod host;
 mod sync;
-pub(crate) mod wait;
 
 pub use futures::future::BoxFuture;
 pub use host::*;
+use usb_if::transfer::wait;
 
 pub trait Kernel {
     fn sleep<'a>(duration: Duration) -> BoxFuture<'a, ()>;

@@ -41,8 +41,8 @@ pub struct Root {
     pub cmd: Ring,
     pub scratchpad_buf_arr: Option<ScratchpadBufferArray>,
 
-    wait_transfer: WaitMap<TransferEvent>,
-    wait_cmd: WaitMap<CommandCompletion>,
+    wait_transfer: WaitMap<u64, TransferEvent>,
+    wait_cmd: WaitMap<u64, CommandCompletion>,
 }
 
 impl Root {

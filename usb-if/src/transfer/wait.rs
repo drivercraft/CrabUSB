@@ -1,4 +1,5 @@
 use core::{
+    fmt::Debug,
     sync::atomic::{AtomicBool, Ordering},
     task::Poll,
 };
@@ -6,15 +7,15 @@ use core::{
 use alloc::{collections::btree_map::BTreeMap, sync::Arc};
 use futures::task::AtomicWaker;
 
-use crate::sync::RwLock;
+use super::sync::RwLock;
 
-pub struct WaitMap<T>(Arc<RwLock<WaitMapRaw<T>>>);
+pub struct WaitMap<K: Ord + Debug, T>(Arc<RwLock<WaitMapRaw<K, T>>>);
 
-unsafe impl<T> Send for WaitMap<T> {}
-unsafe impl<T> Sync for WaitMap<T> {}
+unsafe impl<K: Ord + Debug, T> Send for WaitMap<K, T> {}
+unsafe impl<K: Ord + Debug, T> Sync for WaitMap<K, T> {}
 
-impl<T> WaitMap<T> {
-    pub fn new(id_list: impl Iterator<Item = u64>) -> Self {
+impl<K: Ord + Debug, T> WaitMap<K, T> {
+    pub fn new(id_list: impl Iterator<Item = K>) -> Self {
         Self(Arc::new(RwLock::new(WaitMapRaw::new(id_list))))
     }
 
@@ -22,18 +23,23 @@ impl<T> WaitMap<T> {
         Self(Arc::new(RwLock::new(WaitMapRaw(BTreeMap::new()))))
     }
 
-    pub fn append(&self, id_ls: impl Iterator<Item = u64>) {
+    pub fn append(&self, id_ls: impl Iterator<Item = K>) {
         let mut raw = self.0.write();
         for id in id_ls {
             raw.0.insert(id, Elem::new());
         }
     }
 
-    pub unsafe fn set_result(&self, id: u64, result: T) {
+    /// Sets the result for the given id.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it assumes that the id exists in the map.
+    pub unsafe fn set_result(&self, id: K, result: T) {
         unsafe { self.0.force_use().set_result(id, result) };
     }
 
-    pub fn try_wait_for_result(&self, id: u64) -> Option<Waiter<T>> {
+    pub fn try_wait_for_result(&self, id: K) -> Option<Waiter<T>> {
         let g = self.0.read();
         let elem =
             g.0.get(&id)
@@ -51,13 +57,13 @@ impl<T> WaitMap<T> {
     }
 }
 
-impl<T> Clone for WaitMap<T> {
+impl<K: Ord + Debug, T> Clone for WaitMap<K, T> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
 }
 
-pub struct WaitMapRaw<T>(BTreeMap<u64, Elem<T>>);
+pub struct WaitMapRaw<K: Ord, T>(BTreeMap<K, Elem<T>>);
 
 struct Elem<T> {
     result: Option<T>,
@@ -77,8 +83,8 @@ impl<T> Elem<T> {
     }
 }
 
-impl<T> WaitMapRaw<T> {
-    pub fn new(id_list: impl Iterator<Item = u64>) -> Self {
+impl<K: Ord + Debug, T> WaitMapRaw<K, T> {
+    pub fn new(id_list: impl Iterator<Item = K>) -> Self {
         let mut map = BTreeMap::new();
         for id in id_list {
             map.insert(id, Elem::new());
@@ -86,14 +92,14 @@ impl<T> WaitMapRaw<T> {
         Self(map)
     }
 
-    pub unsafe fn set_result(&mut self, id: u64, result: T) {
+    unsafe fn set_result(&mut self, id: K, result: T) {
         let entry = match self.0.get_mut(&id) {
             Some(entry) => entry,
             None => {
                 let id_0 = self.0.keys().next();
                 let id_end = self.0.keys().last();
                 panic!(
-                    "WaitMap: set_result called with unknown id {id:X}, known ids: [{id_0:X?},{id_end:X?}]"
+                    "WaitMap: set_result called with unknown id {id:X?}, known ids: [{id_0:X?},{id_end:X?}]"
                 );
             }
         };
