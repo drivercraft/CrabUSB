@@ -171,8 +171,8 @@ impl From<parser::DeviceDescriptor> for DeviceDescriptor {
     fn from(desc: parser::DeviceDescriptor) -> Self {
         DeviceDescriptor {
             usb_version: desc.usb_version(),
-            class: desc.class().into(),
-            subclass: desc.subclass().into(),
+            class: desc.class(),
+            subclass: desc.subclass(),
             protocol: desc.protocol(),
             max_packet_size_0: desc.max_packet_size_0(),
             vendor_id: desc.vendor_id(),
@@ -218,8 +218,8 @@ impl From<parser::InterfaceDescriptor<'_>> for InterfaceDescriptor {
         InterfaceDescriptor {
             interface_number: desc.interface_number(),
             alternate_setting: desc.alternate_setting(),
-            class: desc.class().into(),
-            subclass: desc.subclass().into(),
+            class: desc.class(),
+            subclass: desc.subclass(),
             protocol: desc.protocol(),
             string_index: desc.string_index(),
             num_endpoints: desc.num_endpoints(),
