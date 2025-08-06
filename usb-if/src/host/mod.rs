@@ -55,6 +55,8 @@ pub trait Interface: Send + 'static {
         &mut self,
         endpoint: u8,
     ) -> Result<Box<dyn EndpointInterruptOut>, USBError>;
+    fn endpoint_iso_in(&mut self, endpoint: u8) -> Result<Box<dyn EndpintIsoIn>, USBError>;
+    fn endpoint_iso_out(&mut self, endpoint: u8) -> Result<Box<dyn EndpintIsoOut>, USBError>;
 }
 
 pub trait TEndpint: Send + 'static {}
@@ -72,6 +74,14 @@ pub trait EndpointInterruptIn: TEndpint {
 
 pub trait EndpointInterruptOut: TEndpint {
     fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a>;
+}
+
+pub trait EndpintIsoIn: TEndpint {
+    fn submit<'a>(&mut self, data: &'a mut [u8], num_iso_packets: usize) -> ResultTransfer<'a>;
+}
+
+pub trait EndpintIsoOut: TEndpint {
+    fn submit<'a>(&mut self, data: &'a [u8], num_iso_packets: usize) -> ResultTransfer<'a>;
 }
 
 // pub type BoxTransfer<'a> = Pin<Box<dyn Transfer<'a> + Send>>;

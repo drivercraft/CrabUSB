@@ -104,4 +104,20 @@ impl usb_if::host::Interface for Interface {
         let ep = self.endpoint::<kind::Interrupt, direction::Out>(endpoint)?;
         Ok(Box::new(ep))
     }
+
+    fn endpoint_iso_in(
+        &mut self,
+        endpoint: u8,
+    ) -> Result<Box<dyn usb_if::host::EndpintIsoIn>, USBError> {
+        let ep = self.endpoint::<kind::Isochronous, direction::In>(endpoint)?;
+        Ok(Box::new(ep))
+    }
+
+    fn endpoint_iso_out(
+        &mut self,
+        endpoint: u8,
+    ) -> Result<Box<dyn usb_if::host::EndpintIsoOut>, USBError> {
+        let ep = self.endpoint::<kind::Isochronous, direction::Out>(endpoint)?;
+        Ok(Box::new(ep))
+    }
 }

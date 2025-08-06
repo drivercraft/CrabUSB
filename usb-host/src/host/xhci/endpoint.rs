@@ -432,3 +432,15 @@ impl usb_if::host::EndpointInterruptOut for Endpoint<kind::Interrupt, direction:
         self.transfer(data)
     }
 }
+
+impl usb_if::host::EndpintIsoIn for Endpoint<kind::Isochronous, direction::In> {
+    fn submit<'a>(&mut self, data: &'a mut [u8], num_iso_packets: usize) -> ResultTransfer<'a> {
+        self.transfer(data)
+    }
+}
+
+impl usb_if::host::EndpintIsoOut for Endpoint<kind::Isochronous, direction::Out> {
+    fn submit<'a>(&mut self, data: &'a [u8], num_iso_packets: usize) -> ResultTransfer<'a> {
+        self.transfer(data)
+    }
+}
