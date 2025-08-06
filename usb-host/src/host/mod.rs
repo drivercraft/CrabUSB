@@ -1,15 +1,10 @@
-use alloc::vec::Vec;
-
 // #[cfg(feature = "libusb")]
 // pub mod libusb;
 pub mod xhci;
 
-use crate::err::*;
 pub use xhci::Xhci;
 
 define_int_type!(PortId, usize);
-
-
 
 // pub struct Host<C>
 // where

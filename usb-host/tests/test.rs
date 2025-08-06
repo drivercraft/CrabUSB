@@ -28,7 +28,11 @@ mod tests {
     use futures::FutureExt;
     use log::*;
     use pcie::*;
-    use usb_if::{descriptor::EndpointType, host::Controller, transfer::Direction};
+    use usb_if::{
+        descriptor::{ConfigurationDescriptor, EndpointType},
+        host::Controller,
+        transfer::Direction,
+    };
 
     use super::*;
 
@@ -51,29 +55,49 @@ mod tests {
 
             let ls = host.device_list().await.unwrap();
 
-            for mut device in ls {
-                let desc = device.descriptor().await.unwrap();
+            for mut device_info in ls {
+                let desc = device_info.descriptor().await.unwrap();
                 info!("device: {desc:?}");
-                if let Some(index) = desc.product_string_index {
-                    // let product = device.string_descriptor(index, 0).await.unwrap();
-                    // info!("product: {product}");
-                }
-
-                // let mut interface_desc = None;
-                // for config in device.configuration_descriptors() {
-                //     info!("config: {:?}", config.configuration_value);
-
-                //     for interface in &config.interfaces {
-                //         info!("interface: {:?}", interface.interface_number);
-                //         for alt in &interface.alt_settings {
-                //             info!("alternate: {alt:?}");
-                //             if interface_desc.is_none() {
-                //                 interface_desc = Some(alt.clone());
-                //             }
-                //         }
-                //     }
+                // if let Some(index) = desc.product_string_index {
+                // let product = device.string_descriptor(index, 0).await.unwrap();
+                // info!("product: {product}");
                 // }
-                // let interface_desc = interface_desc.unwrap();
+
+                let mut interface_desc = None;
+                let mut config_desc: Option<ConfigurationDescriptor> = None;
+                for config in device_info.configuration_descriptors().await.unwrap() {
+                    info!("config: {:?}", config.configuration_value);
+
+                    for interface in &config.interfaces {
+                        info!("interface: {:?}", interface.interface_number);
+                        for alt in &interface.alt_settings {
+                            info!("alternate: {alt:?}");
+                            if interface_desc.is_none() {
+                                interface_desc = Some(alt.clone());
+                                config_desc = Some(config.clone());
+                            }
+                        }
+                    }
+                }
+                let interface_desc = interface_desc.unwrap();
+                let config_desc = config_desc.unwrap();
+
+                let mut device = device_info.open().await.unwrap();
+
+                info!("open device ok");
+
+                device
+                    .set_configuration(config_desc.configuration_value)
+                    .await
+                    .unwrap();
+                info!("set configuration ok");
+
+                let config_value = device.current_configuration_descriptor().await.unwrap();
+                info!("get configuration: {config_value:?}");
+
+                // device.claim_interface(interface_desc.interface_number).await.unwrap();
+                // info!("claim interface ok");
+
                 // let mut interface = device
                 //     .claim_interface(
                 //         interface_desc.interface_number,
