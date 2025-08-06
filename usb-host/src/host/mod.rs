@@ -1,10 +1,9 @@
-#[cfg(feature = "libusb")]
-pub mod libusb;
 mod common;
-pub mod xhci;
+#[cfg(feature = "libusb")]
+mod libusb;
+mod xhci;
 
 pub use common::*;
-pub use xhci::Xhci;
 
 define_int_type!(PortId, usize);
 

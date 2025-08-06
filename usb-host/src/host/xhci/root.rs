@@ -21,9 +21,7 @@ use xhci::{
 use crate::{
     BusAddr, PortId,
     err::{ConvertXhciError, USBError},
-    sleep,
-    wait::{WaitMap, Waiter},
-    xhci::{
+    host::xhci::{
         XhciRegisters,
         context::{DeviceContextList, ScratchpadBufferArray},
         def::SlotId,
@@ -32,6 +30,8 @@ use crate::{
         reg::DisableIrqGuard,
         ring::{Ring, TrbData},
     },
+    sleep,
+    wait::{WaitMap, Waiter},
 };
 
 pub struct Root {

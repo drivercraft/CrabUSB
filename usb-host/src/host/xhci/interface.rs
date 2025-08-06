@@ -4,7 +4,7 @@ use usb_if::descriptor::{EndpointDescriptor, InterfaceDescriptor};
 use crate::{
     endpoint::{direction, kind},
     err::USBError,
-    xhci::{
+    host::xhci::{
         def::Dci,
         endpoint::{Endpoint, EndpointControl, EndpointRaw},
     },

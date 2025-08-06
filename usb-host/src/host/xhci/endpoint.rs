@@ -19,7 +19,7 @@ use crate::{
     BusAddr,
     endpoint::{direction, kind},
     err::USBError,
-    xhci::{
+    host::xhci::{
         def::{Dci, DirectionExt},
         device::DeviceState,
         ring::Ring,

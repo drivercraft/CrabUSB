@@ -18,7 +18,7 @@ use xhci::{registers::doorbell, ring::trb::command};
 use crate::{
     PortId,
     err::USBError,
-    xhci::{
+    host::xhci::{
         append_port_to_route_string,
         context::ContextData,
         def::{Dci, SlotId},

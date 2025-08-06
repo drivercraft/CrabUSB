@@ -11,7 +11,7 @@ use usb_if::{
     host::{Controller, ResultTransfer, USBError},
 };
 
-use crate::Xhci;
+use crate::host::xhci::Xhci;
 
 pub struct USBHost {
     raw: Box<dyn Controller>,

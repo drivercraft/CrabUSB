@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use dma_api::{DBox, DVec};
 use xhci::context::{Device32Byte, Device64Byte, Input32Byte, Input64Byte, InputHandler};
 
-use crate::{err::*, xhci::SlotId};
+use crate::{err::*, host::xhci::SlotId};
 
 pub struct DeviceContextList {
     pub dcbaa: DVec<u64>,
