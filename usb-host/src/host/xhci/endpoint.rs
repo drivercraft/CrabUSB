@@ -313,15 +313,40 @@ impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
         )
     }
 
-    /// 创建Isoch TRB
+    /// 创建Isoch TRB，根据xHCI规范优化
     fn create_isoch_trb(&self, addr_bus: usize, len: usize) -> transfer::Allowed {
         transfer::Allowed::Isoch(
             *Isoch::new()
                 .set_data_buffer_pointer(addr_bus as _)
                 .set_trb_transfer_length(len as _)
                 .set_interrupter_target(0)
-                .set_interrupt_on_completion(),
+                .set_interrupt_on_completion(), // .set_start_isoch_asap() // 如果方法可用则启用
         )
+    }
+
+    /// 创建Normal TRB用于Isoch TD的链接
+    fn create_normal_trb_for_isoch(
+        &self,
+        addr_bus: usize,
+        len: usize,
+        is_last: bool,
+    ) -> transfer::Allowed {
+        if is_last {
+            transfer::Allowed::Normal(
+                *Normal::new()
+                    .set_data_buffer_pointer(addr_bus as _)
+                    .set_trb_transfer_length(len as _)
+                    .set_interrupter_target(0)
+                    .set_interrupt_on_completion(),
+            )
+        } else {
+            transfer::Allowed::Normal(
+                *Normal::new()
+                    .set_data_buffer_pointer(addr_bus as _)
+                    .set_trb_transfer_length(len as _)
+                    .set_interrupter_target(0),
+            )
+        }
     }
 
     /// 执行传输的通用方法
@@ -333,6 +358,62 @@ impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
     ) -> ResultTransfer<'a> {
         self.raw
             .enque([trb].into_iter(), self.desc.direction, addr_virt, len)
+    }
+
+    /// 执行多包ISO传输的通用方法
+    fn execute_iso_transfer<'a>(
+        &mut self,
+        trbs: Vec<transfer::Allowed>,
+        addr_virt: usize,
+        len: usize,
+    ) -> ResultTransfer<'a> {
+        self.raw
+            .enque(trbs.into_iter(), self.desc.direction, addr_virt, len)
+    }
+
+    /// 创建多包ISO传输的TRB列表
+    fn create_iso_trb_list(
+        &self,
+        addr_bus: usize,
+        len: usize,
+        num_iso_packets: usize,
+    ) -> Vec<transfer::Allowed> {
+        let mut trbs = Vec::new();
+        let packet_size = if len == 0 {
+            0
+        } else {
+            len.div_ceil(num_iso_packets)
+        };
+
+        for i in 0..num_iso_packets {
+            let offset = i * packet_size;
+            if offset >= len {
+                break; // 避免越界
+            }
+            let remaining = len - offset;
+            let current_size = if remaining >= packet_size {
+                packet_size
+            } else {
+                remaining
+            };
+
+            if current_size > 0 {
+                let current_addr = addr_bus + offset;
+                let is_last = (i == num_iso_packets - 1) || (offset + current_size >= len);
+
+                if i == 0 {
+                    // 第一个TRB必须是Isoch TRB
+                    let trb = self.create_isoch_trb(current_addr, current_size);
+                    trbs.push(trb);
+                } else {
+                    // 后续TRB使用Normal TRB
+                    let trb = self.create_normal_trb_for_isoch(current_addr, current_size, is_last);
+                    trbs.push(trb);
+                }
+            }
+        }
+
+        trbs
     }
 }
 
@@ -381,24 +462,46 @@ impl Endpoint<kind::Interrupt, direction::Out> {
 }
 
 impl Endpoint<kind::Isochronous, direction::In> {
-    pub fn transfer<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
+    pub fn transfer_multi_packet<'a>(
+        &mut self,
+        data: &'a mut [u8],
+        num_iso_packets: usize,
+    ) -> ResultTransfer<'a> {
         self.validate_endpoint(Direction::In, EndpointType::Isochronous)?;
 
         let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
-        let trb = self.create_isoch_trb(addr_bus, len);
 
-        self.execute_transfer(trb, addr_virt, len)
+        if num_iso_packets <= 1 || len == 0 {
+            // 单包传输，使用原有逻辑
+            let trb = self.create_isoch_trb(addr_bus, len);
+            return self.execute_transfer(trb, addr_virt, len);
+        }
+
+        // 多包传输，使用公共方法创建TRB列表
+        let trbs = self.create_iso_trb_list(addr_bus, len, num_iso_packets);
+        self.execute_iso_transfer(trbs, addr_virt, len)
     }
 }
 
 impl Endpoint<kind::Isochronous, direction::Out> {
-    pub fn transfer<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
+    pub fn transfer_multi_packet<'a>(
+        &mut self,
+        data: &'a [u8],
+        num_iso_packets: usize,
+    ) -> ResultTransfer<'a> {
         self.validate_endpoint(Direction::Out, EndpointType::Isochronous)?;
 
         let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
-        let trb = self.create_isoch_trb(addr_bus, len);
 
-        self.execute_transfer(trb, addr_virt, len)
+        if num_iso_packets <= 1 || len == 0 {
+            // 单包传输，使用原有逻辑
+            let trb = self.create_isoch_trb(addr_bus, len);
+            return self.execute_transfer(trb, addr_virt, len);
+        }
+
+        // 多包传输，使用公共方法创建TRB列表
+        let trbs = self.create_iso_trb_list(addr_bus, len, num_iso_packets);
+        self.execute_iso_transfer(trbs, addr_virt, len)
     }
 }
 
@@ -435,12 +538,12 @@ impl usb_if::host::EndpointInterruptOut for Endpoint<kind::Interrupt, direction:
 
 impl usb_if::host::EndpintIsoIn for Endpoint<kind::Isochronous, direction::In> {
     fn submit<'a>(&mut self, data: &'a mut [u8], num_iso_packets: usize) -> ResultTransfer<'a> {
-        self.transfer(data)
+        self.transfer_multi_packet(data, num_iso_packets)
     }
 }
 
 impl usb_if::host::EndpintIsoOut for Endpoint<kind::Isochronous, direction::Out> {
     fn submit<'a>(&mut self, data: &'a [u8], num_iso_packets: usize) -> ResultTransfer<'a> {
-        self.transfer(data)
+        self.transfer_multi_packet(data, num_iso_packets)
     }
 }
