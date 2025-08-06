@@ -4,6 +4,9 @@
 extern crate alloc;
 
 use core::time::Duration;
+pub use usb_if::descriptor::*;
+pub use usb_if::err::*;
+pub use usb_if::transfer::*;
 
 #[macro_use]
 mod _macros;
@@ -13,7 +16,6 @@ mod host;
 
 pub use futures::future::BoxFuture;
 pub use host::*;
-use usb_if::transfer::wait;
 
 pub trait Kernel {
     fn sleep<'a>(duration: Duration) -> BoxFuture<'a, ()>;

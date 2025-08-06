@@ -15,6 +15,8 @@ macro_rules! usb {
 
 mod context;
 mod device;
+mod endpoint;
+mod interface;
 
 #[macro_use]
 pub(crate) mod err;
@@ -57,5 +59,11 @@ impl Libusb {
         Self {
             ctx: context::Context::new().expect("Failed to create libusb context"),
         }
+    }
+}
+
+impl Default for Libusb {
+    fn default() -> Self {
+        Self::new()
     }
 }

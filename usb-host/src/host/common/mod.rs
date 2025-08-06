@@ -1,6 +1,7 @@
+use alloc::collections::BTreeMap;
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt::Display, ptr::NonNull};
-use std::collections::BTreeMap;
+use log::debug;
 
 use usb_if::{
     descriptor::{
@@ -37,7 +38,7 @@ impl USBHost {
         self.raw.init().await
     }
 
-    pub async fn device_list(&self) -> Result<impl Iterator<Item = DeviceInfo>, USBError> {
+    pub async fn device_list(&mut self) -> Result<impl Iterator<Item = DeviceInfo>, USBError> {
         let devices = self.raw.device_list().await?;
         let mut device_infos = Vec::with_capacity(devices.len());
         for device in devices {
@@ -76,7 +77,6 @@ impl DeviceInfo {
 
     pub async fn open(&mut self) -> Result<Device, USBError> {
         let mut device = self.raw.open().await?;
-        device.set_configuration(1).await?; // Default to configuration 1
 
         let manufacturer_string = match self.descriptor.manufacturer_string_index {
             Some(index) => device.string_descriptor(index.get(), 0).await?,
@@ -92,6 +92,14 @@ impl DeviceInfo {
             Some(index) => device.string_descriptor(index.get(), 0).await?,
             None => String::new(),
         };
+
+        let mut config_value = device.get_configuration().await?;
+        if config_value == 0 {
+            debug!("Setting configuration 1");
+            device.set_configuration(1).await?; // Reset to configuration 0
+            config_value = 1;
+        }
+        debug!("Current configuration: {config_value}");
 
         Ok(Device {
             descriptor: self.descriptor.clone(),
@@ -179,6 +187,21 @@ impl Device {
                         }
                     }
                 }
+            }
+        }
+        Err(USBError::NotFound)
+    }
+
+    pub async fn current_configuration_descriptor(
+        &mut self,
+    ) -> Result<ConfigurationDescriptor, USBError> {
+        let value = self.raw.get_configuration().await?;
+        if value == 0 {
+            return Err(USBError::NotFound);
+        }
+        for config in &self.configurations {
+            if config.configuration_value == value {
+                return Ok(config.clone());
             }
         }
         Err(USBError::NotFound)

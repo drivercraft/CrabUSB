@@ -43,15 +43,12 @@ pub struct Device {
 }
 
 pub struct DeviceInfo {
-    device_desc: DeviceDescriptor,
     device: Option<Device>,
 }
 
 impl DeviceInfo {
     pub(crate) fn new(device: Device) -> Self {
-        let device_desc = device.desc.clone().unwrap();
         Self {
-            device_desc,
             device: Some(device),
         }
     }
@@ -73,7 +70,7 @@ impl usb_if::host::DeviceInfo for DeviceInfo {
     fn descriptor(
         &self,
     ) -> futures::future::LocalBoxFuture<'_, Result<DeviceDescriptor, USBError>> {
-        async { Ok(self.device_desc.clone()) }.boxed_local()
+        async { Ok(self.device.as_ref().unwrap().desc.clone().unwrap()) }.boxed_local()
     }
 
     fn configuration_descriptor(
@@ -166,12 +163,6 @@ impl usb_if::host::Device for Device {
         .boxed_local()
     }
 
-    // fn configuration_descriptor(
-    //     &mut self,
-    // ) -> futures::future::LocalBoxFuture<'_, Result<Vec<ConfigurationDescriptor>, USBError>> {
-    //     async { Ok(self.config_desc.to_vec()) }.boxed_local()
-    // }
-
     fn string_descriptor(
         &mut self,
         index: u8,
@@ -223,14 +214,13 @@ impl Device {
 
         trace!("Max packet size: {max_packet_size}");
         self.set_ep_packet_size(Dci::CTRL, max_packet_size).await?;
-
-        // let desc = self.descriptor().await?;
-        // for i in 0..desc.num_configurations {
-        //     let config = self.read_configuration_descriptor(i).await?;
-        //     let parsed_config = ConfigurationDescriptor::parse(&config)
-        //         .ok_or(USBError::Other("config descriptor parse err".into()))?;
-        //     self.config_desc.push(parsed_config);
-        // }
+        let desc = self.descriptor().await?;
+        for i in 0..desc.num_configurations {
+            let config = self.read_configuration_descriptor(i).await?;
+            let parsed_config = ConfigurationDescriptor::parse(&config)
+                .ok_or(USBError::Other("config descriptor parse err".into()))?;
+            self.config_desc.push(parsed_config);
+        }
 
         Ok(())
     }

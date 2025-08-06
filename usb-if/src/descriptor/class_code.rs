@@ -1,62 +1,62 @@
 /// USB Device Class Codes as defined by USB-IF
 /// https://www.usb.org/defined-class-codes
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ClassCode(pub u8);
+pub struct BaseClass(pub u8);
 
-impl ClassCode {
+impl BaseClass {
     /// Use class information in the Interface Descriptors
-    pub const USE_INTERFACE: ClassCode = ClassCode(0x00);
+    pub const USE_INTERFACE: BaseClass = BaseClass(0x00);
     /// Audio device
-    pub const AUDIO: ClassCode = ClassCode(0x01);
+    pub const AUDIO: BaseClass = BaseClass(0x01);
     /// Communications and CDC Control
-    pub const COMMUNICATION: ClassCode = ClassCode(0x02);
+    pub const COMMUNICATION: BaseClass = BaseClass(0x02);
     /// HID (Human Interface Device)
-    pub const HID: ClassCode = ClassCode(0x03);
+    pub const HID: BaseClass = BaseClass(0x03);
     /// Physical device
-    pub const PHYSICAL: ClassCode = ClassCode(0x05);
+    pub const PHYSICAL: BaseClass = BaseClass(0x05);
     /// Still Imaging device
-    pub const STILL_IMAGING: ClassCode = ClassCode(0x06);
+    pub const STILL_IMAGING: BaseClass = BaseClass(0x06);
     /// Printer device
-    pub const PRINTER: ClassCode = ClassCode(0x07);
+    pub const PRINTER: BaseClass = BaseClass(0x07);
     /// Mass Storage device
-    pub const MASS_STORAGE: ClassCode = ClassCode(0x08);
+    pub const MASS_STORAGE: BaseClass = BaseClass(0x08);
     /// Hub device
-    pub const HUB: ClassCode = ClassCode(0x09);
+    pub const HUB: BaseClass = BaseClass(0x09);
     /// CDC-Data
-    pub const CDC_DATA: ClassCode = ClassCode(0x0A);
+    pub const CDC_DATA: BaseClass = BaseClass(0x0A);
     /// Smart Card device
-    pub const SMART_CARD: ClassCode = ClassCode(0x0B);
+    pub const SMART_CARD: BaseClass = BaseClass(0x0B);
     /// Content Security device
-    pub const CONTENT_SECURITY: ClassCode = ClassCode(0x0D);
+    pub const CONTENT_SECURITY: BaseClass = BaseClass(0x0D);
     /// Video device
-    pub const VIDEO: ClassCode = ClassCode(0x0E);
+    pub const VIDEO: BaseClass = BaseClass(0x0E);
     /// Personal Healthcare device
-    pub const PERSONAL_HEALTHCARE: ClassCode = ClassCode(0x0F);
+    pub const PERSONAL_HEALTHCARE: BaseClass = BaseClass(0x0F);
     /// Audio/Video Devices
-    pub const AUDIO_VIDEO: ClassCode = ClassCode(0x10);
+    pub const AUDIO_VIDEO: BaseClass = BaseClass(0x10);
     /// Billboard Device Class
-    pub const BILLBOARD: ClassCode = ClassCode(0x11);
+    pub const BILLBOARD: BaseClass = BaseClass(0x11);
     /// USB Type-C Bridge Class
-    pub const TYPE_C_BRIDGE: ClassCode = ClassCode(0x12);
+    pub const TYPE_C_BRIDGE: BaseClass = BaseClass(0x12);
     /// USB Bulk Display Protocol Device Class
-    pub const BULK_DISPLAY_PROTOCOL: ClassCode = ClassCode(0x13);
+    pub const BULK_DISPLAY_PROTOCOL: BaseClass = BaseClass(0x13);
     /// MCTP over USB Protocol Endpoint Device Class
-    pub const MCTP_OVER_USB: ClassCode = ClassCode(0x14);
+    pub const MCTP_OVER_USB: BaseClass = BaseClass(0x14);
     /// I3C Device Class
-    pub const I3C: ClassCode = ClassCode(0x3C);
+    pub const I3C: BaseClass = BaseClass(0x3C);
     /// Diagnostic Device
-    pub const DIAGNOSTIC: ClassCode = ClassCode(0xDC);
+    pub const DIAGNOSTIC: BaseClass = BaseClass(0xDC);
     /// Wireless Controller
-    pub const WIRELESS: ClassCode = ClassCode(0xE0);
+    pub const WIRELESS: BaseClass = BaseClass(0xE0);
     /// Miscellaneous
-    pub const MISCELLANEOUS: ClassCode = ClassCode(0xEF);
+    pub const MISCELLANEOUS: BaseClass = BaseClass(0xEF);
     /// Application Specific
-    pub const APPLICATION: ClassCode = ClassCode(0xFE);
+    pub const APPLICATION: BaseClass = BaseClass(0xFE);
     /// Vendor Specific
-    pub const VENDOR: ClassCode = ClassCode(0xFF);
+    pub const VENDOR: BaseClass = BaseClass(0xFF);
 }
 
-impl core::fmt::Debug for ClassCode {
+impl core::fmt::Debug for BaseClass {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple(match self.0 {
             0x00 => "USE_INTERFACE",
@@ -91,14 +91,16 @@ impl core::fmt::Debug for ClassCode {
     }
 }
 
-impl From<u8> for ClassCode {
+impl From<u8> for BaseClass {
     fn from(value: u8) -> Self {
         Self(value)
     }
 }
 
-impl From<ClassCode> for u8 {
-    fn from(class_code: ClassCode) -> Self {
+impl From<BaseClass> for u8 {
+    fn from(class_code: BaseClass) -> Self {
         class_code.0
     }
 }
+
+pub struct SubClass(pub u8);

@@ -47,8 +47,8 @@ impl From<DescriptorType> for u8 {
 #[derive(Debug, Clone)]
 pub struct DeviceDescriptor {
     pub usb_version: u16,
-    pub class: ClassCode,
-    pub subclass: ClassCode,
+    pub class: BaseClass,
+    pub subclass: u8,
     pub protocol: u8,
     pub max_packet_size_0: u8,
     pub vendor_id: u16,
@@ -72,8 +72,8 @@ impl DeviceDescriptor {
 pub struct InterfaceDescriptor {
     pub interface_number: u8,
     pub alternate_setting: u8,
-    pub class: ClassCode,
-    pub subclass: ClassCode,
+    pub class: BaseClass,
+    pub subclass: u8,
     pub protocol: u8,
     pub string_index: Option<NonZero<u8>>,
     pub string: Option<String>,

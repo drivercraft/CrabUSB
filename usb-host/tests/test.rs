@@ -24,7 +24,6 @@ mod tests {
     use pcie::*;
     use usb_if::{
         descriptor::{ConfigurationDescriptor, EndpointType},
-        host::Controller,
         transfer::Direction,
     };
 
@@ -59,7 +58,7 @@ mod tests {
 
                 let mut interface_desc = None;
                 let mut config_desc: Option<ConfigurationDescriptor> = None;
-                for config in device_info.configuration_descriptors().await.unwrap() {
+                for config in &device_info.configurations {
                     info!("config: {:?}", config.configuration_value);
 
                     for interface in &config.interfaces {

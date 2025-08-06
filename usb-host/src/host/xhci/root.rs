@@ -491,10 +491,7 @@ impl RootHub {
             let ctx = root.dev_list.new_ctx(slot_id, is_64)?;
             let device = Device::new(slot_id, self, ctx, (port_idx + 1).into())?;
             device.ctrl_ep.listen(&mut root);
-            // {
-            //     let ep = device.ctrl_ep.lock();
-            //     root.litsen_transfer(&ep.ring);
-            // }
+
             device
         };
 

@@ -1,8 +1,8 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
-use futures::{FutureExt, future::LocalBoxFuture};
+use futures::future::LocalBoxFuture;
 
 use crate::{
-    descriptor::{ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor},
+    descriptor::{ConfigurationDescriptor, DeviceDescriptor},
     err::TransferError,
     transfer::{Recipient, Request, RequestType, wait::Waiter},
 };
