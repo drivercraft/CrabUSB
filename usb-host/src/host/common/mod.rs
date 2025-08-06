@@ -229,7 +229,7 @@ impl Interface {
 }
 
 pub struct EndpointBulkIn {
-    descriptor: EndpointDescriptor,
+    pub descriptor: EndpointDescriptor,
     raw: Box<dyn usb_if::host::EndpointBulkIn>,
 }
 
@@ -240,7 +240,7 @@ impl EndpointBulkIn {
 }
 
 pub struct EndpointBulkOut {
-    descriptor: EndpointDescriptor,
+    pub descriptor: EndpointDescriptor,
     raw: Box<dyn usb_if::host::EndpointBulkOut>,
 }
 
@@ -251,7 +251,7 @@ impl EndpointBulkOut {
 }
 
 pub struct EndpointInterruptIn {
-    descriptor: EndpointDescriptor,
+    pub descriptor: EndpointDescriptor,
     raw: Box<dyn usb_if::host::EndpointInterruptIn>,
 }
 
@@ -262,7 +262,7 @@ impl EndpointInterruptIn {
 }
 
 pub struct EndpointInterruptOut {
-    descriptor: EndpointDescriptor,
+    pub descriptor: EndpointDescriptor,
     raw: Box<dyn usb_if::host::EndpointInterruptOut>,
 }
 impl EndpointInterruptOut {
