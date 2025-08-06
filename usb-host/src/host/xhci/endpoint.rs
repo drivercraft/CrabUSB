@@ -1,15 +1,14 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 
 use dma_api::{DSlice, DSliceMut};
-use futures::{FutureExt, future::BoxFuture};
 use log::trace;
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
     descriptor::{self, EndpointDescriptor, EndpointType},
     err::TransferError,
-    host::{ControlSetup, ResultTransfer, Transfer},
-    transfer::{BmRequestType, Direction},
+    host::{ControlSetup, ResultTransfer},
+    transfer::{BmRequestType, Direction, wait::WaitOnReady},
 };
 use xhci::{
     registers::doorbell,
@@ -19,7 +18,7 @@ use xhci::{
 use crate::{
     BusAddr,
     endpoint::{direction, kind},
-    err::{ConvertXhciError, USBError},
+    err::USBError,
     xhci::{
         def::{Dci, DirectionExt},
         device::DeviceState,
@@ -67,36 +66,20 @@ impl EndpointRaw {
 
         self.device.doorbell(bell);
 
-        let fur: usb_if::transfer::wait::Waiter<'a, xhci::ring::trb::event::TransferEvent> =
-            unsafe { self.device.root.try_wait_for_transfer(trb_ptr).unwrap() };
-
-        let fur = async move {
-            let ret = fur.await;
-            match ret.completion_code() {
-                Ok(code) => {
-                    code.to_result()?;
-                }
-                Err(_e) => return Err(TransferError::Other("Transfer failed".into())),
-            }
-
-            if buff_len > 0 {
-                let data_slice =
-                    unsafe { core::slice::from_raw_parts_mut(buff_addr as *mut u8, buff_len) };
-
-                let dm = DSliceMut::from(
-                    data_slice,
-                    match direction {
-                        usb_if::transfer::Direction::Out => dma_api::Direction::ToDevice,
-                        usb_if::transfer::Direction::In => dma_api::Direction::FromDevice,
+        Ok(unsafe {
+            self.device
+                .root
+                .try_wait_for_transfer(
+                    trb_ptr,
+                    WaitOnReady {
+                        on_ready,
+                        addr: buff_addr,
+                        len: buff_len,
+                        direction,
                     },
-                );
-                dm.preper_read_all();
-            }
-            Ok(ret.trb_transfer_length() as usize)
-        }
-        .boxed();
-        let box_fur = Box::pin(FutureTransfer { fut: fur });
-        Ok(box_fur)
+                )
+                .unwrap()
+        })
     }
 
     pub fn bus_addr(&self) -> BusAddr {
@@ -104,38 +87,21 @@ impl EndpointRaw {
     }
 }
 
-pub struct FutureTransfer<'a> {
-    fut: BoxFuture<'a, Result<usize, TransferError>>,
-}
+fn on_ready(addr: usize, len: usize, direction: usb_if::transfer::Direction) {
+    trace!("Transfer completed: addr={addr:#x}, len={len}");
+    if len > 0 {
+        let data_slice = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
 
-impl Future for FutureTransfer<'_> {
-    type Output = Result<usize, TransferError>;
-
-    fn poll(
-        mut self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<Self::Output> {
-        self.fut.as_mut().poll(cx)
+        let dm = DSliceMut::from(
+            data_slice,
+            match direction {
+                usb_if::transfer::Direction::Out => dma_api::Direction::ToDevice,
+                usb_if::transfer::Direction::In => dma_api::Direction::FromDevice,
+            },
+        );
+        dm.preper_read_all();
     }
 }
-
-pub struct TransferWait<'a> {
-    fut: BoxFuture<'a, Result<usize, TransferError>>,
-}
-
-impl Future for TransferWait<'_> {
-    type Output = Result<usize, TransferError>;
-
-    fn poll(
-        mut self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<Self::Output> {
-        self.fut.as_mut().poll(cx)
-    }
-}
-
-impl<'a> Transfer<'a> for FutureTransfer<'a> {}
-impl<'a> Transfer<'a> for TransferWait<'a> {}
 
 pub(crate) trait EndpointDescriptorExt {
     fn endpoint_type(&self) -> xhci::context::EndpointType;

@@ -1,5 +1,3 @@
-use core::pin::Pin;
-
 use alloc::{boxed::Box, vec::Vec};
 use futures::{FutureExt, future::LocalBoxFuture};
 
@@ -8,7 +6,7 @@ use crate::{
         ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor, InterfaceDescriptor,
     },
     err::TransferError,
-    transfer::{Recipient, Request, RequestType},
+    transfer::{Recipient, Request, RequestType, wait::Waiter},
 };
 
 pub trait Controller: Send + 'static {
@@ -98,8 +96,9 @@ pub trait EndpointInterruptOut: TEndpint {
     fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a>;
 }
 
-pub type BoxTransfer<'a> = Pin<Box<dyn Transfer<'a> + Send>>;
-pub type ResultTransfer<'a> = Result<BoxTransfer<'a>, TransferError>;
+// pub type BoxTransfer<'a> = Pin<Box<dyn Transfer<'a> + Send>>;
+pub type TransferFuture<'a> = Waiter<'a, Result<usize, TransferError>>;
+pub type ResultTransfer<'a> = Result<TransferFuture<'a>, TransferError>;
 
 pub trait Transfer<'a>: Future<Output = Result<usize, TransferError>> + Send + 'a {}
 

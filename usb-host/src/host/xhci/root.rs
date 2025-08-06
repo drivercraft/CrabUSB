@@ -9,12 +9,12 @@ use core::{
 use alloc::sync::Arc;
 use log::{debug, info, trace};
 use mbarrier::wmb;
-use usb_if::err::TransferError;
+use usb_if::{err::TransferError, transfer::wait::WaitOnReady};
 use xhci::{
     registers::doorbell,
     ring::trb::{
         command,
-        event::{Allowed, CommandCompletion, TransferEvent},
+        event::{Allowed, CommandCompletion},
     },
 };
 
@@ -41,7 +41,7 @@ pub struct Root {
     pub cmd: Ring,
     pub scratchpad_buf_arr: Option<ScratchpadBufferArray>,
 
-    wait_transfer: WaitMap<u64, TransferEvent>,
+    wait_transfer: WaitMap<u64, core::result::Result<usize, TransferError>>,
     wait_cmd: WaitMap<u64, CommandCompletion>,
 }
 
@@ -248,8 +248,15 @@ impl Root {
                         let addr = c.trb_pointer();
                         trace!("[Transfer] << {allowed:?} @{addr:X}");
                         debug!("transfer event: {c:?}");
+                        let result = match c.completion_code() {
+                            Ok(code) => match code.to_result() {
+                                Ok(_) => Ok(c.trb_transfer_length() as usize),
+                                Err(e) => Err(e),
+                            },
+                            Err(_e) => Err(TransferError::Other("Transfer failed".into())),
+                        };
 
-                        self.wait_transfer.set_result(c.trb_pointer(), c)
+                        self.wait_transfer.set_result(c.trb_pointer(), result);
                     }
                     _ => {
                         debug!("unhandled event {allowed:?}");
@@ -292,7 +299,9 @@ impl Root {
             .doorbell
             .write_volatile_at(0, doorbell::Register::default());
 
-        self.wait_cmd.try_wait_for_result(trb_addr.raw()).unwrap()
+        self.wait_cmd
+            .try_wait_for_result(trb_addr.raw(), None)
+            .unwrap()
     }
 
     pub(crate) fn litsen_transfer(&mut self, ring: &Ring) {
@@ -497,9 +506,12 @@ impl RootHub {
     pub(crate) unsafe fn try_wait_for_transfer<'a>(
         &self,
         addr: BusAddr,
-    ) -> Option<Waiter<'a, TransferEvent>> {
+        on_ready: WaitOnReady,
+    ) -> Option<Waiter<'a, Result<usize, TransferError>>> {
         let inner = unsafe { self.force_use() };
-        inner.wait_transfer.try_wait_for_result(addr.raw())
+        inner
+            .wait_transfer
+            .try_wait_for_result(addr.raw(), Some(on_ready))
     }
 }
 

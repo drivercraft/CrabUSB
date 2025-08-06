@@ -10,7 +10,6 @@ mod _macros;
 
 pub mod err;
 mod host;
-mod sync;
 
 pub use futures::future::BoxFuture;
 pub use host::*;

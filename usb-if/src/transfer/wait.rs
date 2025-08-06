@@ -7,6 +7,8 @@ use core::{
 use alloc::{collections::btree_map::BTreeMap, sync::Arc};
 use futures::task::AtomicWaker;
 
+use crate::transfer::Direction;
+
 use super::sync::RwLock;
 
 pub struct WaitMap<K: Ord + Debug, T>(Arc<RwLock<WaitMapRaw<K, T>>>);
@@ -39,7 +41,11 @@ impl<K: Ord + Debug, T> WaitMap<K, T> {
         unsafe { self.0.force_use().set_result(id, result) };
     }
 
-    pub fn try_wait_for_result<'a>(&self, id: K) -> Option<Waiter<'a, T>> {
+    pub fn try_wait_for_result<'a>(
+        &self,
+        id: K,
+        on_ready: Option<WaitOnReady>,
+    ) -> Option<Waiter<'a, T>> {
         let g = self.0.read();
         let elem =
             g.0.get(&id)
@@ -54,6 +60,7 @@ impl<K: Ord + Debug, T> WaitMap<K, T> {
         Some(Waiter {
             elem: elem as *const Elem<T> as *mut Elem<T>,
             _marker: core::marker::PhantomData,
+            on_ready,
         })
     }
 }
@@ -62,6 +69,13 @@ impl<K: Ord + Debug, T> Clone for WaitMap<K, T> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
+}
+
+pub struct WaitOnReady {
+    pub on_ready: fn(addr: usize, len: usize, direction: Direction),
+    pub addr: usize,
+    pub len: usize,
+    pub direction: Direction,
 }
 
 pub struct WaitMapRaw<K: Ord, T>(BTreeMap<K, Elem<T>>);
@@ -114,6 +128,7 @@ impl<K: Ord + Debug, T> WaitMapRaw<K, T> {
 
 pub struct Waiter<'a, T> {
     elem: *mut Elem<T>,
+    on_ready: Option<WaitOnReady>,
     _marker: core::marker::PhantomData<&'a ()>,
 }
 
@@ -124,7 +139,7 @@ impl<T> Future for Waiter<'_, T> {
     type Output = T;
 
     fn poll(
-        self: core::pin::Pin<&mut Self>,
+        mut self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
         let elem = unsafe { &mut *self.as_ref().elem };
@@ -135,6 +150,9 @@ impl<T> Future for Waiter<'_, T> {
                 .take()
                 .expect("Waiter polled after result was set");
             elem.using.store(false, Ordering::Release);
+            if let Some(f) = self.as_mut().on_ready.take() {
+                (f.on_ready)(f.addr, f.len, f.direction);
+            }
             return Poll::Ready(result);
         }
         elem.waker.register(cx.waker());
