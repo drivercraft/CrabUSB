@@ -76,16 +76,21 @@ impl usb_if::host::DeviceInfo for DeviceInfo {
         async { Ok(self.device_desc.clone()) }.boxed_local()
     }
 
-    fn configuration_descriptors(
-        &self,
-    ) -> futures::future::LocalBoxFuture<'_, Result<Vec<ConfigurationDescriptor>, USBError>> {
-        async {
-            Ok(self
+    fn configuration_descriptor(
+        &mut self,
+        index: u8,
+    ) -> futures::future::LocalBoxFuture<'_, Result<ConfigurationDescriptor, USBError>> {
+        async move {
+            let config = self
                 .device
-                .as_ref()
-                .ok_or(USBError::Other("Device not initialized".into()))?
-                .config_desc
-                .to_vec())
+                .as_mut()
+                .ok_or(USBError::Other("Device not opened".into()))?
+                .read_configuration_descriptor(index)
+                .await?;
+
+            let parsed_config = ConfigurationDescriptor::parse(&config)
+                .ok_or(USBError::Other("config descriptor parse err".into()))?;
+            Ok(parsed_config)
         }
         .boxed_local()
     }
@@ -161,11 +166,11 @@ impl usb_if::host::Device for Device {
         .boxed_local()
     }
 
-    fn configuration_descriptors(
-        &mut self,
-    ) -> futures::future::LocalBoxFuture<'_, Result<Vec<ConfigurationDescriptor>, USBError>> {
-        async { Ok(self.config_desc.to_vec()) }.boxed_local()
-    }
+    // fn configuration_descriptor(
+    //     &mut self,
+    // ) -> futures::future::LocalBoxFuture<'_, Result<Vec<ConfigurationDescriptor>, USBError>> {
+    //     async { Ok(self.config_desc.to_vec()) }.boxed_local()
+    // }
 
     fn string_descriptor(
         &mut self,
@@ -219,13 +224,13 @@ impl Device {
         trace!("Max packet size: {max_packet_size}");
         self.set_ep_packet_size(Dci::CTRL, max_packet_size).await?;
 
-        let desc = self.descriptor().await?;
-        for i in 0..desc.num_configurations {
-            let config = self.read_configuration_descriptor(i).await?;
-            let parsed_config = ConfigurationDescriptor::parse(&config)
-                .ok_or(USBError::Other("config descriptor parse err".into()))?;
-            self.config_desc.push(parsed_config);
-        }
+        // let desc = self.descriptor().await?;
+        // for i in 0..desc.num_configurations {
+        //     let config = self.read_configuration_descriptor(i).await?;
+        //     let parsed_config = ConfigurationDescriptor::parse(&config)
+        //         .ok_or(USBError::Other("config descriptor parse err".into()))?;
+        //     self.config_desc.push(parsed_config);
+        // }
 
         Ok(())
     }

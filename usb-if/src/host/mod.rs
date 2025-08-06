@@ -18,9 +18,10 @@ pub trait Controller: Send + 'static {
 pub trait DeviceInfo: Send + 'static {
     fn open(&mut self) -> LocalBoxFuture<'_, Result<Box<dyn Device>, USBError>>;
     fn descriptor(&self) -> LocalBoxFuture<'_, Result<DeviceDescriptor, USBError>>;
-    fn configuration_descriptors(
-        &self,
-    ) -> LocalBoxFuture<'_, Result<Vec<ConfigurationDescriptor>, USBError>>;
+    fn configuration_descriptor(
+        &mut self,
+        index: u8,
+    ) -> LocalBoxFuture<'_, Result<ConfigurationDescriptor, USBError>>;
 }
 
 pub trait Device: Send + 'static {
@@ -31,30 +32,6 @@ pub trait Device: Send + 'static {
         interface: u8,
         alternate: u8,
     ) -> LocalBoxFuture<'_, Result<Box<dyn Interface>, USBError>>;
-
-    fn configuration_descriptors(
-        &mut self,
-    ) -> LocalBoxFuture<'_, Result<Vec<ConfigurationDescriptor>, USBError>>;
-
-    fn current_configuration_descriptor(
-        &mut self,
-    ) -> LocalBoxFuture<'_, Result<ConfigurationDescriptor, USBError>> {
-        async move {
-            let value = self.get_configuration().await?;
-            if value == 0 {
-                Err(USBError::ConfigurationNotSet)
-            } else {
-                let descs = self.configuration_descriptors().await?;
-                for desc in descs {
-                    if desc.configuration_value == value {
-                        return Ok(desc);
-                    }
-                }
-                Err(USBError::NotFound)
-            }
-        }
-        .boxed_local()
-    }
 
     fn string_descriptor(
         &mut self,

@@ -1,5 +1,3 @@
-use crate::{Controller, Host};
-
 macro_rules! usb {
     ($e:expr) => {
         unsafe {
@@ -7,7 +5,9 @@ macro_rules! usb {
             if res >= 0 {
                 Ok(res)
             } else {
-                Err(crate::err::USBError::Unknown)
+                Err(crate::err::USBError::Other(
+                    format!("libusb error: {:?}", res).into(),
+                ))
             }
         }
     };
@@ -20,34 +20,42 @@ mod device;
 pub(crate) mod err;
 
 pub use device::DeviceInfo;
+use futures::FutureExt;
+use usb_if::host::Controller;
 
 pub struct Libusb {
     ctx: context::Context,
 }
 
 impl Controller for Libusb {
-    type Device = device::DeviceInfo;
-
-    async fn init(&mut self) -> crate::err::Result {
-        Ok(())
+    fn init(&mut self) -> futures::future::LocalBoxFuture<'_, Result<(), usb_if::host::USBError>> {
+        async move { Ok(()) }.boxed_local()
     }
 
-    async fn test_cmd(&mut self) -> crate::err::Result {
-        Ok(())
+    fn device_list(
+        &self,
+    ) -> futures::future::LocalBoxFuture<
+        '_,
+        Result<Vec<Box<dyn usb_if::host::DeviceInfo>>, usb_if::host::USBError>,
+    > {
+        async move {
+            let list = self.ctx.device_list()?;
+            let devices = list
+                .map(|raw| Box::new(DeviceInfo::new(raw)) as Box<dyn usb_if::host::DeviceInfo>)
+                .collect();
+
+            Ok(devices)
+        }
+        .boxed_local()
     }
 
-    async fn probe(&mut self) -> crate::err::Result<Vec<Self::Device>> {
-        let ls = self.ctx.device_list()?;
-        Ok(ls.map(device::DeviceInfo::new).collect())
-    }
+    fn handle_event(&mut self) {}
 }
 
-impl Host<Libusb> {
-    pub fn new_libusb() -> Self {
+impl Libusb {
+    pub fn new() -> Self {
         Self {
-            ctrl: Libusb {
-                ctx: context::Context::new().expect("Failed to create libusb context"),
-            },
+            ctx: context::Context::new().expect("Failed to create libusb context"),
         }
     }
 }

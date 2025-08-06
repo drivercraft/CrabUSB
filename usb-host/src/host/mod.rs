@@ -1,5 +1,5 @@
-// #[cfg(feature = "libusb")]
-// pub mod libusb;
+#[cfg(feature = "libusb")]
+pub mod libusb;
 mod common;
 pub mod xhci;
 

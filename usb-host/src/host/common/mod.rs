@@ -1,8 +1,11 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt::Display, ptr::NonNull};
+use std::collections::BTreeMap;
 
 use usb_if::{
-    descriptor::{EndpointDescriptor, InterfaceDescriptor},
+    descriptor::{
+        ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor, InterfaceDescriptor,
+    },
     host::{Controller, ResultTransfer, USBError},
 };
 
@@ -22,17 +25,26 @@ impl USBHost {
         Self { raw: xhci }
     }
 
+    #[cfg(feature = "libusb")]
+    pub fn new_libusb() -> Self {
+        let libusb = crate::host::libusb::Libusb::new();
+        Self {
+            raw: Box::new(libusb),
+        }
+    }
+
     pub async fn init(&mut self) -> Result<(), USBError> {
         self.raw.init().await
     }
 
     pub async fn device_list(&self) -> Result<impl Iterator<Item = DeviceInfo>, USBError> {
-        Ok(self
-            .raw
-            .device_list()
-            .await?
-            .into_iter()
-            .map(DeviceInfo::from_box))
+        let devices = self.raw.device_list().await?;
+        let mut device_infos = Vec::with_capacity(devices.len());
+        for device in devices {
+            let device_info = DeviceInfo::from_box(device).await?;
+            device_infos.push(device_info);
+        }
+        Ok(device_infos.into_iter())
     }
 
     pub fn handle_event(&mut self) {
@@ -42,37 +54,48 @@ impl USBHost {
 
 pub struct DeviceInfo {
     raw: Box<dyn usb_if::host::DeviceInfo>,
+    pub descriptor: DeviceDescriptor,
+    pub configurations: Vec<ConfigurationDescriptor>,
 }
 
 impl DeviceInfo {
-    fn from_box(raw: Box<dyn usb_if::host::DeviceInfo>) -> Self {
-        DeviceInfo { raw }
+    async fn from_box(mut raw: Box<dyn usb_if::host::DeviceInfo>) -> Result<Self, USBError> {
+        let desc = raw.descriptor().await?;
+        let mut configurations = Vec::with_capacity(desc.num_configurations as usize);
+        for i in 0..desc.num_configurations {
+            let config_desc = raw.configuration_descriptor(i).await?;
+
+            configurations.push(config_desc);
+        }
+        Ok(DeviceInfo {
+            raw,
+            descriptor: desc,
+            configurations,
+        })
     }
 
     pub async fn open(&mut self) -> Result<Device, USBError> {
-        let desc = self.raw.descriptor().await?;
         let mut device = self.raw.open().await?;
         device.set_configuration(1).await?; // Default to configuration 1
-        let configurations = device.configuration_descriptors().await?;
 
-        let manufacturer_string = match desc.manufacturer_string_index {
+        let manufacturer_string = match self.descriptor.manufacturer_string_index {
             Some(index) => device.string_descriptor(index.get(), 0).await?,
             None => String::new(),
         };
 
-        let product_string = match desc.product_string_index {
+        let product_string = match self.descriptor.product_string_index {
             Some(index) => device.string_descriptor(index.get(), 0).await?,
             None => String::new(),
         };
 
-        let serial_number_string = match desc.serial_number_string_index {
+        let serial_number_string = match self.descriptor.serial_number_string_index {
             Some(index) => device.string_descriptor(index.get(), 0).await?,
             None => String::new(),
         };
 
         Ok(Device {
-            descriptor: desc,
-            configurations,
+            descriptor: self.descriptor.clone(),
+            configurations: self.configurations.clone(),
             raw: device,
             manufacturer_string,
             product_string,
@@ -84,10 +107,14 @@ impl DeviceInfo {
         self.raw.descriptor().await
     }
 
-    pub async fn configuration_descriptors(
-        &self,
-    ) -> Result<Vec<usb_if::descriptor::ConfigurationDescriptor>, USBError> {
-        self.raw.configuration_descriptors().await
+    pub fn interface_descriptors(&self) -> Vec<usb_if::descriptor::InterfaceDescriptor> {
+        let mut interfaces = BTreeMap::new();
+        for config in &self.configurations {
+            for iface in &config.interfaces {
+                interfaces.insert(iface.interface_number, iface.first_alt_setting());
+            }
+        }
+        interfaces.values().cloned().collect()
     }
 }
 

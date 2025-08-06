@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use crab_usb::Host;
+use crab_usb::USBHost;
 
 #[tokio::test]
 async fn test() {
@@ -9,12 +9,14 @@ async fn test() {
         .is_test(true)
         .init();
 
-    let mut host = Host::new_libusb();
-    let ls = host.probe().await.unwrap();
+    let mut host = USBHost::new_libusb();
+    let mut ls = host.device_list().await.unwrap();
 
-    println!("Found {} devices", ls.len());
+    for device in ls {
+        println!("Device: {:?}", device.descriptor().await.unwrap());
 
-    for device in &ls {
-        println!("Device: {:?}", device.descriptor());
+        for iface in device.interface_descriptors() {
+            println!("  Interface: {iface:?}",);
+        }
     }
 }
