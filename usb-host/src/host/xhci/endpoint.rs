@@ -67,7 +67,8 @@ impl EndpointRaw {
 
         self.device.doorbell(bell);
 
-        let fur = unsafe { self.device.root.try_wait_for_transfer(trb_ptr).unwrap() };
+        let fur: usb_if::transfer::wait::Waiter<'a, xhci::ring::trb::event::TransferEvent> =
+            unsafe { self.device.root.try_wait_for_transfer(trb_ptr).unwrap() };
 
         let fur = async move {
             let ret = fur.await;

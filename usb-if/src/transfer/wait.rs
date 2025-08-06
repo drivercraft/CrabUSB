@@ -39,7 +39,7 @@ impl<K: Ord + Debug, T> WaitMap<K, T> {
         unsafe { self.0.force_use().set_result(id, result) };
     }
 
-    pub fn try_wait_for_result(&self, id: K) -> Option<Waiter<T>> {
+    pub fn try_wait_for_result<'a>(&self, id: K) -> Option<Waiter<'a, T>> {
         let g = self.0.read();
         let elem =
             g.0.get(&id)
@@ -53,6 +53,7 @@ impl<K: Ord + Debug, T> WaitMap<K, T> {
         }
         Some(Waiter {
             elem: elem as *const Elem<T> as *mut Elem<T>,
+            _marker: core::marker::PhantomData,
         })
     }
 }
@@ -111,14 +112,15 @@ impl<K: Ord + Debug, T> WaitMapRaw<K, T> {
     }
 }
 
-pub struct Waiter<T> {
+pub struct Waiter<'a, T> {
     elem: *mut Elem<T>,
+    _marker: core::marker::PhantomData<&'a ()>,
 }
 
-unsafe impl<T> Send for Waiter<T> {}
-unsafe impl<T> Sync for Waiter<T> {}
+unsafe impl<T> Send for Waiter<'_, T> {}
+unsafe impl<T> Sync for Waiter<'_, T> {}
 
-impl<T> Future for Waiter<T> {
+impl<T> Future for Waiter<'_, T> {
     type Output = T;
 
     fn poll(

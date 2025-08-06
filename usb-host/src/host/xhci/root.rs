@@ -285,7 +285,7 @@ impl Root {
         }
     }
 
-    pub fn cmd_request(&mut self, trb: command::Allowed) -> Waiter<CommandCompletion> {
+    pub fn cmd_request<'a>(&mut self, trb: command::Allowed) -> Waiter<'a, CommandCompletion> {
         let trb_addr = self.cmd.enque_command(trb);
         wmb();
         self.reg
@@ -494,10 +494,10 @@ impl RootHub {
         Ok(info)
     }
 
-    pub(crate) unsafe fn try_wait_for_transfer(
+    pub(crate) unsafe fn try_wait_for_transfer<'a>(
         &self,
         addr: BusAddr,
-    ) -> Option<Waiter<TransferEvent>> {
+    ) -> Option<Waiter<'a, TransferEvent>> {
         let inner = unsafe { self.force_use() };
         inner.wait_transfer.try_wait_for_result(addr.raw())
     }
