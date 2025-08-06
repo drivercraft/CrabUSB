@@ -1,7 +1,7 @@
 use core::{num::NonZeroUsize, ptr::NonNull, time::Duration};
 
-use alloc::vec::Vec;
-use futures::task::AtomicWaker;
+use alloc::{boxed::Box, vec::Vec};
+use futures::{FutureExt, task::AtomicWaker};
 use log::*;
 use xhci::{
     ExtendedCapability,
@@ -20,9 +20,7 @@ mod reg;
 mod ring;
 mod root;
 
-use super::Controller;
 use crate::{
-    Host,
     err::*,
     sleep,
     xhci::{reg::XhciRegisters, root::RootHub},
@@ -38,41 +36,53 @@ pub struct Xhci {
 
 unsafe impl Send for Xhci {}
 
-impl Host<Xhci> {
-    pub fn new_xhci(reg_base: NonNull<u8>) -> Self {
-        Self::from(Xhci::new(reg_base))
-    }
-}
-
-impl Controller for Xhci {
-    async fn init(&mut self) -> Result {
-        // 4.2 Host Controller Initialization
-        self.init_ext_caps().await?;
-        // After Chip Hardware Reset6 wait until the Controller Not Ready (CNR) flag
-        // in the USBSTS is ‘0’ before writing any xHC Operational or Runtime
-        // registers.
-        self.chip_hardware_reset().await?;
-        // Program the Max Device Slots Enabled (MaxSlotsEn) field in the CONFIG
-        // register (5.4.7) to enable the device slots that system software is going to
-        // use.
-        let max_slots = self.setup_max_device_slots();
-        let root_hub = RootHub::new(max_slots as _, self.reg.clone())?;
-        root_hub.init()?;
-        self.root = Some(root_hub);
-        trace!("Root hub initialized with max slots: {max_slots}");
-        self.root()?.lock().enable_irq();
-        self.root()?.wait_for_running().await;
-        self.root()?.lock().reset_ports();
-        Ok(())
-    }
-
-    async fn test_cmd(&mut self) -> Result {
-        self.post_cmd(command::Allowed::Noop(command::Noop::new()))
-            .await?;
-        Ok(())
+impl usb_if::host::Controller for Xhci {
+    fn init(
+        &'_ mut self,
+    ) -> futures::future::LocalBoxFuture<'_, core::result::Result<(), usb_if::host::USBError>> {
+        async {
+            // 4.2 Host Controller Initialization
+            self.init_ext_caps().await?;
+            // After Chip Hardware Reset6 wait until the Controller Not Ready (CNR) flag
+            // in the USBSTS is ‘0’ before writing any xHC Operational or Runtime
+            // registers.
+            self.chip_hardware_reset().await?;
+            // Program the Max Device Slots Enabled (MaxSlotsEn) field in the CONFIG
+            // register (5.4.7) to enable the device slots that system software is going to
+            // use.
+            let max_slots = self.setup_max_device_slots();
+            let root_hub = RootHub::new(max_slots as _, self.reg.clone())?;
+            root_hub.init()?;
+            self.root = Some(root_hub);
+            trace!("Root hub initialized with max slots: {max_slots}");
+            self.root()?.lock().enable_irq();
+            self.root()?.wait_for_running().await;
+            self.root()?.lock().reset_ports();
+            Ok(())
+        }
+        .boxed_local()
     }
 
-    fn handle_irq(&mut self) {
+    fn device_list(
+        &'_ self,
+    ) -> futures::future::LocalBoxFuture<
+        '_,
+        core::result::Result<Vec<Box<dyn usb_if::host::DeviceInfo>>, usb_if::host::USBError>,
+    > {
+        async {
+            let mut slots = Vec::new();
+            let port_idx_list = self.port_idx_list();
+
+            for idx in port_idx_list {
+                let slot = self.root()?.new_device(idx).await?;
+                slots.push(Box::new(slot) as Box<dyn usb_if::host::DeviceInfo>);
+            }
+            Ok(slots)
+        }
+        .boxed_local()
+    }
+
+    fn handle_event(&mut self) {
         unsafe {
             let mut sts = self.reg.operational.usbsts.read_volatile();
             if sts.event_interrupt() {
@@ -101,28 +111,87 @@ impl Controller for Xhci {
             self.reg.operational.usbsts.write_volatile(sts);
         }
     }
-
-    async fn probe(&mut self) -> Result<Vec<Self::Device>> {
-        let mut slots = Vec::new();
-        let port_idx_list = self.port_idx_list();
-
-        for idx in port_idx_list {
-            let slot = self.root()?.new_device(idx).await?;
-            slots.push(slot);
-        }
-        Ok(slots)
-    }
-
-    type Device = device::Device;
 }
 
+// impl Controller for Xhci {
+//     async fn init(&mut self) -> Result {
+//         // 4.2 Host Controller Initialization
+//         self.init_ext_caps().await?;
+//         // After Chip Hardware Reset6 wait until the Controller Not Ready (CNR) flag
+//         // in the USBSTS is ‘0’ before writing any xHC Operational or Runtime
+//         // registers.
+//         self.chip_hardware_reset().await?;
+//         // Program the Max Device Slots Enabled (MaxSlotsEn) field in the CONFIG
+//         // register (5.4.7) to enable the device slots that system software is going to
+//         // use.
+//         let max_slots = self.setup_max_device_slots();
+//         let root_hub = RootHub::new(max_slots as _, self.reg.clone())?;
+//         root_hub.init()?;
+//         self.root = Some(root_hub);
+//         trace!("Root hub initialized with max slots: {max_slots}");
+//         self.root()?.lock().enable_irq();
+//         self.root()?.wait_for_running().await;
+//         self.root()?.lock().reset_ports();
+//         Ok(())
+//     }
+
+//     async fn test_cmd(&mut self) -> Result {
+//         self.post_cmd(command::Allowed::Noop(command::Noop::new()))
+//             .await?;
+//         Ok(())
+//     }
+
+//     fn handle_irq(&mut self) {
+//         unsafe {
+//             let mut sts = self.reg.operational.usbsts.read_volatile();
+//             if sts.event_interrupt() {
+//                 if let Some(root) = self.root.as_mut() {
+//                     root.force_use().handle_event();
+//                 } else {
+//                     warn!("[XHCI] Not initialized, cannot handle event");
+//                 }
+
+//                 sts.clear_event_interrupt();
+//             }
+//             if sts.port_change_detect() {
+//                 debug!("Port Change Detected");
+//                 if let Some(data) = self.port_wake.take() {
+//                     data.wake();
+//                 }
+
+//                 sts.clear_port_change_detect();
+//             }
+
+//             if sts.host_system_error() {
+//                 debug!("Host System Error");
+//                 sts.clear_host_system_error();
+//             }
+
+//             self.reg.operational.usbsts.write_volatile(sts);
+//         }
+//     }
+
+//     async fn probe(&mut self) -> Result<Vec<Self::Device>> {
+//         let mut slots = Vec::new();
+//         let port_idx_list = self.port_idx_list();
+
+//         for idx in port_idx_list {
+//             let slot = self.root()?.new_device(idx).await?;
+//             slots.push(slot);
+//         }
+//         Ok(slots)
+//     }
+
+//     type Device = device::Device;
+// }
+
 impl Xhci {
-    pub fn new(mmio_base: NonNull<u8>) -> Self {
-        Self {
+    pub fn new(mmio_base: NonNull<u8>) -> Box<Self> {
+        Box::new(Self {
             reg: XhciRegisters::new(mmio_base),
             root: None,
             port_wake: AtomicWaker::new(),
-        }
+        })
     }
 
     async fn chip_hardware_reset(&mut self) -> Result {
@@ -177,7 +246,8 @@ impl Xhci {
     }
 
     async fn post_cmd(&mut self, trb: command::Allowed) -> Result<CommandCompletion> {
-        self.root()?.post_cmd(trb).await
+        let res = self.root()?.post_cmd(trb).await?;
+        Ok(res)
     }
 
     fn extended_capabilities(&self) -> Vec<ExtendedCapability<MemMapper>> {

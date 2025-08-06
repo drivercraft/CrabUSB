@@ -20,14 +20,11 @@ impl Direction {
     const MASK: u8 = 0x80;
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum TransferError {}
-
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct BmRequestType {
     pub direction: Direction,
-    pub control_type: RequestType,
+    pub request_type: RequestType,
     pub recipient: Recipient,
 }
 
@@ -39,7 +36,7 @@ impl BmRequestType {
     ) -> BmRequestType {
         BmRequestType {
             direction,
-            control_type: transfer_type,
+            request_type: transfer_type,
             recipient,
         }
     }
@@ -47,7 +44,7 @@ impl BmRequestType {
 
 impl From<BmRequestType> for u8 {
     fn from(value: BmRequestType) -> Self {
-        ((value.direction as u8) << 7) | ((value.control_type as u8) << 5) | value.recipient as u8
+        ((value.direction as u8) << 7) | ((value.request_type as u8) << 5) | value.recipient as u8
     }
 }
 

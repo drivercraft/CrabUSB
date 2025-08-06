@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
-#[cfg(feature = "libusb")]
-pub mod libusb;
+// #[cfg(feature = "libusb")]
+// pub mod libusb;
 pub mod xhci;
 
 use crate::err::*;
@@ -9,62 +9,64 @@ pub use xhci::Xhci;
 
 define_int_type!(PortId, usize);
 
-pub struct Host<C>
-where
-    C: Controller,
-{
-    ctrl: C,
-}
 
-impl<C> From<C> for Host<C>
-where
-    C: Controller,
-{
-    fn from(value: C) -> Self {
-        Self { ctrl: value }
-    }
-}
 
-impl<T: Controller> Host<T> {
-    pub async fn init(&mut self) -> Result {
-        self.ctrl.init().await
-    }
+// pub struct Host<C>
+// where
+//     C: Controller,
+// {
+//     ctrl: C,
+// }
 
-    pub async fn test_cmd(&mut self) -> Result {
-        // for _ in 0..300 {
-        self.ctrl.test_cmd().await?;
-        // }
+// impl<C> From<C> for Host<C>
+// where
+//     C: Controller,
+// {
+//     fn from(value: C) -> Self {
+//         Self { ctrl: value }
+//     }
+// }
 
-        Ok(())
-    }
+// impl<T: Controller> Host<T> {
+//     pub async fn init(&mut self) -> Result {
+//         self.ctrl.init().await
+//     }
 
-    pub async fn probe(&mut self) -> Result<Vec<T::Device>> {
-        self.ctrl.probe().await
-    }
+//     pub async fn test_cmd(&mut self) -> Result {
+//         // for _ in 0..300 {
+//         self.ctrl.test_cmd().await?;
+//         // }
 
-    /// 中断处理
-    ///
-    /// # Safety
-    ///
-    /// 只能在中断函数中调用.
-    pub unsafe fn handle_irq(&mut self) {
-        self.ctrl.handle_irq();
-    }
-}
+//         Ok(())
+//     }
 
-pub trait Controller: Send {
-    type Device: IDevice;
+//     pub async fn probe(&mut self) -> Result<Vec<T::Device>> {
+//         self.ctrl.probe().await
+//     }
 
-    fn init(&mut self) -> impl Future<Output = Result> + Send;
+//     /// 中断处理
+//     ///
+//     /// # Safety
+//     ///
+//     /// 只能在中断函数中调用.
+//     pub unsafe fn handle_irq(&mut self) {
+//         self.ctrl.handle_irq();
+//     }
+// }
 
-    fn test_cmd(&mut self) -> impl Future<Output = Result> + Send;
+// pub trait Controller: Send {
+//     type Device: IDevice;
 
-    fn probe(&mut self) -> impl Future<Output = Result<Vec<Self::Device>>> + Send;
+//     fn init(&mut self) -> impl Future<Output = Result> + Send;
 
-    fn handle_irq(&mut self) {}
-}
+//     fn test_cmd(&mut self) -> impl Future<Output = Result> + Send;
 
-pub trait IDevice: Send {}
+//     fn probe(&mut self) -> impl Future<Output = Result<Vec<Self::Device>>> + Send;
+
+//     fn handle_irq(&mut self) {}
+// }
+
+// pub trait IDevice: Send {}
 
 pub mod endpoint {
     pub mod kind {

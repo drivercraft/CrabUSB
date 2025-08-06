@@ -9,24 +9,25 @@ use core::{
 use alloc::sync::Arc;
 use log::{debug, info, trace};
 use mbarrier::wmb;
+use usb_if::err::TransferError;
 use xhci::{
     registers::doorbell,
     ring::trb::{
         command,
-        event::{Allowed, CommandCompletion, CompletionCode, TransferEvent},
+        event::{Allowed, CommandCompletion, TransferEvent},
     },
 };
 
 use crate::{
     BusAddr, PortId,
-    err::USBError,
+    err::{ConvertXhciError, USBError},
     sleep,
     wait::{WaitMap, Waiter},
     xhci::{
         XhciRegisters,
         context::{DeviceContextList, ScratchpadBufferArray},
         def::SlotId,
-        device::Device,
+        device::{Device, DeviceInfo},
         event::EventRing,
         reg::DisableIrqGuard,
         ring::{Ring, TrbData},
@@ -430,18 +431,20 @@ impl RootHub {
             .write_volatile_at(0, doorbell::Register::default());
     }
 
-    pub async fn post_cmd(&self, trb: command::Allowed) -> Result<CommandCompletion, USBError> {
+    pub async fn post_cmd(
+        &self,
+        trb: command::Allowed,
+    ) -> Result<CommandCompletion, TransferError> {
         let fur = self.lock().cmd_request(trb);
         let res = fur.await;
         match res.completion_code() {
             Ok(code) => {
-                if matches!(code, CompletionCode::Success) {
-                    Ok(res)
-                } else {
-                    Err(USBError::TransferEventError(code))
-                }
+                code.to_result()?;
+                Ok(res)
             }
-            Err(_e) => Err(USBError::Unknown),
+            Err(_e) => Err(TransferError::Other(
+                alloc::format!("Command failed: {:#?}", res.completion_code()).into(),
+            )),
         }
     }
 
@@ -449,7 +452,7 @@ impl RootHub {
         unsafe { self.force_use().reg.clone() }
     }
 
-    async fn device_slot_assignment(&self) -> Result<SlotId, USBError> {
+    async fn device_slot_assignment(&self) -> Result<SlotId, TransferError> {
         // enable slot
         let result = self
             .post_cmd(command::Allowed::EnableSlot(command::EnableSlot::default()))
@@ -460,7 +463,7 @@ impl RootHub {
         Ok(slot_id.into())
     }
 
-    pub async fn new_device(&self, port_idx: usize) -> Result<Device, USBError> {
+    pub async fn new_device(&self, port_idx: usize) -> Result<DeviceInfo, USBError> {
         debug!("New device on port {port_idx}");
         let slot_id = self.device_slot_assignment().await?;
         debug!("Slot {slot_id} assigned");
@@ -478,12 +481,17 @@ impl RootHub {
             );
             let ctx = root.dev_list.new_ctx(slot_id, is_64)?;
             let device = Device::new(slot_id, self, ctx, (port_idx + 1).into())?;
-            root.litsen_transfer(&device.ctrl_ep.ring);
+            device.ctrl_ep.listen(&mut root);
+            // {
+            //     let ep = device.ctrl_ep.lock();
+            //     root.litsen_transfer(&ep.ring);
+            // }
             device
         };
 
         device.init().await?;
-        Ok(device)
+        let info = DeviceInfo::new(device);
+        Ok(info)
     }
 
     pub(crate) unsafe fn try_wait_for_transfer(

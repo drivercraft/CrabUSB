@@ -1,10 +1,17 @@
+use alloc::{
+    boxed::Box,
+    collections::btree_map::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::{
     num::NonZero,
     ops::{Deref, DerefMut},
 };
 
-use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc, vec::Vec};
 use dma_api::DSliceMut;
+use futures::FutureExt;
 use log::{debug, trace};
 use mbarrier::mb;
 use spin::Mutex;
@@ -13,7 +20,8 @@ use usb_if::{
         self, ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor,
         InterfaceDescriptor, decode_string_descriptor,
     },
-    transfer::Direction,
+    host::{ControlSetup, ResultTransfer},
+    transfer::{Direction, Recipient, Request, RequestType},
 };
 use xhci::{
     registers::doorbell,
@@ -21,16 +29,13 @@ use xhci::{
 };
 
 use crate::{
-    IDevice, PortId,
+    PortId,
     err::USBError,
-    standard::transfer::control::{
-        Control, ControlRaw, ControlType, Recipient, Request, RequestType,
-    },
     xhci::{
         append_port_to_route_string,
         context::ContextData,
         def::{Dci, DirectionExt, SlotId},
-        endpoint::{EndpointDescriptorExt, EndpointRaw},
+        endpoint::{EndpointControl, EndpointDescriptorExt, EndpointRaw},
         interface::Interface,
         parse_default_max_packet_size_from_port_speed,
         reg::XhciRegisters,
@@ -47,10 +52,64 @@ pub struct Device {
     current_config_value: Option<u8>,
     config_desc: Vec<ConfigurationDescriptor>,
     state: DeviceState,
-    pub(crate) ctrl_ep: EndpointRaw,
+    pub(crate) ctrl_ep: EndpointControl,
 }
 
-impl IDevice for Device {}
+pub struct DeviceInfo {
+    device_desc: DeviceDescriptor,
+    device: Option<Device>,
+}
+
+impl DeviceInfo {
+    pub(crate) fn new(device: Device) -> Self {
+        let device_desc = device.desc.clone().unwrap();
+        Self {
+            device_desc,
+            device: Some(device),
+        }
+    }
+}
+
+impl usb_if::host::DeviceInfo for DeviceInfo {
+    fn open(
+        &mut self,
+    ) -> futures::future::LocalBoxFuture<'_, Result<Box<dyn usb_if::host::Device>, USBError>> {
+        async {
+            self.device
+                .take()
+                .ok_or(USBError::Other("Device already opened".into()))
+                .map(|d| Box::new(d) as Box<dyn usb_if::host::Device>)
+        }
+        .boxed_local()
+    }
+
+    fn descriptor(
+        &self,
+    ) -> futures::future::LocalBoxFuture<'_, Result<DeviceDescriptor, USBError>> {
+        async { Ok(self.device_desc.clone()) }.boxed_local()
+    }
+}
+
+impl usb_if::host::Device for Device {
+    fn set_configuration(
+        &mut self,
+        configuration: u8,
+    ) -> futures::future::LocalBoxFuture<'_, Result<(), USBError>> {
+        todo!()
+    }
+
+    fn get_configuration(&self) -> futures::future::LocalBoxFuture<'_, Result<u8, USBError>> {
+        todo!()
+    }
+
+    fn claim_interface(
+        &mut self,
+        interface: u8,
+    ) -> futures::future::LocalBoxFuture<'_, Result<Box<dyn usb_if::host::Interface>, USBError>>
+    {
+        todo!()
+    }
+}
 
 impl Device {
     pub(crate) fn new(
@@ -60,7 +119,7 @@ impl Device {
         port_id: PortId,
     ) -> Result<Self, USBError> {
         let state = DeviceState::new(id, unsafe { root.reg() }, root.clone());
-        let ctrl_ep = EndpointRaw::new(Dci::CTRL, &state)?;
+        let ctrl_ep = EndpointControl::new(EndpointRaw::new(Dci::CTRL, &state)?);
 
         Ok(Self {
             id,
@@ -91,7 +150,8 @@ impl Device {
         let desc = self.descriptor().await?;
         for i in 0..desc.num_configurations {
             let config = self.read_configuration_descriptor(i).await?;
-            let parsed_config = ConfigurationDescriptor::parse(&config).ok_or(USBError::Unknown)?;
+            let parsed_config = ConfigurationDescriptor::parse(&config)
+                .ok_or(USBError::Other("config descriptor parse err".into()))?;
             self.config_desc.push(parsed_config);
         }
 
@@ -191,107 +251,137 @@ impl Device {
         Ok(())
     }
 
-    pub async fn control_in(&mut self, param: Control, buff: &mut [u8]) -> Result<usize, USBError> {
-        self.control_transfer(ControlRaw {
-            request_type: RequestType {
-                direction: Direction::In,
-                control_type: param.transfer_type,
-                recipient: param.recipient,
-            },
-            request: param.request,
-            index: param.index,
-            value: param.value,
-            data: if buff.is_empty() {
-                None
-            } else {
-                Some((buff.as_mut_ptr() as usize, buff.len() as _))
-            },
-        })
-        .await
-    }
-
-    pub async fn control_out(&mut self, param: Control, buff: &[u8]) -> Result<usize, USBError> {
-        self.control_transfer(ControlRaw {
-            request_type: RequestType {
-                direction: Direction::Out,
-                control_type: param.transfer_type,
-                recipient: param.recipient,
-            },
-            request: param.request,
-            index: param.index,
-            value: param.value,
-            data: if buff.is_empty() {
+    pub fn control_in<'a>(
+        &mut self,
+        param: ControlSetup,
+        buff: &'a mut [u8],
+    ) -> ResultTransfer<'a> {
+        // self.control_transfer(ControlRaw {
+        //     request_type: RequestType {
+        //         direction: Direction::In,
+        //         control_type: param.transfer_type,
+        //         recipient: param.recipient,
+        //     },
+        //     request: param.request,
+        //     index: param.index,
+        //     value: param.value,
+        //     data: if buff.is_empty() {
+        //         None
+        //     } else {
+        //         Some((buff.as_mut_ptr() as usize, buff.len() as _))
+        //     },
+        // })
+        // .await
+        self.control_transfer(
+            param,
+            Direction::In,
+            if buff.is_empty() {
                 None
             } else {
                 Some((buff.as_ptr() as usize, buff.len() as _))
             },
-        })
-        .await
+        )
     }
 
-    async fn control_transfer(&mut self, urb: ControlRaw) -> Result<usize, USBError> {
-        let mut trbs: Vec<transfer::Allowed> = Vec::new();
-        let mut setup = transfer::SetupStage::default();
-        let mut buff_data = 0;
-        let mut buff_len = 0;
+    pub fn control_out<'a>(&mut self, param: ControlSetup, buff: &'a [u8]) -> ResultTransfer<'a> {
+        self.control_transfer(
+            param,
+            Direction::Out,
+            if buff.is_empty() {
+                None
+            } else {
+                Some((buff.as_ptr() as usize, buff.len() as _))
+            },
+        )
 
-        setup
-            .set_request_type(urb.request_type.clone().into())
-            .set_request(urb.request.into())
-            .set_value(urb.value)
-            .set_index(urb.index)
-            .set_transfer_type(transfer::TransferType::No);
-
-        let mut data = None;
-
-        if let Some((addr, len)) = urb.data {
-            buff_data = addr;
-            buff_len = len as usize;
-            let data_slice =
-                unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };
-
-            let dm = DSliceMut::from(data_slice, dma_api::Direction::Bidirectional);
-
-            if matches!(urb.request_type.direction, Direction::Out) {
-                dm.confirm_write_all();
-            }
-
-            setup
-                .set_transfer_type(urb.request_type.direction.to_xhci_transfer_type())
-                .set_length(len);
-
-            let mut raw_data = transfer::DataStage::default();
-            raw_data
-                .set_data_buffer_pointer(dm.bus_addr() as _)
-                .set_trb_transfer_length(len as _)
-                .set_direction(urb.request_type.direction.to_xhci_direction());
-
-            data = Some(raw_data)
-        }
-
-        let mut status = transfer::StatusStage::default();
-        status.set_interrupt_on_completion();
-
-        if matches!(urb.request_type.direction, Direction::In) {
-            status.set_direction();
-        }
-
-        trbs.push(setup.into());
-        if let Some(data) = data {
-            trbs.push(data.into());
-        }
-        trbs.push(status.into());
-
-        self.ctrl_ep
-            .enque(
-                trbs.into_iter(),
-                urb.request_type.direction,
-                buff_data,
-                buff_len,
-            )
-            .await
+        // self.control_transfer(ControlRaw {
+        //     request_type: RequestType {
+        //         direction: Direction::Out,
+        //         control_type: param.transfer_type,
+        //         recipient: param.recipient,
+        //     },
+        //     request: param.request,
+        //     index: param.index,
+        //     value: param.value,
+        //     data: if buff.is_empty() {
+        //         None
+        //     } else {
+        //         Some((buff.as_ptr() as usize, buff.len() as _))
+        //     },
+        // })
+        // .await
     }
 
+    // async fn control_transfer(&mut self, urb: ControlRaw) -> Result<usize, USBError> {
+    //     let mut trbs: Vec<transfer::Allowed> = Vec::new();
+    //     let mut setup = transfer::SetupStage::default();
+    //     let mut buff_data = 0;
+    //     let mut buff_len = 0;
+
+    //     setup
+    //         .set_request_type(urb.request_type.clone().into())
+    //         .set_request(urb.request.into())
+    //         .set_value(urb.value)
+    //         .set_index(urb.index)
+    //         .set_transfer_type(transfer::TransferType::No);
+
+    //     let mut data = None;
+
+    //     if let Some((addr, len)) = urb.data {
+    //         buff_data = addr;
+    //         buff_len = len as usize;
+    //         let data_slice =
+    //             unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };
+
+    //         let dm = DSliceMut::from(data_slice, dma_api::Direction::Bidirectional);
+
+    //         if matches!(urb.request_type.direction, Direction::Out) {
+    //             dm.confirm_write_all();
+    //         }
+
+    //         setup
+    //             .set_transfer_type(urb.request_type.direction.to_xhci_transfer_type())
+    //             .set_length(len);
+
+    //         let mut raw_data = transfer::DataStage::default();
+    //         raw_data
+    //             .set_data_buffer_pointer(dm.bus_addr() as _)
+    //             .set_trb_transfer_length(len as _)
+    //             .set_direction(urb.request_type.direction.to_xhci_direction());
+
+    //         data = Some(raw_data)
+    //     }
+
+    //     let mut status = transfer::StatusStage::default();
+    //     status.set_interrupt_on_completion();
+
+    //     if matches!(urb.request_type.direction, Direction::In) {
+    //         status.set_direction();
+    //     }
+
+    //     trbs.push(setup.into());
+    //     if let Some(data) = data {
+    //         trbs.push(data.into());
+    //     }
+    //     trbs.push(status.into());
+
+    //     self.ctrl_ep
+    //         .enque(
+    //             trbs.into_iter(),
+    //             urb.request_type.direction,
+    //             buff_data,
+    //             buff_len,
+    //         )
+    //         .await
+    // }
+    fn control_transfer<'a>(
+        &mut self,
+        urb: ControlSetup,
+        dir: Direction,
+        buff: Option<(usize, u16)>,
+    ) -> ResultTransfer<'a> {
+        self.ctrl_ep.transfer(urb, dir, buff)
+    }
     async fn control_max_packet_size(&mut self) -> Result<u16, USBError> {
         trace!("control_fetch_control_point_packet_size");
 
@@ -344,7 +434,8 @@ impl Device {
         let mut buff = alloc::vec![0u8; DeviceDescriptor::LEN];
         self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut buff)
             .await?;
-        let desc = DeviceDescriptor::parse(&buff).ok_or(USBError::Unknown)?;
+        let desc = DeviceDescriptor::parse(&buff)
+            .ok_or(USBError::Other("device descriptor parse err".into()))?;
         self.desc = Some(desc.clone());
         Ok(desc)
     }
@@ -357,15 +448,22 @@ impl Device {
         buff: &mut [u8],
     ) -> Result<(), USBError> {
         self.control_in(
-            Control {
-                request: Request::GetDescriptor,
-                index: language_id,
-                value: ((desc_type.0 as u16) << 8) | desc_index as u16,
-                transfer_type: ControlType::Standard,
+            ControlSetup {
+                request_type: RequestType::Standard,
                 recipient: Recipient::Device,
+                request: Request::GetDescriptor,
+                value: ((desc_type.0 as u16) << 8) | desc_index as u16,
+                index: language_id,
             },
+            // Control {
+            //     request: Request::GetDescriptor,
+            //     index: language_id,
+            //     value: ((desc_type.0 as u16) << 8) | desc_index as u16,
+            //     transfer_type: ControlType::Standard,
+            //     recipient: Recipient::Device,
+            // },
             buff,
-        )
+        )?
         .await?;
         Ok(())
     }
@@ -378,7 +476,8 @@ impl Device {
         let mut data = alloc::vec![0u8; 256];
         self.get_descriptor(DescriptorType::STRING, index.get(), language_id, &mut data)
             .await?;
-        decode_string_descriptor(&data).map_err(|_| USBError::Unknown)
+        let res = decode_string_descriptor(&data).map_err(|e| USBError::Other(e.into()))?;
+        Ok(res)
     }
 
     async fn read_configuration_descriptor(&mut self, index: u8) -> Result<Vec<u8>, USBError> {
@@ -404,15 +503,22 @@ impl Device {
         trace!("Setting device configuration to {config_value}");
 
         self.control_out(
-            Control {
-                request: Request::SetConfiguration,
-                index: 0,
-                value: config_value as u16,
-                transfer_type: ControlType::Standard,
+            ControlSetup {
+                request_type: RequestType::Standard,
                 recipient: Recipient::Device,
+                request: Request::SetConfiguration,
+                value: config_value as u16,
+                index: 0,
             },
+            // Control {
+            //     request: Request::SetConfiguration,
+            //     index: 0,
+            //     value: config_value as u16,
+            //     transfer_type: ControlType::Standard,
+            //     recipient: Recipient::Device,
+            // },
             &[],
-        )
+        )?
         .await?;
 
         self.current_config_value = Some(config_value);
@@ -434,7 +540,7 @@ impl Device {
         trace!("Configuring endpoints for interface");
         let _ = self
             .current_config_value
-            .ok_or(USBError::ConfigurationNotSet)?;
+            .ok_or(USBError::Other("Configuration not set".into()))?;
         let ar = self.root.clone();
         let mut root = ar.lock();
         let mut max_dci = 1;
@@ -537,15 +643,21 @@ impl Device {
         });
 
         self.control_out(
-            Control {
-                request: Request::SetInterface,
-                index: interface as _,
-                value: alternate as _,
-                transfer_type: ControlType::Standard,
+            ControlSetup {
+                request_type: RequestType::Standard,
                 recipient: Recipient::Interface,
+                request: usb_if::transfer::Request::SetInterface,
+                value: interface as _,
+                index: alternate as _,
             },
+            //     request: Request::SetInterface,
+            //     index: interface as _,
+            //     value: alternate as _,
+            //     transfer_type: ControlType::Standard,
+            //     recipient: Recipient::Interface,
+            // },
             &[],
-        )
+        )?
         .await?;
         debug!("Interface {interface} set successfully");
 
