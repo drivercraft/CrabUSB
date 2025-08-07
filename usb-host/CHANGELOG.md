@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.2.0...crab-usb-v0.2.1) - 2025-08-07
+
+### Added
+
+- libusb transfer ok
+
+### Other
+
+- update
+- fmt code
+
 ## [0.2.0](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.1.3...crab-usb-v0.2.0) - 2025-08-05
 
 ### Other
