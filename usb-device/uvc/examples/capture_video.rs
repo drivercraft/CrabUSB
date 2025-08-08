@@ -86,12 +86,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 尝试设置对比度（如果失败也继续）
-    if let Err(e) = uvc
-        .send_control_command(VideoControlEvent::ContrastChanged(50))
-        .await
-    {
-        warn!("Failed to set contrast: {:?}", e);
-    }
+    // if let Err(e) = uvc
+    //     .send_control_command(VideoControlEvent::ContrastChanged(50))
+    //     .await
+    // {
+    //     warn!("Failed to set contrast: {:?}", e);
+    // }
 
     let mut frame_count = 0;
     let start_time = std::time::Instant::now();
