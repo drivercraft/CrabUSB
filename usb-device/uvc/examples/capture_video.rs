@@ -1,6 +1,6 @@
 use crab_usb::USBHost;
 use env_logger;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use std::{hint::spin_loop, sync::Arc, thread, time::Duration};
 use tokio::time;
 use usb_uvc::{UvcDevice, UvcDeviceState, VideoControlEvent, frame};
@@ -103,16 +103,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let running_clone = running.clone();
+
+    let mut last_err = String::new();
+
     let handle = tokio::spawn(async move {
         // 处理设备事件
         while running_clone.load(std::sync::atomic::Ordering::Relaxed) {
             let data = stream.recv().await;
             match data {
                 Ok(frame) => {
-                    frame_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    for one in frame {
+                        frame_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        debug!("Received frame data of {} bytes", one.data.len());
+                    }
                 }
                 Err(e) => {
-                    warn!("Error receiving frame: {:?}", e);
+                    if e.to_string() != last_err {
+                        warn!("Error receiving frame: {:?}", e);
+                        last_err = e.to_string();
+                    }
                 }
             }
             ()

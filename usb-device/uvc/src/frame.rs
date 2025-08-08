@@ -135,7 +135,7 @@ impl FrameParser {
         };
 
         if hdr.has_err {
-            debug!(
+            trace!(
                 "UVC payload ERR set; dropping current buffer ({} bytes)",
                 self.buffer.len()
             );
@@ -146,16 +146,17 @@ impl FrameParser {
         }
 
         // FID 翻转表示新帧开始；若上一个未完成，直接丢弃以对齐
-        if let Some(last) = self.last_fid {
-            if last != hdr.fid && !self.buffer.is_empty() {
-                trace!(
-                    "FID toggled ({} -> {}), discard {} bytes of incomplete frame",
-                    last,
-                    hdr.fid,
-                    self.buffer.len()
-                );
-                self.buffer.clear();
-            }
+        if let Some(last) = self.last_fid
+            && last != hdr.fid
+            && !self.buffer.is_empty()
+        {
+            trace!(
+                "FID toggled ({} -> {}), discard {} bytes of incomplete frame",
+                last,
+                hdr.fid,
+                self.buffer.len()
+            );
+            self.buffer.clear();
         }
         self.last_fid = Some(hdr.fid);
 

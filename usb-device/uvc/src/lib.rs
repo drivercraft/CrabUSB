@@ -129,6 +129,35 @@ pub enum VideoFormat {
     },
 }
 
+impl VideoFormat {
+    pub fn frame_bytes(&self) -> usize {
+        match self {
+            VideoFormat::Uncompressed {
+                width,
+                height,
+                format_type,
+                ..
+            } => {
+                let pixel_size = match format_type {
+                    UncompressedFormat::Yuy2 => 2,  // YUY2 每像素2字节
+                    UncompressedFormat::Nv12 => 1,  // NV12 每像素1字节 (平均)
+                    UncompressedFormat::Rgb24 => 3, // RGB24 每像素3字节
+                    UncompressedFormat::Rgb32 => 4, // RGB32 每像素4字节
+                };
+                (*width as usize) * (*height as usize) * pixel_size
+            }
+            VideoFormat::Mjpeg { width, height, .. } => {
+                // MJPEG 压缩后大小不定，这里返回一个估算值（假设压缩比为10:1）
+                ((*width as usize) * (*height as usize) * 3) / 10
+            }
+            VideoFormat::H264 { width, height, .. } => {
+                // H.264 压缩后大小不定，这里返回一个估算值（假设压缩比为20:1）
+                ((*width as usize) * (*height as usize) * 3) / 20
+            }
+        }
+    }
+}
+
 /// 未压缩视频格式类型
 #[derive(Debug, Clone, PartialEq)]
 pub enum UncompressedFormat {
@@ -927,7 +956,11 @@ impl UvcDevice {
 
         debug!("Starting video streaming");
         self.state = UvcDeviceState::Streaming;
-        Ok(VideoStream::new(ep, vs_interface))
+        Ok(VideoStream::new(
+            ep,
+            vs_interface,
+            self.current_format.clone().unwrap(),
+        ))
     }
 
     // /// 接收视频帧数据 (参考libusb计算ISO传输参数)
