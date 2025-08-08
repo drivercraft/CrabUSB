@@ -49,14 +49,6 @@ impl Interface {
 }
 
 impl usb_if::host::Interface for Interface {
-    // fn set_alt_setting(&mut self, _alt_setting: u8) -> Result<(), USBError> {
-    //     todo!()
-    // }
-
-    // fn get_alt_setting(&self) -> Result<u8, USBError> {
-    //     todo!()
-    // }
-
     fn control_in<'a>(
         &mut self,
         setup: usb_if::host::ControlSetup,
@@ -119,5 +111,13 @@ impl usb_if::host::Interface for Interface {
     ) -> Result<Box<dyn usb_if::host::EndpintIsoOut>, USBError> {
         let ep = self.endpoint::<kind::Isochronous, direction::Out>(endpoint)?;
         Ok(Box::new(ep))
+    }
+
+    fn set_alt_setting(&mut self, alt_setting: u8) -> Result<(), USBError> {
+        todo!()
+    }
+
+    fn get_alt_setting(&self) -> Result<u8, USBError> {
+        todo!()
     }
 }

@@ -5,12 +5,25 @@ use crate::host::libusb::{device::EPControl, endpoint::EndpointImpl};
 
 pub struct InterfaceImpl {
     raw: *mut libusb_device_handle,
+    num: u8,
+    alt_setting: u8,
     ctrl: EPControl,
 }
 
 impl InterfaceImpl {
-    pub fn new(raw: *mut libusb_device_handle, ctrl: EPControl) -> Self {
-        Self { raw, ctrl }
+    pub fn new(raw: *mut libusb_device_handle, ctrl: EPControl, num: u8, alt_setting: u8) -> Self {
+        Self {
+            raw,
+            ctrl,
+            num,
+            alt_setting,
+        }
+    }
+}
+
+impl Drop for InterfaceImpl {
+    fn drop(&mut self) {
+        usb!(libusb_release_interface(self.raw, self.num as _)).unwrap();
     }
 }
 
@@ -66,5 +79,18 @@ impl Interface for InterfaceImpl {
     }
     fn endpoint_iso_out(&mut self, endpoint: u8) -> Result<Box<dyn EndpintIsoOut>, USBError> {
         Ok(EndpointImpl::new(self.raw, endpoint, 24))
+    }
+
+    fn set_alt_setting(&mut self, alt_setting: u8) -> Result<(), USBError> {
+        usb!(libusb_set_interface_alt_setting(
+            self.raw,
+            self.num as _,
+            self.alt_setting as _
+        ))?;
+        Ok(())
+    }
+
+    fn get_alt_setting(&self) -> Result<u8, USBError> {
+        todo!()
     }
 }

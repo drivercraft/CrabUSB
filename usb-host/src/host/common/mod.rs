@@ -379,6 +379,10 @@ impl Display for Interface {
 }
 
 impl Interface {
+    pub fn set_alt_setting(&mut self, alt_setting: u8) -> Result<(), USBError> {
+        self.raw.set_alt_setting(alt_setting)
+    }
+
     pub fn class(&self) -> Class {
         self.descriptor.class()
     }

@@ -250,10 +250,12 @@ impl usb_if::host::Device for Device {
                 debug!("Interface {interface} set to alternate setting {alternate} successfully");
             }
 
-            Ok(
-                Box::new(InterfaceImpl::new(self.handle.raw(), self.ctrl.clone()))
-                    as Box<dyn usb_if::host::Interface>,
-            )
+            Ok(Box::new(InterfaceImpl::new(
+                self.handle.raw(),
+                self.ctrl.clone(),
+                interface,
+                alternate,
+            )) as Box<dyn usb_if::host::Interface>)
         }
         .boxed_local()
     }

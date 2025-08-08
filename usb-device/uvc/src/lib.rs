@@ -422,7 +422,7 @@ impl UvcDevice {
 
         // 提取总长度（小端格式）
         let total_length = u16::from_le_bytes([header_buffer[2], header_buffer[3]]) as usize;
-        debug!("Configuration descriptor total length: {total_length} bytes");
+        trace!("Configuration descriptor total length: {total_length} bytes");
 
         if total_length < 9 {
             return Err(USBError::Other(
@@ -459,7 +459,7 @@ impl UvcDevice {
         let mut found_vs_interface = false;
         let mut current_format_type: Option<CurrentFormatType> = None;
 
-        debug!(
+        trace!(
             "Parsing configuration descriptor of {} bytes for VS interface {}",
             config_data.len(),
             vs_interface_num
@@ -498,7 +498,7 @@ impl UvcDevice {
                             && interface_subclass == 2
                         {
                             found_vs_interface = true;
-                            debug!("Found target VS interface {vs_interface_num}");
+                            trace!("Found target VS interface {vs_interface_num}");
                         } else {
                             found_vs_interface = false;
                         }
@@ -508,17 +508,17 @@ impl UvcDevice {
                     // Class-specific interface descriptor
                     if found_vs_interface && length >= 3 {
                         let subtype = config_data[pos + 2];
-                        debug!(
+                        trace!(
                             "Found class-specific descriptor subtype 0x{subtype:02x} length {length}"
                         );
 
                         match subtype {
                             uvc_interface_subtypes::VS_FORMAT_MJPEG => {
-                                debug!("Parsing MJPEG format descriptor");
+                                trace!("Parsing MJPEG format descriptor");
                                 current_format_type = Some(CurrentFormatType::Mjpeg);
                             }
                             uvc_interface_subtypes::VS_FORMAT_UNCOMPRESSED => {
-                                debug!("Parsing uncompressed format descriptor");
+                                trace!("Parsing uncompressed format descriptor");
                                 if let Ok(format_type) = self
                                     .parse_uncompressed_format_type(&config_data[pos..pos + length])
                                 {
@@ -527,12 +527,12 @@ impl UvcDevice {
                                 }
                             }
                             uvc_interface_subtypes::VS_FORMAT_H264 => {
-                                debug!("Found H264 format descriptor");
+                                trace!("Found H264 format descriptor");
                                 current_format_type = Some(CurrentFormatType::H264);
                             }
                             uvc_interface_subtypes::VS_FRAME_MJPEG
                             | uvc_interface_subtypes::VS_FRAME_UNCOMPRESSED => {
-                                debug!("Parsing frame descriptor subtype 0x{subtype:02x}");
+                                trace!("Parsing frame descriptor subtype 0x{subtype:02x}");
                                 if let Some(ref format_type) = current_format_type
                                     && let Ok(frame_formats) = self.parse_frame_descriptor(
                                         &config_data[pos..pos + length],
@@ -556,7 +556,7 @@ impl UvcDevice {
             pos += length;
         }
 
-        debug!(
+        trace!(
             "Parsed {} video formats from VS interface descriptors",
             formats.len()
         );
@@ -625,7 +625,7 @@ impl UvcDevice {
                     },
                 };
 
-                debug!("Parsed frame format: {video_format:?}");
+                trace!("Parsed frame format: {video_format:?}");
                 Ok(vec![video_format])
             }
             Err(e) => Err(e),
