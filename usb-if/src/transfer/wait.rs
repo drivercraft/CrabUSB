@@ -56,7 +56,7 @@ impl<K: Ord + Debug, T> WaitMap<K, T> {
         }
         let g = unsafe { self.0.force_use() };
         let elem =
-            g.0.get_mut(&id)
+            g.0.get_mut(id)
                 .expect("WaitMap: try_wait_for_result called with unknown id");
         elem.result = None;
         elem.result_ok.store(false, Ordering::Release);

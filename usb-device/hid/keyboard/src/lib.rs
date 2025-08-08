@@ -206,8 +206,7 @@ impl KeyBoard {
         if current_modifiers != previous_modifiers {
             // 这里可以根据需要生成修饰键事件
             debug!(
-                "Modifier change: {:?} -> {:?}",
-                previous_modifiers, current_modifiers
+                "Modifier change: {previous_modifiers:?} -> {current_modifiers:?}"
             );
         }
 
@@ -225,26 +224,24 @@ impl KeyBoard {
 
         // 检测新按下的键
         for &scancode in &current_keys {
-            if !previous_keys.contains(&scancode) {
-                if let Some(key) = scancode_to_key(scancode) {
+            if !previous_keys.contains(&scancode)
+                && let Some(key) = scancode_to_key(scancode) {
                     events.push(KeyEvent::KeyDown {
                         key,
                         modifiers: current_modifiers,
                     });
                 }
-            }
         }
 
         // 检测释放的键
         for &scancode in &previous_keys {
-            if !current_keys.contains(&scancode) {
-                if let Some(key) = scancode_to_key(scancode) {
+            if !current_keys.contains(&scancode)
+                && let Some(key) = scancode_to_key(scancode) {
                     events.push(KeyEvent::KeyUp {
                         key,
                         modifiers: previous_modifiers,
                     });
                 }
-            }
         }
 
         events
@@ -294,11 +291,10 @@ impl KeyBoard {
     pub fn get_pressed_keys(&self) -> Vec<Key> {
         let mut keys = Vec::new();
         for &scancode in &self.previous_state[2..8] {
-            if scancode != 0 {
-                if let Some(key) = scancode_to_key(scancode) {
+            if scancode != 0
+                && let Some(key) = scancode_to_key(scancode) {
                     keys.push(key);
                 }
-            }
         }
         keys
     }
