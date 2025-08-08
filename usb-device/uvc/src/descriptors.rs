@@ -682,17 +682,15 @@ mod tests {
 
     #[test]
     fn test_fps_conversion() {
-        let parser = DescriptorParser::new();
-
         // 测试30fps
         let interval_30fps = 333333; // 100ns单位
-        assert_eq!(parser.interval_to_fps(interval_30fps), 30);
-        assert_eq!(parser.fps_to_interval(30), 333333);
+    assert_eq!(DescriptorParser::interval_to_fps(interval_30fps), 30);
+    assert_eq!(DescriptorParser::fps_to_interval(30), 333333);
 
         // 测试60fps
         let interval_60fps = 166666;
-        assert_eq!(parser.interval_to_fps(interval_60fps), 60);
-        assert_eq!(parser.fps_to_interval(60), 166666);
+    assert_eq!(DescriptorParser::interval_to_fps(interval_60fps), 60);
+    assert_eq!(DescriptorParser::fps_to_interval(60), 166666);
     }
 
     #[test]

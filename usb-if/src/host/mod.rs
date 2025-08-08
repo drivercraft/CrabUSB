@@ -109,7 +109,13 @@ pub enum USBError {
     #[error("Configuration not set")]
     ConfigurationNotSet,
     #[error("Other error: {0}")]
-    Other(#[from] Box<dyn core::error::Error>),
+    Other(String),
+}
+
+impl From<Box<dyn core::error::Error>> for USBError {
+    fn from(err: Box<dyn core::error::Error>) -> Self {
+        USBError::Other(alloc::format!("{err}"))
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -87,34 +87,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Format set successfully");
 
     // 开始流传输
-    device.start_streaming().await?;
+    let mut stream = device.start_streaming().await?;
     info!("Streaming started");
 
-    // 尝试几次简单的传输
-    for attempt in 0..10 {
-        match device.recv_frame().await {
-            Ok(Some(frame)) => {
-                info!(
-                    "SUCCESS! Received frame {}: {} bytes",
-                    frame.frame_number,
-                    frame.data.len()
-                );
-                // 成功接收到一帧就退出
-                break;
-            }
-            Ok(None) => {
-                debug!("Attempt {}: No frame received", attempt);
-            }
-            Err(e) => {
-                warn!("Attempt {}: Error: {:?}", attempt, e);
+    let frame = stream.recv().await?;
 
-                // 如果是队列满，等待一下
-                if format!("{:?}", e).contains("RequestQueueFull") {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                }
-            }
-        }
-    }
+    // // 尝试几次简单的传输
+    // for attempt in 0..10 {
+    //     match device.recv_frame().await {
+    //         Ok(Some(frame)) => {
+    //             info!(
+    //                 "SUCCESS! Received frame {}: {} bytes",
+    //                 frame.frame_number,
+    //                 frame.data.len()
+    //             );
+    //             // 成功接收到一帧就退出
+    //             break;
+    //         }
+    //         Ok(None) => {
+    //             debug!("Attempt {}: No frame received", attempt);
+    //         }
+    //         Err(e) => {
+    //             warn!("Attempt {}: Error: {:?}", attempt, e);
+
+    //             // 如果是队列满，等待一下
+    //             if format!("{:?}", e).contains("RequestQueueFull") {
+    //                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    //             }
+    //         }
+    //     }
+    // }
 
     info!("Test completed");
     Ok(())

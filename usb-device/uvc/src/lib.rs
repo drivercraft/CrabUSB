@@ -9,6 +9,13 @@ use usb_if::host::ControlSetup;
 pub mod descriptors;
 pub use descriptors::*;
 
+pub mod stream;
+// 帧解析模块（参考 libuvc 的包头解析与帧组装）
+pub mod frame;
+use frame::{FrameEvent, FrameParser};
+
+use crate::stream::VideoStream;
+
 // 保持向后兼容的常量别名
 pub mod uvc_requests {
     pub use crate::descriptors::request_codes::*;
@@ -207,16 +214,14 @@ struct StreamControl {
 pub struct UvcDevice {
     device: Device,
     video_control_interface: Interface,
-    video_streaming_interface: Option<Interface>,
-    video_streaming_interface_num: Option<u8>,
+    // video_streaming_interface: Option<Interface>,
+    video_streaming_interface_num: u8,
     processing_unit_id: Option<u8>, // 处理单元ID
-    ep_in: Option<EndpointIsoIn>,
+    // ep_in: Option<EndpointIsoIn>,
     current_format: Option<VideoFormat>,
     state: UvcDeviceState,
-    frame_buffer: Vec<u8>,
-    current_frame_number: u32,
     descriptor_parser: DescriptorParser, // 新增描述符解析器
-    last_frame_id: bool,                 // 用于检测帧边界
+    frame_parser: FrameParser,           // UVC 帧组装器
 }
 
 impl UvcDevice {
@@ -296,46 +301,46 @@ impl UvcDevice {
             .claim_interface(video_control_info.0, video_control_info.1)
             .await?;
 
-        let mut video_streaming_interface = None;
-        let mut ep_in = None;
+        // let mut video_streaming_interface = None;
+        // let mut ep_in = None;
 
-        if let Some((vs_interface_num, vs_alt_setting)) = video_streaming_info {
-            debug!("Using Video Streaming interface: {vs_interface_num} alt {vs_alt_setting}");
+        // if let Some((vs_interface_num, vs_alt_setting)) = video_streaming_info {
+        //     debug!("Using Video Streaming interface: {vs_interface_num} alt {vs_alt_setting}");
 
-            let mut vs_interface = device
-                .claim_interface(vs_interface_num, vs_alt_setting)
-                .await?;
+        //     let mut vs_interface = device
+        //         .claim_interface(vs_interface_num, vs_alt_setting)
+        //         .await?;
 
-            // 查找同步 IN 端点用于视频数据传输
-            for endpoint in vs_interface.descriptor.endpoints.clone().into_iter() {
-                match (endpoint.transfer_type, endpoint.direction) {
-                    (EndpointType::Isochronous, Direction::In) => {
-                        debug!("Found isochronous IN endpoint: {endpoint:?}");
-                        ep_in = Some(vs_interface.endpoint_iso_in(endpoint.address)?);
-                        break;
-                    }
-                    _ => {
-                        debug!("Ignoring endpoint: {endpoint:?}");
-                    }
-                }
-            }
+        //     // 查找同步 IN 端点用于视频数据传输
+        //     for endpoint in vs_interface.descriptor.endpoints.clone().into_iter() {
+        //         match (endpoint.transfer_type, endpoint.direction) {
+        //             (EndpointType::Isochronous, Direction::In) => {
+        //                 debug!("Found isochronous IN endpoint: {endpoint:?}");
+        //                 ep_in = Some(vs_interface.endpoint_iso_in(endpoint.address)?);
+        //                 break;
+        //             }
+        //             _ => {
+        //                 debug!("Ignoring endpoint: {endpoint:?}");
+        //             }
+        //         }
+        //     }
 
-            video_streaming_interface = Some(vs_interface);
-        }
+        //     video_streaming_interface = Some(vs_interface);
+        // }
 
         Ok(Self {
             device,
             video_control_interface,
-            video_streaming_interface,
-            video_streaming_interface_num: video_streaming_info.map(|(num, _)| num),
+            // video_streaming_interface,
+            video_streaming_interface_num: video_streaming_info
+                .map(|(num, _)| num)
+                .expect("Video Streaming interface number is required"),
             processing_unit_id: Some(1), // 通常处理单元ID为1，实际应用中应该解析描述符
-            ep_in,
+            // ep_in,
             current_format: None,
             state: UvcDeviceState::Configured,
-            frame_buffer: Vec::new(),
-            current_frame_number: 0,
             descriptor_parser: DescriptorParser::new(),
-            last_frame_id: false,
+            frame_parser: FrameParser::new(),
         })
     }
 
@@ -344,52 +349,51 @@ impl UvcDevice {
         let mut formats = Vec::new();
 
         // 获取完整的配置描述符来解析VS接口的额外描述符
-        if let Some(vs_interface_num) = self.video_streaming_interface_num {
-            trace!("Parsing VS interface {vs_interface_num} descriptors");
+        let vs_interface_num = self.video_streaming_interface_num;
+        trace!("Parsing VS interface {vs_interface_num} descriptors");
 
-            // 首先尝试通过GET_DESCRIPTOR控制请求获取完整的配置描述符
-            match self.get_full_configuration_descriptor().await {
-                Ok(config_data) => {
+        // 首先尝试通过GET_DESCRIPTOR控制请求获取完整的配置描述符
+        match self.get_full_configuration_descriptor().await {
+            Ok(config_data) => {
+                trace!(
+                    "Got full configuration descriptor: {} bytes",
+                    config_data.len()
+                );
+
+                // 解析配置描述符中的VS接口部分
+                if let Ok(parsed_formats) =
+                    self.parse_vs_interface_descriptors(&config_data, vs_interface_num)
+                    && !parsed_formats.is_empty()
+                {
                     trace!(
-                        "Got full configuration descriptor: {} bytes",
-                        config_data.len()
+                        "Parsed {} formats from VS interface descriptors",
+                        parsed_formats.len()
                     );
+                    formats.extend(parsed_formats);
+                }
+            }
+            Err(e) => {
+                debug!("Failed to get full configuration descriptor: {e:?}");
+            }
+        }
 
-                    // 解析配置描述符中的VS接口部分
-                    if let Ok(parsed_formats) =
-                        self.parse_vs_interface_descriptors(&config_data, vs_interface_num)
+        // 如果上面的方法失败，尝试获取VS接口特定的描述符
+        if formats.is_empty() {
+            match self.get_vs_interface_descriptor(vs_interface_num).await {
+                Ok(vs_desc_data) => {
+                    trace!("Got VS interface descriptor: {} bytes", vs_desc_data.len());
+                    if let Ok(parsed_formats) = self.parse_format_descriptors(&vs_desc_data)
                         && !parsed_formats.is_empty()
                     {
                         trace!(
-                            "Parsed {} formats from VS interface descriptors",
+                            "Parsed {} formats from VS interface specific descriptors",
                             parsed_formats.len()
                         );
                         formats.extend(parsed_formats);
                     }
                 }
                 Err(e) => {
-                    debug!("Failed to get full configuration descriptor: {e:?}");
-                }
-            }
-
-            // 如果上面的方法失败，尝试获取VS接口特定的描述符
-            if formats.is_empty() {
-                match self.get_vs_interface_descriptor(vs_interface_num).await {
-                    Ok(vs_desc_data) => {
-                        trace!("Got VS interface descriptor: {} bytes", vs_desc_data.len());
-                        if let Ok(parsed_formats) = self.parse_format_descriptors(&vs_desc_data)
-                            && !parsed_formats.is_empty()
-                        {
-                            trace!(
-                                "Parsed {} formats from VS interface specific descriptors",
-                                parsed_formats.len()
-                            );
-                            formats.extend(parsed_formats);
-                        }
-                    }
-                    Err(e) => {
-                        debug!("Failed to get VS interface descriptor: {e:?}");
-                    }
+                    debug!("Failed to get VS interface descriptor: {e:?}");
                 }
             }
         }
@@ -839,20 +843,8 @@ impl UvcDevice {
     }
 
     /// 开始视频流传输
-    pub async fn start_streaming(&mut self) -> Result<(), USBError> {
-        if self.ep_in.is_some() {
-            // 如果已经有端点，直接开始流传输
-            if self.current_format.is_none() {
-                return Err(USBError::Other("No format selected".into()));
-            }
-            self.state = UvcDeviceState::Streaming;
-            return Ok(());
-        }
-
-        // 如果没有端点，需要切换到有带宽的 alternate setting
-        let vs_interface_num = self
-            .video_streaming_interface_num
-            .ok_or(USBError::NotFound)?;
+    pub async fn start_streaming(&mut self) -> Result<VideoStream, USBError> {
+        let vs_interface_num = self.video_streaming_interface_num;
 
         if self.current_format.is_none() {
             return Err(USBError::Other("No format selected".into()));
@@ -915,156 +907,205 @@ impl UvcDevice {
             .device
             .claim_interface(vs_interface_num, alt_setting)
             .await?;
-
+        let mut ep = None;
         // 查找同步 IN 端点
         for endpoint in vs_interface.descriptor.endpoints.clone().into_iter() {
             if matches!(endpoint.transfer_type, EndpointType::Isochronous)
                 && matches!(endpoint.direction, Direction::In)
             {
                 debug!("Found isochronous IN endpoint: {endpoint:?}");
-                self.ep_in = Some(vs_interface.endpoint_iso_in(endpoint.address)?);
+                ep = Some(vs_interface.endpoint_iso_in(endpoint.address)?);
                 break;
             }
         }
 
-        self.video_streaming_interface = Some(vs_interface);
+        let ep = vs_interface.endpoint_iso_in(
+            ep.expect("No isochronous IN endpoint found")
+                .descriptor
+                .address,
+        )?;
 
         debug!("Starting video streaming");
         self.state = UvcDeviceState::Streaming;
-        Ok(())
+        Ok(VideoStream::new(ep, vs_interface))
     }
 
-    /// 停止视频流传输
-    pub async fn stop_streaming(&mut self) -> Result<(), USBError> {
-        debug!("Stopping video streaming");
+    // /// 接收视频帧数据 (参考libusb计算ISO传输参数)
+    // pub async fn recv_frame(&mut self) -> Result<Option<VideoFrame>, TransferError> {
+    //     if self.state != UvcDeviceState::Streaming {
+    //         return Ok(None);
+    //     }
 
-        // 切换回 alternate setting 0（无带宽）
-        if let Some(vs_interface_num) = self.video_streaming_interface_num {
-            let vs_interface = self.device.claim_interface(vs_interface_num, 0).await?;
-            self.video_streaming_interface = Some(vs_interface);
-        }
+    //     let ep_in = match &mut self.ep_in {
+    //         Some(ep) => ep,
+    //         None => return Ok(None),
+    //     };
 
-        // 清除端点引用
-        self.ep_in = None;
-        self.state = UvcDeviceState::Configured;
-        Ok(())
-    }
+    //     // 根据libusb stream.c的逻辑计算缓冲区参数
+    //     let (packets_per_transfer, buffer_size) = {
+    //         // 在新的作用域中计算参数，避免borrowing冲突
+    //         let (max_video_frame_size, _max_payload_transfer_size) = match &self.current_format {
+    //             Some(VideoFormat::Mjpeg { width, height, .. }) => {
+    //                 // MJPEG帧的最大大小估算 (参考UVC标准)
+    //                 let max_frame_size = (*width as usize * *height as usize * 3) / 2; // MJPEG压缩率约2:1
+    //                 let max_payload_size = 614400_u32; // 从commit控制获取的dwMaxPayloadTransferSize
+    //                 (max_frame_size, max_payload_size as usize)
+    //             }
+    //             Some(VideoFormat::Uncompressed {
+    //                 width,
+    //                 height,
+    //                 format_type,
+    //                 ..
+    //             }) => {
+    //                 // 未压缩格式
+    //                 let bytes_per_pixel = match format_type {
+    //                     UncompressedFormat::Yuy2 => 2, // YUY2是16位每像素
+    //                     UncompressedFormat::Nv12 => 1, // NV12平均每像素12位,约1.5字节
+    //                     _ => 2,                        // 默认2字节每像素
+    //                 };
+    //                 let max_frame_size = *width as usize * *height as usize * bytes_per_pixel;
+    //                 let max_payload_size = 614400_u32;
+    //                 (max_frame_size, max_payload_size as usize)
+    //             }
+    //             Some(VideoFormat::H264 { width, height, .. }) => {
+    //                 // H264压缩格式，压缩率更高
+    //                 let max_frame_size = (*width as usize * *height as usize) / 4; // H264压缩率约8:1
+    //                 let max_payload_size = 614400_u32;
+    //                 (max_frame_size, max_payload_size as usize)
+    //             }
+    //             None => {
+    //                 // 默认值
+    //                 (640 * 480 * 2, 614400)
+    //             }
+    //         };
 
-    /// 接收视频帧数据 (修复传输队列管理)
-    pub async fn recv_frame(&mut self) -> Result<Option<VideoFrame>, TransferError> {
-        if self.state != UvcDeviceState::Streaming {
-            return Ok(None);
-        }
+    //         // 获取当前端点的包大小
+    //         let endpoint_bytes_per_packet = {
+    //             let mut packet_size = 1024; // 默认值
 
-        let ep_in = match &mut self.ep_in {
-            Some(ep) => ep,
-            None => return Ok(None),
-        };
+    //             // 尝试从video streaming interface获取当前的端点信息
+    //             if let Some(ref vs_interface) = self.video_streaming_interface {
+    //                 for endpoint in &vs_interface.descriptor.endpoints {
+    //                     if matches!(endpoint.transfer_type, EndpointType::Isochronous)
+    //                         && matches!(endpoint.direction, Direction::In)
+    //                     {
+    //                         // 根据libusb的计算方法:
+    //                         // wMaxPacketSize: [unused:2 (multiplier-1):3 size:11]
+    //                         let raw_packet_size = endpoint.max_packet_size as usize;
+    //                         packet_size =
+    //                             (raw_packet_size & 0x07ff) * (((raw_packet_size >> 11) & 3) + 1);
 
-        // 使用更保守的参数，避免队列满
-        let packets_per_transfer = 8; // 减少包数量
-        let buffer_size = 16 * 1024; // 16KB 缓冲区
+    //                         debug!(
+    //                             "Current endpoint packet size: {packet_size} (raw: {raw_packet_size})"
+    //                         );
+    //                         break;
+    //                     }
+    //                 }
+    //             }
 
-        // 只做一次传输尝试，而不是循环
-        let mut buf = vec![0u8; buffer_size];
+    //             if packet_size == 1024 {
+    //                 debug!("Using default endpoint packet size: {packet_size}");
+    //             }
+    //             packet_size
+    //         };
 
-        match ep_in.submit(&mut buf, packets_per_transfer)?.await {
-            Ok(n) => {
-                if n == 0 {
-                    debug!("No data received in this transfer");
-                    return Ok(None);
-                }
+    //         // 参考libusb计算逻辑:
+    //         // packets_per_transfer = (dwMaxVideoFrameSize + endpoint_bytes_per_packet - 1) / endpoint_bytes_per_packet
+    //         // 但保持合理的限制(最多32个包)
+    //         let packets_per_transfer =
+    //             std::cmp::min(max_video_frame_size.div_ceil(endpoint_bytes_per_packet), 32);
 
-                let data = &buf[..n];
-                debug!("Received {n} bytes from USB");
+    //         // 确保至少有1个包
+    //         let packets_per_transfer = std::cmp::max(packets_per_transfer, 1);
 
-                // 处理 UVC 载荷数据
-                self.process_uvc_payload_data(data)
-            }
-            Err(e) => {
-                debug!("Transfer error: {e:?}");
-                Err(e)
-            }
-        }
-    }
+    //         // 总传输大小 = packets_per_transfer * endpoint_bytes_per_packet
+    //         let total_transfer_size = packets_per_transfer * endpoint_bytes_per_packet;
+
+    //         debug!(
+    //             "ISO transfer params: packets_per_transfer={packets_per_transfer}, endpoint_bytes_per_packet={endpoint_bytes_per_packet}, total_transfer_size={total_transfer_size}"
+    //         );
+    //         debug!(
+    //             "Video format params: max_video_frame_size={max_video_frame_size}, max_payload_transfer_size={_max_payload_transfer_size}"
+    //         );
+
+    //         (packets_per_transfer, total_transfer_size)
+    //     };
+
+    //     // 只做一次传输尝试，而不是循环
+    //     let mut buf = vec![0u8; buffer_size];
+
+    //     match ep_in.submit(&mut buf, packets_per_transfer)?.await {
+    //         Ok(n) => {
+    //             if n == 0 {
+    //                 debug!("No data received in this transfer");
+    //                 return Ok(None);
+    //             }
+
+    //             let data = &buf[..n];
+    //             debug!("Received {n} bytes from USB");
+
+    //             // 处理 UVC 载荷数据
+    //             self.process_uvc_payload_data(data)
+    //         }
+    //         Err(e) => {
+    //             debug!("Transfer error: {e:?}");
+    //             Err(e)
+    //         }
+    //     }
+    // }
+
+    // /// 获取当前端点的包大小
+    // fn get_current_endpoint_packet_size(&self) -> usize {
+    //     // 尝试从video streaming interface获取当前的端点信息
+    //     if let Some(ref vs_interface) = self.video_streaming_interface {
+    //         for endpoint in &vs_interface.descriptor.endpoints {
+    //             if matches!(endpoint.transfer_type, EndpointType::Isochronous)
+    //                 && matches!(endpoint.direction, Direction::In)
+    //             {
+    //                 // 根据libusb的计算方法:
+    //                 // wMaxPacketSize: [unused:2 (multiplier-1):3 size:11]
+    //                 let raw_packet_size = endpoint.max_packet_size as usize;
+    //                 let packet_size =
+    //                     (raw_packet_size & 0x07ff) * (((raw_packet_size >> 11) & 3) + 1);
+
+    //                 debug!("Current endpoint packet size: {packet_size} (raw: {raw_packet_size})");
+    //                 return packet_size;
+    //             }
+    //         }
+    //     }
+
+    //     // 如果无法获取，使用保守的默认值
+    //     let default_size = 1024;
+    //     debug!("Using default endpoint packet size: {default_size}");
+    //     default_size
+    // }
 
     /// 处理 UVC 载荷数据，返回完整的帧（如果有）
     fn process_uvc_payload_data(
         &mut self,
         data: &[u8],
     ) -> Result<Option<VideoFrame>, TransferError> {
-        let mut pos = 0;
-
-        while pos < data.len() {
-            // UVC 载荷头分析
-            if pos + 2 > data.len() {
-                break; // 数据不足，退出
-            }
-
-            let header_length = data[pos] as usize;
-            if header_length < 2 || pos + header_length > data.len() {
-                debug!("Invalid header length: {header_length} at pos {pos}");
-                break;
-            }
-
-            let header_info = data[pos + 1];
-            let frame_id = (header_info & 0x01) != 0;
-            let end_of_frame = (header_info & 0x02) != 0;
-            let presentation_time = (header_info & 0x04) != 0;
-            let error = (header_info & 0x40) != 0;
-
-            if error {
-                debug!("UVC payload error detected in packet at pos {pos}");
-                self.frame_buffer.clear();
-                pos += header_length;
-                continue;
-            }
-
-            // 帧 ID 变化意味着新帧开始
-            if frame_id != self.last_frame_id {
-                debug!("Frame ID changed: {} -> {}", self.last_frame_id, frame_id);
-                if !self.frame_buffer.is_empty() {
-                    debug!(
-                        "Discarding incomplete frame ({} bytes)",
-                        self.frame_buffer.len()
-                    );
-                    self.frame_buffer.clear();
-                }
-                self.last_frame_id = frame_id;
-            }
-
-            // 提取实际的视频数据（跳过载荷头）
-            let payload_start = pos + header_length;
-            let remaining_data = if payload_start < data.len() {
-                &data[payload_start..]
-            } else {
-                &[]
-            };
-
-            // 将数据添加到帧缓冲区
-            if !remaining_data.is_empty() {
-                self.frame_buffer.extend_from_slice(remaining_data);
-                debug!(
-                    "Added {} bytes to frame buffer (total: {}, fid: {})",
-                    remaining_data.len(),
-                    self.frame_buffer.len(),
-                    frame_id
-                );
-            }
-
-            if end_of_frame && !self.frame_buffer.is_empty() {
-                // 完整帧接收完成
-                let frame = VideoFrame {
-                    data: self.frame_buffer.clone(),
-                    timestamp: if presentation_time {
+        match self.frame_parser.push_packet(data)? {
+            Some(FrameEvent {
+                data,
+                pts_90khz,
+                eof: true,
+                frame_number,
+                ..
+            }) => {
+                let timestamp = pts_90khz
+                    .map(|v| (v as u64) * 1000 / 90) // 90kHz -> 微秒近似（注意：真实应转换为时间基）
+                    .unwrap_or_else(|| {
                         std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_micros() as u64
-                    } else {
-                        0
-                    },
-                    frame_number: self.current_frame_number,
+                    });
+
+                let vf = VideoFrame {
+                    data,
+                    timestamp,
+                    frame_number,
                     format: self.current_format.clone().unwrap_or(VideoFormat::Mjpeg {
                         width: 640,
                         height: 480,
@@ -1072,24 +1113,10 @@ impl UvcDevice {
                     }),
                     end_of_frame: true,
                 };
-
-                self.frame_buffer.clear();
-                self.current_frame_number += 1;
-
-                debug!(
-                    "Received complete video frame #{}: {} bytes",
-                    frame.frame_number,
-                    frame.data.len()
-                );
-                return Ok(Some(frame));
+                Ok(Some(vf))
             }
-
-            // 移动到下一个载荷包
-            // 简化处理：假设每个 USB 传输包含一个完整的 UVC 载荷包
-            break;
+            _ => Ok(None),
         }
-
-        Ok(None)
     }
 
     /// 获取当前设备状态
@@ -1191,15 +1218,15 @@ impl UvcDevice {
 
         // 查找匹配的格式索引（简化版本，实际应该从描述符解析获得）
         let (format_index, frame_index) = match format {
-            VideoFormat::Mjpeg { width, height, .. } => {
+            VideoFormat::Mjpeg { .. } => {
                 // 为 MJPEG 格式查找索引
                 self.find_format_indices(&formats, format).unwrap_or((1, 1))
             }
-            VideoFormat::Uncompressed { width, height, .. } => {
+            VideoFormat::Uncompressed { .. } => {
                 // 为未压缩格式查找索引
                 self.find_format_indices(&formats, format).unwrap_or((1, 1))
             }
-            VideoFormat::H264 { width, height, .. } => {
+            VideoFormat::H264 { .. } => {
                 // 为 H264 格式查找索引
                 self.find_format_indices(&formats, format).unwrap_or((1, 1))
             }
@@ -1266,9 +1293,7 @@ impl UvcDevice {
         control_selector: u8,
         stream_ctrl: &StreamControl,
     ) -> Result<(), USBError> {
-        let vs_interface_num = self
-            .video_streaming_interface_num
-            .ok_or(USBError::NotFound)?;
+        let vs_interface_num = self.video_streaming_interface_num;
 
         // 序列化 StreamControl 到字节数组
         let data = self.serialize_stream_control(stream_ctrl);
@@ -1302,9 +1327,7 @@ impl UvcDevice {
         control_selector: u8,
         length: usize,
     ) -> Result<Vec<u8>, USBError> {
-        let vs_interface_num = self
-            .video_streaming_interface_num
-            .ok_or(USBError::NotFound)?;
+        let vs_interface_num = self.video_streaming_interface_num;
 
         let setup = ControlSetup {
             request_type: RequestType::Class,

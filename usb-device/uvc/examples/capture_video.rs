@@ -1,9 +1,9 @@
 use crab_usb::USBHost;
 use env_logger;
 use log::{error, info, warn};
-use std::{hint::spin_loop, thread, time::Duration};
+use std::{hint::spin_loop, sync::Arc, thread, time::Duration};
 use tokio::time;
-use usb_uvc::{UvcDevice, UvcDeviceState, VideoControlEvent};
+use usb_uvc::{UvcDevice, UvcDeviceState, VideoControlEvent, frame};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 开始视频流
     info!("Starting video streaming...");
-    uvc.start_streaming().await?;
+    let mut stream = uvc.start_streaming().await?;
 
     // 设置一些控制参数的示例
     info!("Setting video controls...");
@@ -93,65 +93,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     warn!("Failed to set contrast: {:?}", e);
     // }
 
-    let mut frame_count = 0;
     let start_time = std::time::Instant::now();
 
     // 捕获视频帧 (运行30秒)
     info!("Capturing video frames for 30 seconds...");
-    let capture_duration = Duration::from_secs(30);
-    let mut last_stats_time = std::time::Instant::now();
+    let capture_duration = Duration::from_secs(6);
+    let frame_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let frame_count_clone = frame_count.clone();
 
-    while start_time.elapsed() < capture_duration {
-        match uvc.recv_frame().await {
-            Ok(Some(frame)) => {
-                frame_count += 1;
-
-                // 每10秒打印一次统计信息
-                if last_stats_time.elapsed() >= Duration::from_secs(10) {
-                    let fps = frame_count as f32 / start_time.elapsed().as_secs_f32();
-                    info!(
-                        "Captured {} frames, average FPS: {:.2}, last frame size: {} bytes",
-                        frame_count,
-                        fps,
-                        frame.data.len()
-                    );
-                    last_stats_time = std::time::Instant::now();
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let running_clone = running.clone();
+    let handle = tokio::spawn(async move {
+        // 处理设备事件
+        while running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+            let data = stream.recv().await;
+            match data {
+                Ok(frame) => {
+                    frame_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
-
-                // 在实际应用中，这里可以处理视频帧数据：
-                // - 解码 MJPEG/H.264 数据
-                // - 转换颜色格式
-                // - 保存到文件或显示到屏幕
-                // - 进行计算机视觉处理等
-
-                // 示例：保存前几帧到文件
-                if frame_count <= 5 {
-                    save_frame_to_file(&frame, frame_count).await?;
+                Err(e) => {
+                    warn!("Error receiving frame: {:?}", e);
                 }
             }
-            Ok(None) => {
-                // 没有完整帧可用，继续等待
-                time::sleep(Duration::from_millis(1)).await;
-            }
-            Err(e) => {
-                warn!("Error receiving frame: {:?}", e);
-                time::sleep(Duration::from_millis(10)).await;
-            }
+            ()
         }
+    });
 
-        // 检查设备状态
-        if *uvc.get_state() != UvcDeviceState::Streaming {
-            error!("Device is no longer streaming");
-            break;
-        }
-    }
+    tokio::time::sleep(capture_duration).await;
 
-    // 停止视频流
-    info!("Stopping video streaming...");
-    uvc.stop_streaming().await?;
+    running.store(false, std::sync::atomic::Ordering::Relaxed);
+    handle.await.unwrap();
 
-    let total_time = start_time.elapsed();
-    let avg_fps = frame_count as f32 / total_time.as_secs_f32();
+    let frame_count = frame_count.load(std::sync::atomic::Ordering::Acquire);
+
+    let avg_fps = frame_count as f32 / start_time.elapsed().as_secs_f32();
     info!(
         "Capture completed. Total frames: {}, Average FPS: {:.2}",
         frame_count, avg_fps

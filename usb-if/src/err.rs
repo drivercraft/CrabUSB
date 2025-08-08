@@ -1,4 +1,4 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, string::String};
 
 #[derive(thiserror::Error, Debug)]
 pub enum TransferError {
@@ -7,7 +7,13 @@ pub enum TransferError {
     #[error("Request queue full")]
     RequestQueueFull,
     #[error("Other error: {0}")]
-    Other(#[from] Box<dyn core::error::Error>),
+    Other(String),
+}
+
+impl From<Box<dyn core::error::Error>> for TransferError {
+    fn from(err: Box<dyn core::error::Error>) -> Self {
+        TransferError::Other(alloc::format!("{err}"))
+    }
 }
 /*
 
