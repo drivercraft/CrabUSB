@@ -76,10 +76,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 设置一些控制参数的示例
     info!("Setting video controls...");
-    uvc.send_control_command(VideoControlEvent::BrightnessChanged(100))
-        .await?;
-    uvc.send_control_command(VideoControlEvent::ContrastChanged(50))
-        .await?;
+
+    // 尝试设置亮度（如果失败也继续）
+    if let Err(e) = uvc
+        .send_control_command(VideoControlEvent::BrightnessChanged(100))
+        .await
+    {
+        warn!("Failed to set brightness: {:?}", e);
+    }
+
+    // 尝试设置对比度（如果失败也继续）
+    if let Err(e) = uvc
+        .send_control_command(VideoControlEvent::ContrastChanged(50))
+        .await
+    {
+        warn!("Failed to set contrast: {:?}", e);
+    }
 
     let mut frame_count = 0;
     let start_time = std::time::Instant::now();
