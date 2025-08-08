@@ -4,7 +4,7 @@ use ffmpeg_next as ffmpeg;
 use log::{debug, error, info, warn};
 use std::{hint::spin_loop, sync::Arc, thread, time::Duration};
 use tokio::fs;
-use usb_uvc::{UvcDevice, VideoControlEvent};
+use usb_uvc::{UncompressedFormat, UvcDevice, VideoControlEvent, VideoFormat};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -179,6 +179,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             info!("Video saved as output.mp4");
         }
+
+        // 转换每帧为图片
+        info!("Converting frames to images...");
+        if let Err(e) = convert_frames_to_images(&saved_frame_numbers, &current_format).await {
+            error!("Failed to convert frames to images: {:?}", e);
+        } else {
+            info!("Images saved to images/ directory");
+        }
     }
 
     Ok(())
@@ -327,28 +335,12 @@ async fn create_video_from_mjpeg_frames(
     // 使用 ffmpeg-next 处理 MJPEG 帧
     match tokio::task::spawn_blocking(
         move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            use ffmpeg::format::{Pixel, input, output};
-            use ffmpeg::{Rational, codec, encoder, media};
+            use ffmpeg::format::{Pixel, output};
+            use ffmpeg::{Rational, codec, encoder};
+            use std::fs::File;
+            use std::io::Read;
 
             ffmpeg::init()?;
-
-            // 对于 MJPEG 帧序列，使用图片序列输入格式
-            let pattern = "frames/frame_%06d.raw";
-
-            // 创建输入上下文（MJPEG 图片序列）
-            let mut input_ctx = input(pattern)?;
-            let input_stream_index = {
-                let input_stream = input_ctx
-                    .streams()
-                    .best(media::Type::Video)
-                    .ok_or("No video stream found")?;
-                input_stream.index()
-            };
-
-            let mut decoder = {
-                let input_stream = input_ctx.stream(input_stream_index).unwrap();
-                input_stream.codec().decoder().video()?
-            };
 
             // 创建输出上下文
             let mut output_ctx = output("output_mjpeg.mp4")?;
@@ -367,23 +359,61 @@ async fn create_video_from_mjpeg_frames(
 
             output_ctx.write_header()?;
 
-            // 处理帧
+            // 处理每个MJPEG帧文件
             let mut frame_count = 0i64;
-            for (stream, packet) in input_ctx.packets() {
-                if stream.index() == input_stream_index {
-                    decoder.send_packet(&packet)?;
-                    let mut decoded = ffmpeg::util::frame::video::Video::empty();
-                    while decoder.receive_frame(&mut decoded).is_ok() {
-                        decoded.set_pts(Some(frame_count));
-                        frame_count += 1;
+            for i in 0u32..100 {
+                // 假设最多100帧
+                let frame_path = format!("frames/frame_{:06}.raw", i);
+                if let Ok(mut file) = File::open(&frame_path) {
+                    let mut buffer = Vec::new();
+                    if file.read_to_end(&mut buffer).is_ok() && !buffer.is_empty() {
+                        // 检查这是否是JPEG数据（以FF D8开头）
+                        if buffer.len() >= 2 && buffer[0] == 0xFF && buffer[1] == 0xD8 {
+                            // 这是JPEG数据，我们需要解码它
+                            // 创建临时文件来解码JPEG
+                            let temp_jpeg_path = format!("/tmp/temp_frame_{}.jpg", i);
+                            std::fs::write(&temp_jpeg_path, &buffer)?;
 
-                        let mut encoded = ffmpeg::Packet::empty();
-                        encoder.send_frame(&decoded)?;
-                        while encoder.receive_packet(&mut encoded).is_ok() {
-                            encoded.set_stream(0);
-                            encoded.write_interleaved(&mut output_ctx)?;
+                            // 使用ffmpeg解码JPEG
+                            use ffmpeg::format::input;
+                            let mut input_ctx = input(&temp_jpeg_path)?;
+                            let input_stream_index = {
+                                let input_stream = input_ctx
+                                    .streams()
+                                    .best(ffmpeg::media::Type::Video)
+                                    .ok_or("No video stream found")?;
+                                input_stream.index()
+                            };
+
+                            let mut decoder = {
+                                let input_stream = input_ctx.stream(input_stream_index).unwrap();
+                                input_stream.codec().decoder().video()?
+                            };
+
+                            for (stream, packet) in input_ctx.packets() {
+                                if stream.index() == input_stream_index {
+                                    decoder.send_packet(&packet)?;
+                                    let mut decoded = ffmpeg::util::frame::video::Video::empty();
+                                    while decoder.receive_frame(&mut decoded).is_ok() {
+                                        decoded.set_pts(Some(frame_count));
+                                        frame_count += 1;
+
+                                        let mut encoded = ffmpeg::Packet::empty();
+                                        encoder.send_frame(&decoded)?;
+                                        while encoder.receive_packet(&mut encoded).is_ok() {
+                                            encoded.set_stream(0);
+                                            encoded.write_interleaved(&mut output_ctx)?;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 清理临时文件
+                            let _ = std::fs::remove_file(&temp_jpeg_path);
                         }
                     }
+                } else {
+                    break; // 没有更多帧文件
                 }
             }
 
@@ -850,4 +880,214 @@ async fn create_video_from_images(fps: f32) -> Result<(), Box<dyn std::error::Er
         Ok(Err(e)) => Err(format!("ffmpeg-next failed: {:?}", e).into()),
         Err(e) => Err(format!("Task failed: {:?}", e).into()),
     }
+}
+
+async fn convert_frames_to_images(
+    frame_numbers: &[u32],
+    video_format: &VideoFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fs;
+    use tokio::task;
+
+    // 创建 images 目录
+    fs::create_dir_all("images")?;
+
+    let frame_numbers = frame_numbers.to_vec();
+    let video_format = video_format.clone();
+
+    match &video_format {
+        VideoFormat::Mjpeg { .. } => {
+            info!("Converting MJPEG frames to JPEG images...");
+            convert_mjpeg_frames_to_images(frame_numbers).await
+        }
+        VideoFormat::Uncompressed { format_type, .. } => {
+            info!(
+                "Converting uncompressed frames ({:?}) to PNG images...",
+                format_type
+            );
+            convert_raw_frames_to_images(frame_numbers, format_type, &video_format).await
+        }
+        VideoFormat::H264 { .. } => {
+            warn!("H264 format is not supported for frame-to-image conversion");
+            Ok(())
+        }
+    }
+}
+
+async fn convert_mjpeg_frames_to_images(
+    frame_numbers: Vec<u32>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fs;
+
+    match tokio::task::spawn_blocking(
+        move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            for frame_number in frame_numbers {
+                let input_path = format!("frames/frame_{:06}.raw", frame_number);
+                let output_path = format!("images/frame_{:06}.jpg", frame_number);
+
+                if let Ok(data) = fs::read(&input_path) {
+                    // 检查这是否是JPEG数据（以FF D8开头）
+                    if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
+                        // 直接保存为JPEG文件
+                        fs::write(&output_path, &data)?;
+                        println!("Converted frame {} to {}", frame_number, output_path);
+                    } else {
+                        println!("Skipping frame {} - not valid JPEG data", frame_number);
+                    }
+                }
+            }
+            Ok(())
+        },
+    )
+    .await
+    {
+        Ok(Ok(())) => {
+            info!("MJPEG frames converted to JPEG images successfully!");
+            Ok(())
+        }
+        Ok(Err(e)) => Err(format!("Conversion failed: {:?}", e).into()),
+        Err(e) => Err(format!("Task failed: {:?}", e).into()),
+    }
+}
+
+async fn convert_raw_frames_to_images(
+    frame_numbers: Vec<u32>,
+    format_type: &UncompressedFormat,
+    video_format: &VideoFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let format_type = format_type.clone();
+    let video_format = video_format.clone();
+
+    match tokio::task::spawn_blocking(
+        move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            use std::fs::File;
+            use std::io::Read;
+
+            for frame_number in frame_numbers {
+                let input_path = format!("frames/frame_{:06}.raw", frame_number);
+                let output_path = format!("images/frame_{:06}.png", frame_number);
+
+                if let Ok(mut file) = File::open(&input_path) {
+                    let mut buffer = Vec::new();
+                    if file.read_to_end(&mut buffer).is_ok() && !buffer.is_empty() {
+                        // 这里需要根据实际的像素格式和尺寸来处理原始数据
+                        // 对于 YUY2 格式，我们需要转换为RGB并保存为PNG
+
+                        match &video_format {
+                            VideoFormat::Uncompressed {
+                                width,
+                                height,
+                                format_type,
+                                ..
+                            } => {
+                                match format_type {
+                                    UncompressedFormat::Yuy2 => {
+                                        // 使用图像处理库将YUY2转换为PNG
+                                        if let Err(e) = convert_yuy2_to_png(
+                                            &buffer,
+                                            *width,
+                                            *height,
+                                            &output_path,
+                                        ) {
+                                            println!(
+                                                "Failed to convert frame {}: {:?}",
+                                                frame_number, e
+                                            );
+                                        } else {
+                                            println!(
+                                                "Converted frame {} to {}",
+                                                frame_number, output_path
+                                            );
+                                        }
+                                    }
+                                    _ => {
+                                        println!("Unsupported format type: {:?}", format_type);
+                                    }
+                                }
+                            }
+                            _ => {
+                                println!("Unexpected video format for raw conversion");
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(())
+        },
+    )
+    .await
+    {
+        Ok(Ok(())) => {
+            info!("Raw frames converted to PNG images successfully!");
+            Ok(())
+        }
+        Ok(Err(e)) => Err(format!("Conversion failed: {:?}", e).into()),
+        Err(e) => Err(format!("Task failed: {:?}", e).into()),
+    }
+}
+
+fn convert_yuy2_to_png(
+    yuy2_data: &[u8],
+    width: u16,
+    height: u16,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use image::{ImageBuffer, Rgb};
+
+    let width = width as u32;
+    let height = height as u32;
+
+    // YUY2 格式：每4个字节表示2个像素 (Y0 U Y1 V)
+    let expected_size = (width * height * 2) as usize;
+    if yuy2_data.len() < expected_size {
+        return Err(format!(
+            "Invalid YUY2 data size: expected {}, got {}",
+            expected_size,
+            yuy2_data.len()
+        )
+        .into());
+    }
+
+    let mut rgb_buffer = ImageBuffer::new(width, height);
+
+    for y in 0..height {
+        for x in 0..(width / 2) {
+            let base_idx = ((y * width / 2 + x) * 4) as usize;
+            if base_idx + 3 < yuy2_data.len() {
+                let y0 = yuy2_data[base_idx] as f32;
+                let u = yuy2_data[base_idx + 1] as f32;
+                let y1 = yuy2_data[base_idx + 2] as f32;
+                let v = yuy2_data[base_idx + 3] as f32;
+
+                // YUV到RGB的转换
+                let convert_yuv_to_rgb = |y: f32, u: f32, v: f32| -> (u8, u8, u8) {
+                    let c = y - 16.0;
+                    let d = u - 128.0;
+                    let e = v - 128.0;
+
+                    let r = ((298.0 * c + 409.0 * e + 128.0) / 256.0).clamp(0.0, 255.0) as u8;
+                    let g = ((298.0 * c - 100.0 * d - 208.0 * e + 128.0) / 256.0).clamp(0.0, 255.0)
+                        as u8;
+                    let b = ((298.0 * c + 516.0 * d + 128.0) / 256.0).clamp(0.0, 255.0) as u8;
+
+                    (r, g, b)
+                };
+
+                // 转换第一个像素
+                let (r0, g0, b0) = convert_yuv_to_rgb(y0, u, v);
+                if x * 2 < width {
+                    rgb_buffer.put_pixel(x * 2, y, Rgb([r0, g0, b0]));
+                }
+
+                // 转换第二个像素
+                let (r1, g1, b1) = convert_yuv_to_rgb(y1, u, v);
+                if x * 2 + 1 < width {
+                    rgb_buffer.put_pixel(x * 2 + 1, y, Rgb([r1, g1, b1]));
+                }
+            }
+        }
+    }
+
+    rgb_buffer.save(output_path)?;
+    Ok(())
 }

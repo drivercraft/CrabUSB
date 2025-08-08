@@ -1,5 +1,4 @@
 use crab_usb::{EndpointIsoIn, Interface};
-use log::{debug, trace};
 
 use crate::{
     VideoFormat,
@@ -11,37 +10,44 @@ pub struct VideoStream {
     _iface: Interface,
     frame_parser: FrameParser,
     pub vedio_format: VideoFormat,
+    packets_per_transfer: usize,
+    packet_size: usize,
+    buffer: Vec<u8>,
 }
 
 unsafe impl Send for VideoStream {}
 
 impl VideoStream {
     pub fn new(ep: EndpointIsoIn, iface: Interface, vfmt: VideoFormat) -> Self {
+        let max_packet_size = ep.descriptor.max_packet_size;
+        // 参考libusb计算逻辑:
+        // packets_per_transfer = (dwMaxVideoFrameSize + endpoint_bytes_per_packet - 1) / endpoint_bytes_per_packet
+        // 但保持合理的限制(最多32个包)
+        let packets_per_transfer =
+            std::cmp::min(vfmt.frame_bytes().div_ceil(max_packet_size as _), 32);
+        let buffer = vec![0u8; (max_packet_size as usize) * packets_per_transfer];
+
         VideoStream {
             ep,
             _iface: iface,
             frame_parser: FrameParser::new(),
             vedio_format: vfmt,
+            packets_per_transfer,
+            buffer,
+            packet_size: max_packet_size as usize,
         }
     }
 
     pub async fn recv(&mut self) -> Result<Vec<FrameEvent>, usb_if::host::USBError> {
-        let max_packet_size = self.ep.descriptor.max_packet_size;
+        self.buffer.fill(0);
 
-        let mut buffer = vec![0u8; 4096]; // Adjust size as needed
-        // 使用合理的 ISO packet 数量，例如根据缓冲区大小和最大包大小计算
-        let num_iso_packets = if max_packet_size > 0 {
-            (buffer.len() / max_packet_size as usize).clamp(1, 32)
-        } else {
-            8 // 默认使用 8 个包
-        };
-        trace!("Using {num_iso_packets} ISO packets, max_packet_size: {max_packet_size}");
-
-        self.ep.submit(&mut buffer, num_iso_packets)?.await?;
+        self.ep
+            .submit(&mut self.buffer, self.packets_per_transfer)?
+            .await?;
 
         let mut events = Vec::new();
 
-        for data in buffer.chunks(max_packet_size as usize) {
+        for data in self.buffer.chunks(self.packet_size) {
             if let Some(one) = self
                 .frame_parser
                 .push_packet(data)

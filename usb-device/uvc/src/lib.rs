@@ -1,6 +1,6 @@
 use crab_usb::{
-    Class, Device, DeviceInfo, Direction, EndpointIsoIn, EndpointType, Interface, Recipient,
-    Request, RequestType, TransferError, err::USBError,
+    Class, Device, DeviceInfo, Direction, EndpointType, Interface, Recipient, Request, RequestType,
+    err::USBError,
 };
 use log::{debug, trace};
 use usb_if::host::ControlSetup;
@@ -12,7 +12,6 @@ pub use descriptors::*;
 pub mod stream;
 // 帧解析模块（参考 libuvc 的包头解析与帧组装）
 pub mod frame;
-use frame::{FrameEvent, FrameParser};
 
 use crate::stream::VideoStream;
 
@@ -250,7 +249,6 @@ pub struct UvcDevice {
     current_format: Option<VideoFormat>,
     state: UvcDeviceState,
     descriptor_parser: DescriptorParser, // 新增描述符解析器
-    frame_parser: FrameParser,           // UVC 帧组装器
 }
 
 impl UvcDevice {
@@ -369,7 +367,6 @@ impl UvcDevice {
             current_format: None,
             state: UvcDeviceState::Configured,
             descriptor_parser: DescriptorParser::new(),
-            frame_parser: FrameParser::new(),
         })
     }
 
@@ -961,195 +958,6 @@ impl UvcDevice {
             vs_interface,
             self.current_format.clone().unwrap(),
         ))
-    }
-
-    // /// 接收视频帧数据 (参考libusb计算ISO传输参数)
-    // pub async fn recv_frame(&mut self) -> Result<Option<VideoFrame>, TransferError> {
-    //     if self.state != UvcDeviceState::Streaming {
-    //         return Ok(None);
-    //     }
-
-    //     let ep_in = match &mut self.ep_in {
-    //         Some(ep) => ep,
-    //         None => return Ok(None),
-    //     };
-
-    //     // 根据libusb stream.c的逻辑计算缓冲区参数
-    //     let (packets_per_transfer, buffer_size) = {
-    //         // 在新的作用域中计算参数，避免borrowing冲突
-    //         let (max_video_frame_size, _max_payload_transfer_size) = match &self.current_format {
-    //             Some(VideoFormat::Mjpeg { width, height, .. }) => {
-    //                 // MJPEG帧的最大大小估算 (参考UVC标准)
-    //                 let max_frame_size = (*width as usize * *height as usize * 3) / 2; // MJPEG压缩率约2:1
-    //                 let max_payload_size = 614400_u32; // 从commit控制获取的dwMaxPayloadTransferSize
-    //                 (max_frame_size, max_payload_size as usize)
-    //             }
-    //             Some(VideoFormat::Uncompressed {
-    //                 width,
-    //                 height,
-    //                 format_type,
-    //                 ..
-    //             }) => {
-    //                 // 未压缩格式
-    //                 let bytes_per_pixel = match format_type {
-    //                     UncompressedFormat::Yuy2 => 2, // YUY2是16位每像素
-    //                     UncompressedFormat::Nv12 => 1, // NV12平均每像素12位,约1.5字节
-    //                     _ => 2,                        // 默认2字节每像素
-    //                 };
-    //                 let max_frame_size = *width as usize * *height as usize * bytes_per_pixel;
-    //                 let max_payload_size = 614400_u32;
-    //                 (max_frame_size, max_payload_size as usize)
-    //             }
-    //             Some(VideoFormat::H264 { width, height, .. }) => {
-    //                 // H264压缩格式，压缩率更高
-    //                 let max_frame_size = (*width as usize * *height as usize) / 4; // H264压缩率约8:1
-    //                 let max_payload_size = 614400_u32;
-    //                 (max_frame_size, max_payload_size as usize)
-    //             }
-    //             None => {
-    //                 // 默认值
-    //                 (640 * 480 * 2, 614400)
-    //             }
-    //         };
-
-    //         // 获取当前端点的包大小
-    //         let endpoint_bytes_per_packet = {
-    //             let mut packet_size = 1024; // 默认值
-
-    //             // 尝试从video streaming interface获取当前的端点信息
-    //             if let Some(ref vs_interface) = self.video_streaming_interface {
-    //                 for endpoint in &vs_interface.descriptor.endpoints {
-    //                     if matches!(endpoint.transfer_type, EndpointType::Isochronous)
-    //                         && matches!(endpoint.direction, Direction::In)
-    //                     {
-    //                         // 根据libusb的计算方法:
-    //                         // wMaxPacketSize: [unused:2 (multiplier-1):3 size:11]
-    //                         let raw_packet_size = endpoint.max_packet_size as usize;
-    //                         packet_size =
-    //                             (raw_packet_size & 0x07ff) * (((raw_packet_size >> 11) & 3) + 1);
-
-    //                         debug!(
-    //                             "Current endpoint packet size: {packet_size} (raw: {raw_packet_size})"
-    //                         );
-    //                         break;
-    //                     }
-    //                 }
-    //             }
-
-    //             if packet_size == 1024 {
-    //                 debug!("Using default endpoint packet size: {packet_size}");
-    //             }
-    //             packet_size
-    //         };
-
-    //         // 参考libusb计算逻辑:
-    //         // packets_per_transfer = (dwMaxVideoFrameSize + endpoint_bytes_per_packet - 1) / endpoint_bytes_per_packet
-    //         // 但保持合理的限制(最多32个包)
-    //         let packets_per_transfer =
-    //             std::cmp::min(max_video_frame_size.div_ceil(endpoint_bytes_per_packet), 32);
-
-    //         // 确保至少有1个包
-    //         let packets_per_transfer = std::cmp::max(packets_per_transfer, 1);
-
-    //         // 总传输大小 = packets_per_transfer * endpoint_bytes_per_packet
-    //         let total_transfer_size = packets_per_transfer * endpoint_bytes_per_packet;
-
-    //         debug!(
-    //             "ISO transfer params: packets_per_transfer={packets_per_transfer}, endpoint_bytes_per_packet={endpoint_bytes_per_packet}, total_transfer_size={total_transfer_size}"
-    //         );
-    //         debug!(
-    //             "Video format params: max_video_frame_size={max_video_frame_size}, max_payload_transfer_size={_max_payload_transfer_size}"
-    //         );
-
-    //         (packets_per_transfer, total_transfer_size)
-    //     };
-
-    //     // 只做一次传输尝试，而不是循环
-    //     let mut buf = vec![0u8; buffer_size];
-
-    //     match ep_in.submit(&mut buf, packets_per_transfer)?.await {
-    //         Ok(n) => {
-    //             if n == 0 {
-    //                 debug!("No data received in this transfer");
-    //                 return Ok(None);
-    //             }
-
-    //             let data = &buf[..n];
-    //             debug!("Received {n} bytes from USB");
-
-    //             // 处理 UVC 载荷数据
-    //             self.process_uvc_payload_data(data)
-    //         }
-    //         Err(e) => {
-    //             debug!("Transfer error: {e:?}");
-    //             Err(e)
-    //         }
-    //     }
-    // }
-
-    // /// 获取当前端点的包大小
-    // fn get_current_endpoint_packet_size(&self) -> usize {
-    //     // 尝试从video streaming interface获取当前的端点信息
-    //     if let Some(ref vs_interface) = self.video_streaming_interface {
-    //         for endpoint in &vs_interface.descriptor.endpoints {
-    //             if matches!(endpoint.transfer_type, EndpointType::Isochronous)
-    //                 && matches!(endpoint.direction, Direction::In)
-    //             {
-    //                 // 根据libusb的计算方法:
-    //                 // wMaxPacketSize: [unused:2 (multiplier-1):3 size:11]
-    //                 let raw_packet_size = endpoint.max_packet_size as usize;
-    //                 let packet_size =
-    //                     (raw_packet_size & 0x07ff) * (((raw_packet_size >> 11) & 3) + 1);
-
-    //                 debug!("Current endpoint packet size: {packet_size} (raw: {raw_packet_size})");
-    //                 return packet_size;
-    //             }
-    //         }
-    //     }
-
-    //     // 如果无法获取，使用保守的默认值
-    //     let default_size = 1024;
-    //     debug!("Using default endpoint packet size: {default_size}");
-    //     default_size
-    // }
-
-    /// 处理 UVC 载荷数据，返回完整的帧（如果有）
-    fn process_uvc_payload_data(
-        &mut self,
-        data: &[u8],
-    ) -> Result<Option<VideoFrame>, TransferError> {
-        match self.frame_parser.push_packet(data)? {
-            Some(FrameEvent {
-                data,
-                pts_90khz,
-                eof: true,
-                frame_number,
-                ..
-            }) => {
-                let timestamp = pts_90khz
-                    .map(|v| (v as u64) * 1000 / 90) // 90kHz -> 微秒近似（注意：真实应转换为时间基）
-                    .unwrap_or_else(|| {
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_micros() as u64
-                    });
-
-                let vf = VideoFrame {
-                    data,
-                    timestamp,
-                    frame_number,
-                    format: self.current_format.clone().unwrap_or(VideoFormat::Mjpeg {
-                        width: 640,
-                        height: 480,
-                        frame_rate: 30,
-                    }),
-                    end_of_frame: true,
-                };
-                Ok(Some(vf))
-            }
-            _ => Ok(None),
-        }
     }
 
     /// 获取当前设备状态
