@@ -1,5 +1,5 @@
 [workspace]
-members = ["test_crates/*", "usb-device/hid/keyboard", "usb-host", "usb-if"]
+members = ["test_crates/*", "usb-device/hid/keyboard", "usb-device/uvc", "usb-host", "usb-if"]
 resolver = "3"
 
 [workspace.package]
