@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.2.3...crab-usb-v0.2.4) - 2025-08-09
+
+### Fixed
+
+- handle enabled ports with no device ([#20](https://github.com/drivercraft/CrabUSB/pull/20))
+
 ## [0.2.3](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.2.2...crab-usb-v0.2.3) - 2025-08-08
 
 ### Other
