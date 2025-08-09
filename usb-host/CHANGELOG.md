@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.2.4...crab-usb-v0.2.5) - 2025-08-09
+
+### Other
+
+- Use default LANGID for string descriptor requests ([#23](https://github.com/drivercraft/CrabUSB/pull/23))
+
 ## [0.2.4](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.2.3...crab-usb-v0.2.4) - 2025-08-09
 
 ### Fixed
