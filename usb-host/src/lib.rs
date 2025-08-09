@@ -12,7 +12,7 @@ pub use usb_if::transfer::*;
 mod _macros;
 
 pub mod err;
-mod host;
+pub mod host;
 
 pub use futures::future::BoxFuture;
 pub use host::*;

@@ -139,18 +139,44 @@ impl DeviceInfo {
     pub async fn open(&mut self) -> Result<Device, USBError> {
         let mut device = self.raw.open().await?;
 
+        let mut lang_buf = alloc::vec![0u8; 256];
+        device
+            .control_in(
+                ControlSetup {
+                    request_type: RequestType::Standard,
+                    recipient: Recipient::Device,
+                    request: Request::GetDescriptor,
+                    value: ((DescriptorType::STRING.0 as u16) << 8) | 0,
+                    index: 0,
+                },
+                &mut lang_buf,
+            )?
+            .await?;
+        if lang_buf.len() >= 4
+            && (lang_buf[0] as usize) <= lang_buf.len()
+            && lang_buf[1] == DescriptorType::STRING.0
+        {
+            let dlen = lang_buf[0] as usize;
+            if dlen >= 4 {
+                let langid = u16::from_le_bytes([lang_buf[2], lang_buf[3]]);
+                self.descriptor.default_language = langid;
+
+                trace!("Configured default lang id to {langid:#x}");
+            }
+        }
+
         let manufacturer_string = match self.descriptor.manufacturer_string_index {
-            Some(index) => device.string_descriptor(index.get(), 0).await?,
+            Some(index) => device.string_descriptor(index.get(), self.descriptor.default_language).await?,
             None => String::new(),
         };
 
         let product_string = match self.descriptor.product_string_index {
-            Some(index) => device.string_descriptor(index.get(), 0).await?,
+            Some(index) => device.string_descriptor(index.get(), self.descriptor.default_language).await?,
             None => String::new(),
         };
 
         let serial_number_string = match self.descriptor.serial_number_string_index {
-            Some(index) => device.string_descriptor(index.get(), 0).await?,
+            Some(index) => device.string_descriptor(index.get(), self.descriptor.default_language).await?,
             None => String::new(),
         };
 
@@ -240,7 +266,7 @@ impl Device {
     ) -> Result<Interface, USBError> {
         let mut desc = self.find_interface_desc(interface, alternate)?;
         desc.string = Some(match desc.string_index {
-            Some(index) => self.raw.string_descriptor(index.get(), 0).await?,
+            Some(index) => self.raw.string_descriptor(index.get(), self.descriptor.default_language).await?,
             None => String::new(),
         });
         self.raw

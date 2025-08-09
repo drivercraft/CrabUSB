@@ -314,6 +314,7 @@ fn libusb_device_desc_to_desc(
         usb_version: desc.bcdUSB,
         max_packet_size_0: desc.bMaxPacketSize0,
         device_version: desc.bcdDevice,
+        default_language: 0,
     })
 }
 

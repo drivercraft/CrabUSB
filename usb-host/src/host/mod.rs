@@ -1,7 +1,7 @@
 mod common;
 #[cfg(feature = "libusb")]
 mod libusb;
-mod xhci;
+pub mod xhci;
 
 pub use common::*;
 
