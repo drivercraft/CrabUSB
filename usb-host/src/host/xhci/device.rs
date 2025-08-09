@@ -30,6 +30,25 @@ use crate::{
     },
 };
 
+/// Validate a USB LANGID per the rules:
+/// - Primary language is bits [9:0]
+/// - Sublanguage is bits [15:10]
+/// - Invalid if primary is 0, or in 0x62..=0xFE, or in 0x100..=0x3FF
+/// - Invalid if sublanguage is 0
+fn is_valid_langid(langid: u16) -> bool {
+    let primary_lang = langid & 0x03ff;
+    let sub_lang = langid >> 10;
+
+    if primary_lang == 0
+        || (0x62..=0xFE).contains(&primary_lang)
+        || (0x100..=0x3FF).contains(&primary_lang)
+    {
+        return false;
+    }
+
+    sub_lang != 0
+}
+
 pub struct Device {
     id: SlotId,
     root: RootHub,
@@ -169,6 +188,9 @@ impl usb_if::host::Device for Device {
         language_id: u16,
     ) -> futures::future::LocalBoxFuture<'_, Result<String, USBError>> {
         async move {
+            if index != 0 && !is_valid_langid(language_id) {
+                return Err(USBError::Other("Invalid language ID".into()));
+            }
             let mut data = alloc::vec![0u8; 256];
             self.get_descriptor(DescriptorType::STRING, index, language_id, &mut data)
                 .await?;
