@@ -322,7 +322,7 @@ impl Xhci {
                 portsc.port_power()
             );
 
-            if !portsc.port_enabled_disabled() {
+            if !portsc.port_enabled_disabled() || !portsc.current_connect_status() {
                 continue;
             }
 
