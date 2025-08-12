@@ -1,26 +1,12 @@
-macro_rules! usb {
-    ($e:expr) => {
-        unsafe {
-            let res = $e;
-            if res >= 0 {
-                Ok(res)
-            } else {
-                Err(crate::err::USBError::Other(
-                    format!("libusb error: {:?}", res).into(),
-                ))
-            }
-        }
-    };
-}
+
+#[macro_use]
+pub(crate) mod err;
 
 mod context;
 mod device;
 mod endpoint;
 mod interface;
 mod queue;
-
-#[macro_use]
-pub(crate) mod err;
 
 use std::sync::Arc;
 
