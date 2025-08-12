@@ -4,4 +4,7 @@
     "rust-analyzer.cargo.features": [
         "libusb"
     ],
+    "lldb.displayFormat": "auto",
+    "lldb.dereferencePointers": true,
+    "lldb.consoleMode": "commands",
 }

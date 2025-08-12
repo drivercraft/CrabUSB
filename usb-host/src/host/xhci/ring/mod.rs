@@ -3,7 +3,7 @@ pub use dma_api::Direction;
 use log::trace;
 use xhci::ring::trb::{Link, command, transfer};
 
-use crate::{BusAddr, err::*, page_size};
+use crate::{BusAddr, err::*, osal::kernel::page_size};
 
 const TRB_LEN: usize = 4;
 const TRB_SIZE: usize = size_of::<TrbData>();

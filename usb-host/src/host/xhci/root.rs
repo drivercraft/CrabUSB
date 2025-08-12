@@ -30,7 +30,7 @@ use crate::{
         reg::DisableIrqGuard,
         ring::{Ring, TrbData},
     },
-    sleep,
+    osal::kernel::sleep,
     wait::{WaitMap, Waiter},
 };
 
