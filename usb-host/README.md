@@ -32,23 +32,28 @@ The driver uses a lock-free design based on TRB (Transfer Request Block) rings, 
     use crab_usb::*;
 
     // Implement the Kernel trait for your system
-    struct MyKernel;
+    struct KernelImpl;
+    impl_trait! {
+        impl Kernel for KernelImpl {
+            fn sleep<'a>(duration: Duration) -> BoxFuture<'a, ()> {
+                your_os::sleep(duration).boxed()
+            }
 
-    impl Kernel for MyKernel {
-        fn sleep(duration: Duration) -> BoxFuture<'static, ()> {
-            // Your sleep implementation
-        }
-        
-        fn page_size() -> usize {
-            4096
+            fn page_size() -> usize {
+                your_os::page_size()
+            }
         }
     }
 
-    // Set the kernel implementation
-    set_impl!(MyKernel);
-
     // Initialize USB host controller
-    let mut host = Xhci::new(mmio_base);
+    let mut host = USBHost::new_xhci(mmio_base);
+    let handle = host.event_handler();
+
+    // Handle USB events in your OS irq callback
+    your_os::register_irq_handler(usb_irq, move || {
+         handle.handle_event();
+    });
+
     host.init().await?;
     ```
 
@@ -56,28 +61,33 @@ The driver uses a lock-free design based on TRB (Transfer Request Block) rings, 
 
 ```rust
 // Probe for connected devices
-let devices = host.probe().await?;
+let devices = host.device_list().await.unwrap();
 
 for mut device in devices {
-    // Get device descriptor
-    let desc = device.descriptor().await?;
-    println!("Device: {:?}", desc);
-    
-    // Read string descriptors
-    if let Some(index) = desc.product_string_index() {
-        let product = device.string_descriptor(index, 0).await?;
-        println!("Product: {}", product);
-    }
+    println!("Device: {:?}", device);
     
     // Claim an interface
     let mut interface = device.claim_interface(0, 0).await?;
     
     // Get endpoint for bulk transfers
-    let mut bulk_in = interface.endpoint::<Bulk, In>(0x81)?;
+    let mut bulk_in = interface.endpoint_bulk_in(0x81)?;
     
     // Perform data transfer
     let mut data = vec![0u8; 64];
-    bulk_in.transfer(&mut data).await?;
+    bulk_in.submit(&mut data)?.await?;
+
+    // submit batch
+    let mut datas = vec![vec![0u8; 64]; 10];
+    let mut results = Vec::new();
+    for data in datas.iter_mut() {
+        let res = bulk_in.submit(data)?;
+        results.push(res);  
+    }
+    // Wait for all transfers to complete
+    for res in results {
+        res.await?;
+    }
+
 }
 ```
 
