@@ -1,7 +1,7 @@
 use libusb1_sys::*;
 use usb_if::host::{EndpintIsoIn, EndpintIsoOut, Interface, USBError};
 
-use crate::host::libusb::{device::EPControl, endpoint::EndpointImpl};
+use crate::backend::libusb::{device::EPControl, endpoint::EndpointImpl};
 
 pub struct InterfaceImpl {
     raw: *mut libusb_device_handle,
@@ -85,8 +85,9 @@ impl Interface for InterfaceImpl {
         usb!(libusb_set_interface_alt_setting(
             self.raw,
             self.num as _,
-            self.alt_setting as _
+            alt_setting as _
         ))?;
+        self.alt_setting = alt_setting;
         Ok(())
     }
 

@@ -129,11 +129,11 @@ impl KeyBoard {
     }
 
     pub async fn new(mut device: Device) -> Result<Self, USBError> {
-        for config in device.configurations.iter() {
+        for config in device.configurations().iter() {
             debug!("Configuration: {config:?}");
         }
 
-        let config = &device.configurations[0];
+        let config = &device.configurations()[0];
         let interface = config
             .interfaces
             .iter()
@@ -205,9 +205,7 @@ impl KeyBoard {
         // 检查修饰键变化
         if current_modifiers != previous_modifiers {
             // 这里可以根据需要生成修饰键事件
-            debug!(
-                "Modifier change: {previous_modifiers:?} -> {current_modifiers:?}"
-            );
+            debug!("Modifier change: {previous_modifiers:?} -> {current_modifiers:?}");
         }
 
         // 提取当前按下的键
@@ -225,23 +223,25 @@ impl KeyBoard {
         // 检测新按下的键
         for &scancode in &current_keys {
             if !previous_keys.contains(&scancode)
-                && let Some(key) = scancode_to_key(scancode) {
-                    events.push(KeyEvent::KeyDown {
-                        key,
-                        modifiers: current_modifiers,
-                    });
-                }
+                && let Some(key) = scancode_to_key(scancode)
+            {
+                events.push(KeyEvent::KeyDown {
+                    key,
+                    modifiers: current_modifiers,
+                });
+            }
         }
 
         // 检测释放的键
         for &scancode in &previous_keys {
             if !current_keys.contains(&scancode)
-                && let Some(key) = scancode_to_key(scancode) {
-                    events.push(KeyEvent::KeyUp {
-                        key,
-                        modifiers: previous_modifiers,
-                    });
-                }
+                && let Some(key) = scancode_to_key(scancode)
+            {
+                events.push(KeyEvent::KeyUp {
+                    key,
+                    modifiers: previous_modifiers,
+                });
+            }
         }
 
         events
@@ -292,9 +292,10 @@ impl KeyBoard {
         let mut keys = Vec::new();
         for &scancode in &self.previous_state[2..8] {
             if scancode != 0
-                && let Some(key) = scancode_to_key(scancode) {
-                    keys.push(key);
-                }
+                && let Some(key) = scancode_to_key(scancode)
+            {
+                keys.push(key);
+            }
         }
         keys
     }

@@ -19,18 +19,21 @@ use xhci::{
 };
 
 use crate::{
-    BusAddr, PortId,
-    err::{ConvertXhciError, USBError},
-    host::xhci::{
-        XhciRegisters,
-        context::{DeviceContextList, ScratchpadBufferArray},
-        def::SlotId,
-        device::{Device, DeviceInfo},
-        event::EventRing,
-        reg::DisableIrqGuard,
-        ring::{Ring, TrbData},
+    BusAddr,
+    backend::{
+        PortId,
+        xhci::{
+            XhciRegisters,
+            context::{DeviceContextList, ScratchpadBufferArray},
+            def::SlotId,
+            device::{Device, DeviceInfo},
+            event::EventRing,
+            reg::DisableIrqGuard,
+            ring::{Ring, TrbData},
+        },
     },
-    sleep,
+    err::{ConvertXhciError, USBError},
+    osal::kernel::sleep,
     wait::{WaitMap, Waiter},
 };
 
@@ -454,9 +457,10 @@ impl RootHub {
                 code.to_result()?;
                 Ok(res)
             }
-            Err(_e) => Err(TransferError::Other(
-                alloc::format!("Command failed: {:#?}", res.completion_code()).into(),
-            )),
+            Err(_e) => Err(TransferError::Other(alloc::format!(
+                "Command failed: {:#?}",
+                res.completion_code()
+            ))),
         }
     }
 

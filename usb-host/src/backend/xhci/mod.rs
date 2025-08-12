@@ -20,9 +20,9 @@ mod ring;
 mod root;
 
 use crate::{
+    backend::xhci::{reg::XhciRegisters, root::RootHub},
     err::*,
-    host::xhci::{reg::XhciRegisters, root::RootHub},
-    sleep,
+    osal::kernel::sleep,
 };
 use def::*;
 

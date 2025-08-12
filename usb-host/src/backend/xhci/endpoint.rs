@@ -17,14 +17,16 @@ use xhci::{
 
 use crate::{
     BusAddr,
-    endpoint::{direction, kind},
-    err::USBError,
-    host::xhci::{
-        def::{Dci, DirectionExt},
-        device::DeviceState,
-        ring::Ring,
-        root::Root,
+    backend::{
+        endpoint::{direction, kind},
+        xhci::{
+            def::{Dci, DirectionExt},
+            device::DeviceState,
+            ring::Ring,
+            root::Root,
+        },
     },
+    err::USBError,
 };
 
 pub(crate) struct EndpointRaw {

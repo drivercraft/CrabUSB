@@ -1,9 +1,6 @@
-mod common;
 #[cfg(feature = "libusb")]
-mod libusb;
+pub mod libusb;
 pub mod xhci;
-
-pub use common::*;
 
 define_int_type!(PortId, usize);
 

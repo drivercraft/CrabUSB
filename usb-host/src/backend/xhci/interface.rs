@@ -2,12 +2,14 @@ use alloc::{boxed::Box, collections::btree_map::BTreeMap};
 use usb_if::descriptor::{EndpointDescriptor, InterfaceDescriptor};
 
 use crate::{
-    endpoint::{direction, kind},
-    err::USBError,
-    host::xhci::{
-        def::Dci,
-        endpoint::{Endpoint, EndpointControl, EndpointRaw},
+    backend::{
+        endpoint::{direction, kind},
+        xhci::{
+            def::Dci,
+            endpoint::{Endpoint, EndpointControl, EndpointRaw},
+        },
     },
+    err::USBError,
 };
 
 pub struct Interface {
@@ -113,7 +115,7 @@ impl usb_if::host::Interface for Interface {
         Ok(Box::new(ep))
     }
 
-    fn set_alt_setting(&mut self, alt_setting: u8) -> Result<(), USBError> {
+    fn set_alt_setting(&mut self, _alt_setting: u8) -> Result<(), USBError> {
         todo!()
     }
 

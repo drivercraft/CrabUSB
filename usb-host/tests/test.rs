@@ -18,7 +18,7 @@ mod tests {
         println,
     };
     use core::time::Duration;
-    use crab_usb::*;
+    use crab_usb::{impl_trait, *};
     use futures::FutureExt;
     use log::*;
     use pcie::*;
@@ -73,7 +73,7 @@ mod tests {
 
                 let mut device = info.open().await.unwrap();
 
-                info!("open device ok: {device}");
+                info!("open device ok: {device:?}");
 
                 device
                     .set_configuration(config_desc.configuration_value)
@@ -142,18 +142,17 @@ mod tests {
     }
 
     struct KernelImpl;
+    impl_trait! {
+        impl Kernel for KernelImpl {
+            fn sleep<'a>(duration: Duration) -> BoxFuture<'a, ()> {
+                time::sleep(duration).boxed()
+            }
 
-    impl Kernel for KernelImpl {
-        fn sleep<'a>(duration: Duration) -> futures::future::BoxFuture<'a, ()> {
-            time::sleep(duration).boxed()
-        }
-
-        fn page_size() -> usize {
-            page_size()
+            fn page_size() -> usize {
+                page_size()
+            }
         }
     }
-
-    set_impl!(KernelImpl);
 
     struct XhciInfo {
         usb: USBHost,

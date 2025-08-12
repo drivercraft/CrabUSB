@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, collections::btree_map::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::btree_map::BTreeMap, sync::Arc, vec::Vec};
 use core::ops::{Deref, DerefMut};
 
 use futures::FutureExt;
@@ -8,7 +8,7 @@ use spin::Mutex;
 use usb_if::{
     descriptor::{
         self, ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor,
-        InterfaceDescriptor, decode_string_descriptor,
+        InterfaceDescriptor,
     },
     host::{ControlSetup, ResultTransfer},
     transfer::{Recipient, Request, RequestType},
@@ -16,33 +16,21 @@ use usb_if::{
 use xhci::{registers::doorbell, ring::trb::command};
 
 use crate::{
-    PortId,
-    err::USBError,
-    host::xhci::{
-        append_port_to_route_string,
-        context::ContextData,
-        def::{Dci, SlotId},
-        endpoint::{EndpointControl, EndpointDescriptorExt, EndpointRaw},
-        interface::Interface,
-        parse_default_max_packet_size_from_port_speed,
-        reg::XhciRegisters,
-        root::RootHub,
+    backend::{
+        PortId,
+        xhci::{
+            append_port_to_route_string,
+            context::ContextData,
+            def::{Dci, SlotId},
+            endpoint::{EndpointControl, EndpointDescriptorExt, EndpointRaw},
+            interface::Interface,
+            parse_default_max_packet_size_from_port_speed,
+            reg::XhciRegisters,
+            root::RootHub,
+        },
     },
+    err::USBError,
 };
-
-fn is_valid_langid(langid: u16) -> bool {
-    let primary_lang = langid & 0x03ff;
-    let sub_lang = langid >> 10;
-
-    if primary_lang == 0
-        || (0x62..=0xFE).contains(&primary_lang)
-        || (0x100..=0x3FF).contains(&primary_lang)
-    {
-        return false;
-    }
-
-    sub_lang != 0
-}
 
 pub struct Device {
     id: SlotId,
@@ -173,26 +161,6 @@ impl usb_if::host::Device for Device {
             let desc = self.find_interface_desc(interface, alternate)?;
             let interface = Interface::new(desc, ep_map, self.ctrl_ep.clone());
             Ok(Box::new(interface) as Box<dyn usb_if::host::Interface>)
-        }
-        .boxed_local()
-    }
-
-    fn string_descriptor(
-        &mut self,
-        index: u8,
-        language_id: u16,
-    ) -> futures::future::LocalBoxFuture<'_, Result<String, USBError>> {
-        async move {
-            if index != 0 && !is_valid_langid(language_id) {
-                return Err(USBError::Other("Invalid language ID".into()));
-            }
-
-            let mut data = alloc::vec![0u8; 256];
-            self.get_descriptor(DescriptorType::STRING, index, language_id, &mut data)
-                .await?;
-
-            let res = decode_string_descriptor(&data).map_err(|e| USBError::Other(e.into()))?;
-            Ok(res)
         }
         .boxed_local()
     }

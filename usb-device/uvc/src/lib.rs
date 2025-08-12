@@ -278,7 +278,7 @@ impl UvcDevice {
 
     /// 创建新的 UVC 设备实例
     pub async fn new(mut device: Device) -> Result<Self, USBError> {
-        for config in device.configurations.iter() {
+        for config in device.configurations().iter() {
             debug!(
                 "Configuration: {}",
                 match &config.string {
@@ -290,7 +290,7 @@ impl UvcDevice {
 
         // 首先保存需要的接口信息，避免同时持有可变和不可变引用
         let (video_control_info, video_streaming_info) = {
-            let config = &device.configurations[0];
+            let config = &device.configurations()[0];
 
             // 查找 Video Control Interface (class=14, subclass=1)
             let video_control_iface = config
@@ -877,7 +877,7 @@ impl UvcDevice {
         }
 
         // 参考 libuvc 的实现，根据 dwMaxPayloadTransferSize 选择合适的 alternate setting
-        let config = &self.device.configurations[0];
+        let config = &self.device.configurations()[0];
         let vs_interface_group = config
             .interfaces
             .iter()
