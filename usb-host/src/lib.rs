@@ -10,11 +10,12 @@ pub use usb_if::transfer::*;
 #[macro_use]
 mod _macros;
 
+pub(crate) mod backend;
+mod common;
 pub mod err;
-pub mod host;
 
+pub use common::*;
 pub use futures::future::BoxFuture;
-pub use host::*;
 
 #[macro_use]
 mod osal;

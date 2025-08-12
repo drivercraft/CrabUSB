@@ -21,7 +21,7 @@ mod root;
 
 use crate::{
     err::*,
-    host::xhci::{reg::XhciRegisters, root::RootHub},
+    backend::xhci::{reg::XhciRegisters, root::RootHub},
     osal::kernel::sleep,
 };
 use def::*;

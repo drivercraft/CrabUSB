@@ -13,7 +13,7 @@ use usb_if::{
     host::{Controller, ResultTransfer, USBError},
 };
 
-use crate::host::xhci::Xhci;
+use crate::backend::xhci::Xhci;
 
 pub struct EventHandler {
     ptr: *mut USBHost,
@@ -57,7 +57,7 @@ impl USBHost {
 
     #[cfg(feature = "libusb")]
     pub fn new_libusb() -> Self {
-        let libusb = crate::host::libusb::Libusb::new();
+        let libusb = crate::backend::libusb::Libusb::new();
         Self {
             raw: Box::new(libusb),
             running: Arc::new(AtomicBool::new(true)),
@@ -166,17 +166,29 @@ impl DeviceInfo {
         }
 
         let manufacturer_string = match self.descriptor.manufacturer_string_index {
-            Some(index) => device.string_descriptor(index.get(), self.descriptor.default_language).await?,
+            Some(index) => {
+                device
+                    .string_descriptor(index.get(), self.descriptor.default_language)
+                    .await?
+            }
             None => String::new(),
         };
 
         let product_string = match self.descriptor.product_string_index {
-            Some(index) => device.string_descriptor(index.get(), self.descriptor.default_language).await?,
+            Some(index) => {
+                device
+                    .string_descriptor(index.get(), self.descriptor.default_language)
+                    .await?
+            }
             None => String::new(),
         };
 
         let serial_number_string = match self.descriptor.serial_number_string_index {
-            Some(index) => device.string_descriptor(index.get(), self.descriptor.default_language).await?,
+            Some(index) => {
+                device
+                    .string_descriptor(index.get(), self.descriptor.default_language)
+                    .await?
+            }
             None => String::new(),
         };
 
@@ -266,7 +278,11 @@ impl Device {
     ) -> Result<Interface, USBError> {
         let mut desc = self.find_interface_desc(interface, alternate)?;
         desc.string = Some(match desc.string_index {
-            Some(index) => self.raw.string_descriptor(index.get(), self.descriptor.default_language).await?,
+            Some(index) => {
+                self.raw
+                    .string_descriptor(index.get(), self.descriptor.default_language)
+                    .await?
+            }
             None => String::new(),
         });
         self.raw

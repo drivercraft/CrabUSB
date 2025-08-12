@@ -2,7 +2,7 @@ use core::ptr::null_mut;
 
 use libusb1_sys::{
     libusb_device_handle, libusb_fill_bulk_transfer, libusb_fill_interrupt_transfer,
-    libusb_fill_iso_transfer, libusb_get_iso_packet_buffer_simple, libusb_transfer,
+    libusb_fill_iso_transfer, libusb_transfer,
 };
 use log::trace;
 use usb_if::host::{
@@ -10,7 +10,7 @@ use usb_if::host::{
     EndpointInterruptOut,
 };
 
-use crate::host::libusb::queue::Queue;
+use crate::backend::libusb::queue::Queue;
 
 pub struct EndpointImpl {
     dev: *mut libusb_device_handle,
@@ -153,7 +153,6 @@ fn iso_in_on_ready(trans: *mut (), dest: *mut (), len: *mut ()) {
                 libusb1_sys::constants::LIBUSB_TRANSFER_COMPLETED => {
                     // 处理成功完成的包
                     let packet_len = packet.actual_length as usize;
-                    
                 }
                 libusb1_sys::constants::LIBUSB_TRANSFER_OVERFLOW => {
                     log::error!(

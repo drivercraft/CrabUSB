@@ -16,18 +16,20 @@ use usb_if::{
 use xhci::{registers::doorbell, ring::trb::command};
 
 use crate::{
-    PortId,
-    err::USBError,
-    host::xhci::{
-        append_port_to_route_string,
-        context::ContextData,
-        def::{Dci, SlotId},
-        endpoint::{EndpointControl, EndpointDescriptorExt, EndpointRaw},
-        interface::Interface,
-        parse_default_max_packet_size_from_port_speed,
-        reg::XhciRegisters,
-        root::RootHub,
+    backend::{
+        PortId,
+        xhci::{
+            append_port_to_route_string,
+            context::ContextData,
+            def::{Dci, SlotId},
+            endpoint::{EndpointControl, EndpointDescriptorExt, EndpointRaw},
+            interface::Interface,
+            parse_default_max_packet_size_from_port_speed,
+            reg::XhciRegisters,
+            root::RootHub,
+        },
     },
+    err::USBError,
 };
 
 fn is_valid_langid(langid: u16) -> bool {

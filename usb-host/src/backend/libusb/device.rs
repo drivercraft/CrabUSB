@@ -12,7 +12,7 @@ use usb_if::{
     transfer::{BmRequestType, Direction},
 };
 
-use crate::host::libusb::{context::Context, interface::InterfaceImpl};
+use crate::backend::libusb::{context::Context, interface::InterfaceImpl};
 
 pub struct DeviceInfo {
     pub(crate) raw: *mut libusb_device,
