@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.1...crab-usb-v0.3.2) - 2025-08-12
+
+### Other
+
+- enhance error handling in libusb context and error modules ([#26](https://github.com/drivercraft/CrabUSB/pull/26))
+
 ## [0.3.0](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.2.3...crab-usb-v0.3.0) - 2025-08-09
 
 ### Fixed
