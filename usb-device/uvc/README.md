@@ -24,7 +24,7 @@
 
 ```rust
 use crab_usb::host::Host;
-use usb_uvc::{UvcDevice, VideoFormat};
+use crab_uvc::{UvcDevice, VideoFormat};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### 设置视频控制参数
 
 ```rust
-use usb_uvc::VideoControlEvent;
+use crab_uvc::VideoControlEvent;
 
 // 调整图像参数
 uvc.send_control_command(VideoControlEvent::BrightnessChanged(100)).await?;
@@ -80,7 +80,7 @@ uvc.send_control_command(VideoControlEvent::SaturationChanged(80)).await?;
 ### 支持的视频格式
 
 ```rust
-use usb_uvc::{VideoFormat, UncompressedFormat};
+use crab_uvc::{VideoFormat, UncompressedFormat};
 
 // MJPEG 压缩格式
 let mjpeg_format = VideoFormat::Mjpeg {

@@ -15,7 +15,7 @@ mod common;
 pub mod err;
 
 pub use common::*;
-pub use futures::future::BoxFuture;
+pub use futures::future::{BoxFuture, FutureExt};
 
 #[macro_use]
 mod osal;

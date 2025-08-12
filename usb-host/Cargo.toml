@@ -30,7 +30,7 @@ tock-registers = "0.10"
 usb-if = {workspace = true}
 xhci = "0.9"
 libusb1-sys = { version = "0.7", optional = true}
-trait-ffi = "0.2.2"
+trait-ffi = "0.2.4"
 
 [dev-dependencies]
 bare-test = "0.5"

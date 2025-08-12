@@ -1,10 +1,10 @@
 use crab_usb::USBHost;
+use crab_uvc::{UncompressedFormat, UvcDevice, VideoControlEvent, VideoFormat};
 use env_logger;
 use ffmpeg_next as ffmpeg;
 use log::{debug, error, info, warn};
 use std::{hint::spin_loop, sync::Arc, thread, time::Duration};
 use tokio::fs;
-use usb_uvc::{UncompressedFormat, UvcDevice, VideoControlEvent, VideoFormat};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -193,7 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn save_frame_to_file(
-    frame: &usb_uvc::frame::FrameEvent,
+    frame: &crab_uvc::frame::FrameEvent,
     frame_number: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::fs::File;
@@ -210,7 +210,7 @@ async fn save_frame_to_file(
 async fn create_video_from_frames(
     frame_numbers: &[u32],
     fps: f32,
-    video_format: &usb_uvc::VideoFormat,
+    video_format: &crab_uvc::VideoFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(
         "Creating video with {} frames at {:.2} fps",
@@ -221,25 +221,25 @@ async fn create_video_from_frames(
 
     // 根据 VideoFormat 确定 FFmpeg 参数
     let (width, height, pixel_format) = match video_format {
-        usb_uvc::VideoFormat::Uncompressed {
+        crab_uvc::VideoFormat::Uncompressed {
             width,
             height,
             format_type,
             ..
         } => {
             let ffmpeg_format = match format_type {
-                usb_uvc::UncompressedFormat::Yuy2 => "yuyv422",
-                usb_uvc::UncompressedFormat::Nv12 => "nv12",
-                usb_uvc::UncompressedFormat::Rgb24 => "rgb24",
-                usb_uvc::UncompressedFormat::Rgb32 => "rgba",
+                crab_uvc::UncompressedFormat::Yuy2 => "yuyv422",
+                crab_uvc::UncompressedFormat::Nv12 => "nv12",
+                crab_uvc::UncompressedFormat::Rgb24 => "rgb24",
+                crab_uvc::UncompressedFormat::Rgb32 => "rgba",
             };
             (*width, *height, ffmpeg_format)
         }
-        usb_uvc::VideoFormat::Mjpeg { width, height, .. } => {
+        crab_uvc::VideoFormat::Mjpeg { width, height, .. } => {
             // MJPEG 数据直接从帧解码，不需要指定像素格式
             return create_video_from_mjpeg_frames(frame_numbers, fps, *width, *height).await;
         }
-        usb_uvc::VideoFormat::H264 { width, height, .. } => {
+        crab_uvc::VideoFormat::H264 { width, height, .. } => {
             // H.264 数据直接从帧解码
             return create_video_from_h264_frames(frame_numbers, fps, *width, *height).await;
         }
@@ -511,7 +511,7 @@ async fn create_video_from_h264_frames(
 
 async fn convert_raw_to_images(
     frame_numbers: &[u32],
-    video_format: &usb_uvc::VideoFormat,
+    video_format: &crab_uvc::VideoFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::fs;
 
@@ -519,14 +519,16 @@ async fn convert_raw_to_images(
     fs::create_dir_all("images").await?;
 
     let (width, height, format_info) = match video_format {
-        usb_uvc::VideoFormat::Uncompressed {
+        crab_uvc::VideoFormat::Uncompressed {
             width,
             height,
             format_type,
             ..
         } => (*width, *height, format!("{:?}", format_type)),
-        usb_uvc::VideoFormat::Mjpeg { width, height, .. } => (*width, *height, "MJPEG".to_string()),
-        usb_uvc::VideoFormat::H264 { width, height, .. } => (*width, *height, "H264".to_string()),
+        crab_uvc::VideoFormat::Mjpeg { width, height, .. } => {
+            (*width, *height, "MJPEG".to_string())
+        }
+        crab_uvc::VideoFormat::H264 { width, height, .. } => (*width, *height, "H264".to_string()),
     };
 
     info!(
@@ -563,16 +565,16 @@ async fn convert_raw_to_png(
     output_path: &str,
     width: u16,
     height: u16,
-    video_format: &usb_uvc::VideoFormat,
+    video_format: &crab_uvc::VideoFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
 
     match video_format {
-        usb_uvc::VideoFormat::Uncompressed { format_type, .. } => {
+        crab_uvc::VideoFormat::Uncompressed { format_type, .. } => {
             // 对于未压缩格式，我们可以尝试使用 image crate 进行转换
             match format_type {
-                usb_uvc::UncompressedFormat::Yuy2 => {
+                crab_uvc::UncompressedFormat::Yuy2 => {
                     // YUY2 (YUYV) 到 RGB 的转换
                     if let Ok(rgb_data) =
                         convert_yuyv_to_rgb(raw_data, width as usize, height as usize)
@@ -585,7 +587,7 @@ async fn convert_raw_to_png(
                         file.write_all(raw_data).await?;
                     }
                 }
-                usb_uvc::UncompressedFormat::Rgb24 => {
+                crab_uvc::UncompressedFormat::Rgb24 => {
                     // RGB24 直接转 PNG
                     save_rgb_as_png(raw_data, output_path, width as u32, height as u32).await?;
                 }
@@ -596,7 +598,7 @@ async fn convert_raw_to_png(
                 }
             }
         }
-        usb_uvc::VideoFormat::Mjpeg { .. } => {
+        crab_uvc::VideoFormat::Mjpeg { .. } => {
             // MJPEG 数据可以直接保存为 JPEG 文件
             let jpeg_path = output_path.replace(".png", ".jpg");
             let mut file = File::create(&jpeg_path).await?;
@@ -608,7 +610,7 @@ async fn convert_raw_to_png(
                 debug!("Kept JPEG file: {}", jpeg_path);
             }
         }
-        usb_uvc::VideoFormat::H264 { .. } => {
+        crab_uvc::VideoFormat::H264 { .. } => {
             // H.264 帧需要特殊处理，暂时保存原始数据
             let mut file = File::create(output_path).await?;
             file.write_all(raw_data).await?;
@@ -756,28 +758,28 @@ async fn convert_jpeg_to_png(
 }
 
 async fn write_format_info(
-    video_format: &usb_uvc::VideoFormat,
+    video_format: &crab_uvc::VideoFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
 
     let (width, height, pixel_format) = match video_format {
-        usb_uvc::VideoFormat::Uncompressed {
+        crab_uvc::VideoFormat::Uncompressed {
             width,
             height,
             format_type,
             ..
         } => {
             let ffmpeg_format = match format_type {
-                usb_uvc::UncompressedFormat::Yuy2 => "yuyv422",
-                usb_uvc::UncompressedFormat::Nv12 => "nv12",
-                usb_uvc::UncompressedFormat::Rgb24 => "rgb24",
-                usb_uvc::UncompressedFormat::Rgb32 => "rgba",
+                crab_uvc::UncompressedFormat::Yuy2 => "yuyv422",
+                crab_uvc::UncompressedFormat::Nv12 => "nv12",
+                crab_uvc::UncompressedFormat::Rgb24 => "rgb24",
+                crab_uvc::UncompressedFormat::Rgb32 => "rgba",
             };
             (*width, *height, ffmpeg_format)
         }
-        usb_uvc::VideoFormat::Mjpeg { width, height, .. } => (*width, *height, "mjpeg"),
-        usb_uvc::VideoFormat::H264 { width, height, .. } => (*width, *height, "h264"),
+        crab_uvc::VideoFormat::Mjpeg { width, height, .. } => (*width, *height, "mjpeg"),
+        crab_uvc::VideoFormat::H264 { width, height, .. } => (*width, *height, "h264"),
     };
 
     let format_info = format!(

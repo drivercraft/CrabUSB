@@ -1,9 +1,9 @@
 /// 简化的 UVC 流传输测试
 /// 用于诊断 isochronous 传输问题
 use crab_usb::USBHost;
+use crab_uvc::*;
 use log::{debug, info, warn};
 use std::{hint::spin_loop, thread};
-use usb_uvc::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

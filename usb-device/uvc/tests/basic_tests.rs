@@ -1,4 +1,4 @@
-use usb_uvc::{UncompressedFormat, UvcDeviceState, VideoControlEvent, VideoFormat};
+use crab_uvc::{UncompressedFormat, UvcDeviceState, VideoControlEvent, VideoFormat};
 
 #[test]
 fn test_video_format_creation() {
