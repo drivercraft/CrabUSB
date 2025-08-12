@@ -48,7 +48,7 @@ async fn test() {
     info!("Opened device: {device}");
 
     if let Some(index) = device.descriptor.manufacturer_string_index {
-        let s = device.string_descriptor(index.get(), 0).await.unwrap();
+        let s = device.string_descriptor(index.get()).await.unwrap();
         info!("Manufacturer: {s}");
     }
 
