@@ -4,6 +4,7 @@ license.workspace = true
 name = "test_xhci_uvc"
 repository.workspace = true
 version = "0.1.0"
+publish = false
 
 [dependencies]
 crab-usb = {workspace = true}
