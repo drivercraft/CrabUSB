@@ -20,8 +20,8 @@ mod ring;
 mod root;
 
 use crate::{
-    err::*,
     backend::xhci::{reg::XhciRegisters, root::RootHub},
+    err::*,
     osal::kernel::sleep,
 };
 use def::*;

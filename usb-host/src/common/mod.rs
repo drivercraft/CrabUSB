@@ -1,19 +1,15 @@
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
-use core::sync::atomic::AtomicBool;
-use core::{fmt::Display, ptr::NonNull};
-use log::{debug, trace};
-use usb_if::descriptor::{Class, DescriptorType, decode_string_descriptor};
-use usb_if::host::ControlSetup;
-use usb_if::transfer::{Recipient, Request, RequestType};
-
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
+use core::{fmt::Display, ptr::NonNull, sync::atomic::AtomicBool};
+use log::trace;
 use usb_if::{
-    descriptor::{
-        ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor, InterfaceDescriptor,
-    },
+    descriptor::{Class, ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor},
     host::{Controller, ResultTransfer, USBError},
 };
 
 use crate::backend::xhci::Xhci;
+
+mod device;
+pub use device::*;
 
 pub struct EventHandler {
     ptr: *mut USBHost,
@@ -137,78 +133,8 @@ impl DeviceInfo {
     }
 
     pub async fn open(&mut self) -> Result<Device, USBError> {
-        let mut device = self.raw.open().await?;
-
-        let mut lang_buf = alloc::vec![0u8; 256];
-        device
-            .control_in(
-                ControlSetup {
-                    request_type: RequestType::Standard,
-                    recipient: Recipient::Device,
-                    request: Request::GetDescriptor,
-                    value: ((DescriptorType::STRING.0 as u16) << 8) | 0,
-                    index: 0,
-                },
-                &mut lang_buf,
-            )?
-            .await?;
-        if lang_buf.len() >= 4
-            && (lang_buf[0] as usize) <= lang_buf.len()
-            && lang_buf[1] == DescriptorType::STRING.0
-        {
-            let dlen = lang_buf[0] as usize;
-            if dlen >= 4 {
-                let langid = u16::from_le_bytes([lang_buf[2], lang_buf[3]]);
-                self.descriptor.default_language = langid;
-
-                trace!("Configured default lang id to {langid:#x}");
-            }
-        }
-
-        let manufacturer_string = match self.descriptor.manufacturer_string_index {
-            Some(index) => {
-                device
-                    .string_descriptor(index.get(), self.descriptor.default_language)
-                    .await?
-            }
-            None => String::new(),
-        };
-
-        let product_string = match self.descriptor.product_string_index {
-            Some(index) => {
-                device
-                    .string_descriptor(index.get(), self.descriptor.default_language)
-                    .await?
-            }
-            None => String::new(),
-        };
-
-        let serial_number_string = match self.descriptor.serial_number_string_index {
-            Some(index) => {
-                device
-                    .string_descriptor(index.get(), self.descriptor.default_language)
-                    .await?
-            }
-            None => String::new(),
-        };
-
-        // let mut config_value = device.get_configuration().await?;
-        // if config_value == 0 {
-        //     debug!("Setting configuration 1");
-        //     device.set_configuration(1).await?; // Reset to configuration 0
-        //     config_value = 1;
-        // }
-        // debug!("Current configuration: {config_value}");
-        let mut device = Device {
-            descriptor: self.descriptor.clone(),
-            configurations: Vec::with_capacity(self.configurations.len()),
-            raw: device,
-            manufacturer_string,
-            product_string,
-            serial_number_string,
-        };
-        device.init_configs().await?;
-        Ok(device)
+        let device = self.raw.open().await?;
+        Device::new(device, self.descriptor.clone()).await
     }
 
     pub fn class(&self) -> Class {
@@ -231,178 +157,6 @@ impl DeviceInfo {
             }
         }
         interfaces.values().cloned().collect()
-    }
-}
-
-pub struct Device {
-    pub descriptor: usb_if::descriptor::DeviceDescriptor,
-    pub configurations: Vec<ConfigurationDescriptor>,
-    pub manufacturer_string: String,
-    pub product_string: String,
-    pub serial_number_string: String,
-    raw: Box<dyn usb_if::host::Device>,
-}
-
-impl Display for Device {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Device")
-            .field(
-                "id",
-                &alloc::format!(
-                    "{:04x}:{:04x}",
-                    self.descriptor.vendor_id,
-                    self.descriptor.product_id
-                ),
-            )
-            .field("class", &self.class())
-            .field("manufacturer_string", &self.manufacturer_string)
-            .field("product_string", &self.product_string)
-            .field("serial_number_string", &self.serial_number_string)
-            .finish()
-    }
-}
-
-impl Device {
-    pub async fn set_configuration(&mut self, configuration: u8) -> Result<(), USBError> {
-        self.raw.set_configuration(configuration).await
-    }
-
-    pub async fn get_configuration(&mut self) -> Result<u8, USBError> {
-        self.raw.get_configuration().await
-    }
-
-    pub async fn claim_interface(
-        &mut self,
-        interface: u8,
-        alternate: u8,
-    ) -> Result<Interface, USBError> {
-        let mut desc = self.find_interface_desc(interface, alternate)?;
-        desc.string = Some(match desc.string_index {
-            Some(index) => {
-                self.raw
-                    .string_descriptor(index.get(), self.descriptor.default_language)
-                    .await?
-            }
-            None => String::new(),
-        });
-        self.raw
-            .claim_interface(interface, alternate)
-            .await
-            .map(|raw| Interface {
-                descriptor: desc,
-                raw,
-            })
-    }
-
-    async fn init_configs(&mut self) -> Result<(), USBError> {
-        if self.configurations.is_empty() {
-            debug!("No configurations found, reading configuration descriptors");
-            for i in 0..self.descriptor.num_configurations {
-                let config_desc = self.read_configuration_descriptor(i).await?;
-                self.configurations.push(config_desc);
-            }
-        }
-        Ok(())
-    }
-
-    fn find_interface_desc(
-        &self,
-        interface: u8,
-        alternate: u8,
-    ) -> Result<InterfaceDescriptor, USBError> {
-        for config in &self.configurations {
-            for iface in &config.interfaces {
-                if iface.interface_number == interface {
-                    for alt in &iface.alt_settings {
-                        if alt.alternate_setting == alternate {
-                            return Ok(alt.clone());
-                        }
-                    }
-                }
-            }
-        }
-        Err(USBError::NotFound)
-    }
-
-    pub async fn current_configuration_descriptor(
-        &mut self,
-    ) -> Result<ConfigurationDescriptor, USBError> {
-        let value = self.raw.get_configuration().await?;
-        if value == 0 {
-            return Err(USBError::NotFound);
-        }
-        for config in &self.configurations {
-            if config.configuration_value == value {
-                return Ok(config.clone());
-            }
-        }
-        Err(USBError::NotFound)
-    }
-
-    pub fn class(&self) -> Class {
-        self.descriptor.class()
-    }
-
-    pub fn vendor_id(&self) -> u16 {
-        self.descriptor.vendor_id
-    }
-
-    pub fn product_id(&self) -> u16 {
-        self.descriptor.product_id
-    }
-
-    pub async fn string_descriptor(
-        &mut self,
-        index: u8,
-        language_id: u16,
-    ) -> Result<String, USBError> {
-        // self.raw.string_descriptor(index, language_id).await
-        let mut data = alloc::vec![0u8; 256];
-        self.get_descriptor(DescriptorType::STRING, index, language_id, &mut data)
-            .await?;
-        let res = decode_string_descriptor(&data).map_err(|e| USBError::Other(e.into()))?;
-        Ok(res)
-    }
-
-    async fn get_descriptor(
-        &mut self,
-        desc_type: DescriptorType,
-        desc_index: u8,
-        language_id: u16,
-        buff: &mut [u8],
-    ) -> Result<(), USBError> {
-        self.raw
-            .control_in(
-                ControlSetup {
-                    request_type: RequestType::Standard,
-                    recipient: Recipient::Device,
-                    request: Request::GetDescriptor,
-                    value: ((desc_type.0 as u16) << 8) | desc_index as u16,
-                    index: language_id,
-                },
-                buff,
-            )?
-            .await?;
-        Ok(())
-    }
-
-    async fn read_configuration_descriptor(
-        &mut self,
-        index: u8,
-    ) -> Result<ConfigurationDescriptor, USBError> {
-        let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN]; // 配置描述符头部固定为9字节
-        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut header)
-            .await?;
-
-        let total_length = u16::from_le_bytes(header[2..4].try_into().unwrap()) as usize;
-        // 获取完整的配置描述符（包括接口和端点描述符）
-        let mut full_data = alloc::vec![0u8; total_length];
-        debug!("Reading configuration descriptor for index {index}, total length: {total_length}");
-        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut full_data)
-            .await?;
-        let parsed_config = ConfigurationDescriptor::parse(&full_data)
-            .ok_or(USBError::Other("config descriptor parse err".into()))?;
-        Ok(parsed_config)
     }
 }
 

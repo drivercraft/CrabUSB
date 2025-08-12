@@ -33,11 +33,6 @@ pub trait Device: Send + 'static {
         alternate: u8,
     ) -> LocalBoxFuture<'_, Result<Box<dyn Interface>, USBError>>;
 
-    fn string_descriptor(
-        &mut self,
-        index: u8,
-        language_id: u16,
-    ) -> LocalBoxFuture<'_, Result<String, USBError>>;
     fn control_in<'a>(&mut self, setup: ControlSetup, data: &'a mut [u8]) -> ResultTransfer<'a>;
     fn control_out<'a>(&mut self, setup: ControlSetup, data: &'a [u8]) -> ResultTransfer<'a>;
 }

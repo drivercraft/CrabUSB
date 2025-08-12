@@ -73,7 +73,7 @@ mod tests {
 
                 let mut device = info.open().await.unwrap();
 
-                info!("open device ok: {device}");
+                info!("open device ok: {device:?}");
 
                 device
                     .set_configuration(config_desc.configuration_value)

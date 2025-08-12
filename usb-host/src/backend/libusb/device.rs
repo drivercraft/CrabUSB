@@ -260,27 +260,6 @@ impl usb_if::host::Device for Device {
         .boxed_local()
     }
 
-    fn string_descriptor(
-        &mut self,
-        index: u8,
-        _language_id: u16,
-    ) -> futures::future::LocalBoxFuture<'_, Result<String, usb_if::host::USBError>> {
-        async move {
-            let mut buf = vec![0u8; 256];
-            let len = usb!(libusb_get_string_descriptor_ascii(
-                self.handle.raw(),
-                index,
-                buf.as_mut_ptr(),
-                buf.len() as _
-            ))?;
-            buf.truncate(len as usize);
-            String::from_utf8(buf).map_err(|_| {
-                usb_if::host::USBError::Other("Failed to convert string descriptor to UTF-8".into())
-            })
-        }
-        .boxed_local()
-    }
-
     fn control_in<'a>(
         &mut self,
         setup: usb_if::host::ControlSetup,
@@ -314,7 +293,6 @@ fn libusb_device_desc_to_desc(
         usb_version: desc.bcdUSB,
         max_packet_size_0: desc.bMaxPacketSize0,
         device_version: desc.bcdDevice,
-        default_language: 0,
     })
 }
 
