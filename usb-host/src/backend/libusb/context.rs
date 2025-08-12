@@ -17,7 +17,7 @@ impl Context {
 
     pub fn device_list(&self) -> crate::err::Result<DeviceList> {
         let mut list: *const *mut libusb_device = std::ptr::null_mut();
-        let count = usb!(libusb1_sys::libusb_get_device_list(self.0, &mut list))?;
+        let count = unsafe { libusb1_sys::libusb_get_device_list(self.0, &mut list) };
         Ok(DeviceList {
             list,
             len: count as usize,

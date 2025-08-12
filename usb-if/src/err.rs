@@ -6,6 +6,10 @@ pub enum TransferError {
     Stall,
     #[error("Request queue full")]
     RequestQueueFull,
+    #[error("Timeout")]
+    Timeout,
+    #[error("Cancelled")]
+    Cancelled,
     #[error("Other error: {0}")]
     Other(String),
 }
