@@ -1,10 +1,12 @@
-use libusb1_sys::{constants::*, *};
+use libusb1_sys::*;
 use log::*;
 use usb_if::{
     err::TransferError,
     host::ResultTransfer,
     transfer::wait::{CallbackOnReady, WaitMap},
 };
+
+use crate::backend::libusb::err::transfer_status_to_result;
 
 pub struct Queue {
     elems: Vec<USBTransfer>,
@@ -124,24 +126,11 @@ extern "system" fn transfer_callback(transfer: *mut libusb_transfer) {
         let user_data = Box::from_raw(user_data_ptr);
         let id = user_data.id;
         let wait_map = user_data.wait_map;
-
-        let result = if (*transfer).status == LIBUSB_TRANSFER_COMPLETED {
-            Ok((*transfer).actual_length as usize)
-        } else {
-            Err(TransferError::Other(format!(
-                "Transfer failed with status: {:?}",
-                match (*transfer).status {
-                    LIBUSB_TRANSFER_COMPLETED => "COMPLETED",
-                    LIBUSB_TRANSFER_ERROR => "ERROR",
-                    LIBUSB_TRANSFER_TIMED_OUT => "TIMED_OUT",
-                    LIBUSB_TRANSFER_CANCELLED => "CANCELLED",
-                    LIBUSB_TRANSFER_STALL => "STALL",
-                    LIBUSB_TRANSFER_NO_DEVICE => "NO_DEVICE",
-                    LIBUSB_TRANSFER_OVERFLOW => "OVERFLOW",
-                    _ => "UNKNOWN",
-                }
-            )))
+        let result = match transfer_status_to_result((*transfer).status) {
+            Ok(_) => Ok((*transfer).actual_length as usize),
+            Err(e) => Err(e),
         };
+
         wait_map.set_result(id, result);
     }
 }

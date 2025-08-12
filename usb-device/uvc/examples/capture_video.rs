@@ -253,7 +253,7 @@ async fn create_video_from_frames(
     // 使用 ffmpeg-next 从原始帧创建视频
     match tokio::task::spawn_blocking(
         move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            use ffmpeg::format::{Pixel, input, output};
+            use ffmpeg::format::{Pixel, output};
             use ffmpeg::{Rational, codec, encoder};
 
             ffmpeg::init()?;
