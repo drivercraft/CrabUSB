@@ -241,16 +241,16 @@ impl Root {
                 match allowed {
                     Allowed::CommandCompletion(c) => {
                         let addr = c.command_trb_pointer();
-                        trace!("[Command] << {allowed:?} @{addr:X}");
+                        // trace!("[Command] << {allowed:?} @{addr:X}");
                         self.wait_cmd.set_result(addr, c);
                     }
                     Allowed::PortStatusChange(st) => {
-                        debug!("port change: {}", st.port_id());
+                        // debug!("port change: {}", st.port_id());
                     }
                     Allowed::TransferEvent(c) => {
                         let addr = c.trb_pointer();
-                        trace!("[Transfer] << {allowed:?} @{addr:X}");
-                        debug!("transfer event: {c:?}");
+                        // trace!("[Transfer] << {allowed:?} @{addr:X}");
+                        // debug!("transfer event: {c:?}");
                         let result = match c.completion_code() {
                             Ok(code) => match code.to_result() {
                                 Ok(_) => Ok(c.trb_transfer_length() as usize),
@@ -262,7 +262,7 @@ impl Root {
                         self.wait_transfer.set_result(c.trb_pointer(), result);
                     }
                     _ => {
-                        debug!("unhandled event {allowed:?}");
+                        // debug!("unhandled event {allowed:?}");
                     }
                 }
             }
@@ -518,6 +518,7 @@ impl RootHub {
         on_ready: CallbackOnReady,
     ) -> Waiter<'a, Result<usize, TransferError>> {
         let inner = unsafe { self.force_use() };
+        trace!("wait_for_transfer: {addr:?}");
         inner
             .wait_transfer
             .wait_for_result(addr.raw(), Some(on_ready))

@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use dma_api::{DSlice, DSliceMut};
 use log::trace;
-use mbarrier::mb;
+use mbarrier::{mb, rmb};
 use spin::Mutex;
 use usb_if::{
     descriptor::{self, EndpointDescriptor, EndpointType},
@@ -59,7 +59,7 @@ impl EndpointRaw {
             trb_ptr = self.ring.enque_transfer(trb);
         }
 
-        trace!("trb : {trb_ptr:#x?}");
+        trace!("trb : {trb_ptr:#x?}, addr: {buff_addr:#x}, len: {buff_len}, {direction:?}");
 
         self.device.root.transfer_preper_id(trb_ptr)?;
 
@@ -67,14 +67,16 @@ impl EndpointRaw {
 
         let mut bell = doorbell::Register::default();
         bell.set_doorbell_target(self.dci.into());
-
+        trace!("ring doorbell: slot {}, {bell:?}", self.device.id);
         self.device.doorbell(bell);
+
+        trace!("ring doorbell done");
 
         Ok(unsafe {
             self.device.root.wait_for_transfer(
                 trb_ptr,
                 CallbackOnReady {
-                    on_ready,
+                    on_ready: on_ready,
                     param1: buff_addr as *mut (),
                     param2: buff_len as *mut (),
                     param3: direction as u8 as usize as *mut (),
@@ -91,19 +93,22 @@ impl EndpointRaw {
 fn on_ready(addr: *mut (), len: *mut (), direction: *mut ()) {
     let addr = addr as usize;
     let len = len as usize;
-    let direction = Direction::from_address(direction as usize as u8);
-    trace!("Transfer completed: addr={addr:#x}, len={len}");
+    let direction = direction as usize as u8;
+    trace!("on_ready: {addr:#x}, {len}, {direction}");
+    let direction = Direction::from_raw(direction as usize as u8);
+    trace!("Transfer completed: addr={addr:#x}, len={len}, {direction:?}");
     if len > 0 {
         let data_slice = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
 
         let dm = DSliceMut::from(
             data_slice,
             match direction {
-                usb_if::transfer::Direction::Out => dma_api::Direction::ToDevice,
-                usb_if::transfer::Direction::In => dma_api::Direction::FromDevice,
+                Direction::Out => dma_api::Direction::ToDevice,
+                Direction::In => dma_api::Direction::FromDevice,
             },
         );
         dm.preper_read_all();
+        rmb();
     }
 }
 

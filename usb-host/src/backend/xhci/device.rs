@@ -1,5 +1,8 @@
 use alloc::{boxed::Box, collections::btree_map::BTreeMap, sync::Arc, vec::Vec};
-use core::ops::{Deref, DerefMut};
+use core::{
+    ops::{Deref, DerefMut},
+    time::Duration,
+};
 
 use futures::FutureExt;
 use log::{debug, trace};
@@ -8,7 +11,7 @@ use spin::Mutex;
 use usb_if::{
     descriptor::{
         self, ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor,
-        InterfaceDescriptor,
+        InterfaceDescriptor, LanguageId,
     },
     host::{ControlSetup, ResultTransfer},
     transfer::{Recipient, Request, RequestType},
@@ -30,6 +33,7 @@ use crate::{
         },
     },
     err::USBError,
+    osal::kernel::sleep,
 };
 
 pub struct Device {
@@ -42,6 +46,7 @@ pub struct Device {
     config_desc: Vec<ConfigurationDescriptor>,
     state: DeviceState,
     pub(crate) ctrl_ep: EndpointControl,
+    lang_id: LanguageId,
 }
 
 pub struct DeviceInfo {
@@ -194,6 +199,7 @@ impl Device {
             config_desc: Default::default(),
             state,
             ctrl_ep,
+            lang_id: LanguageId::EnglishUnitedStates,
         })
     }
 
@@ -205,6 +211,9 @@ impl Device {
         trace!("Initializing device with ID: {}", self.id.as_u8());
         // Perform initialization logic here
         self.address().await?;
+
+        sleep(Duration::from_secs(1)).await;
+
         let max_packet_size = self.control_max_packet_size().await?;
 
         trace!("Max packet size: {max_packet_size}");
@@ -324,7 +333,32 @@ impl Device {
     pub fn control_out<'a>(&mut self, param: ControlSetup, buff: &'a [u8]) -> ResultTransfer<'a> {
         self.ctrl_ep.control_out(param, buff)
     }
+    async fn defautl_lang_id(&mut self) -> Result<LanguageId, USBError> {
+        let mut lang_buf = alloc::vec![0u8; 8];
+        self.control_in(
+            ControlSetup {
+                request_type: RequestType::Standard,
+                recipient: Recipient::Device,
+                request: Request::GetDescriptor,
+                value: ((DescriptorType::STRING.0 as u16) << 8),
+                index: 0,
+            },
+            &mut lang_buf,
+        )?
+        .await?;
+        if lang_buf.len() >= 4
+            && (lang_buf[0] as usize) <= lang_buf.len()
+            && lang_buf[1] == DescriptorType::STRING.0
+        {
+            let dlen = lang_buf[0] as usize;
+            if dlen >= 4 {
+                let langid = u16::from_le_bytes([lang_buf[2], lang_buf[3]]);
+                return Ok(langid.into());
+            }
+        }
 
+        Ok(LanguageId::EnglishUnitedStates) // 默认返回英语（美国）
+    }
     async fn control_max_packet_size(&mut self) -> Result<u16, USBError> {
         trace!("control_fetch_control_point_packet_size");
 
@@ -340,6 +374,7 @@ impl Device {
             .map(|&len| if len == 0 { 8u8 } else { len })
             .unwrap_or(8);
 
+        trace!("data@{:p}: {data:?}", data.as_ptr());
         trace!("Device descriptor bMaxPacketSize0: {packet_size} bytes");
 
         Ok(packet_size as _)
@@ -377,6 +412,7 @@ impl Device {
         let mut buff = alloc::vec![0u8; DeviceDescriptor::LEN];
         self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut buff)
             .await?;
+        trace!("data: {buff:?}");
         let desc = DeviceDescriptor::parse(&buff)
             .ok_or(USBError::Other("device descriptor parse err".into()))?;
         self.desc = Some(desc.clone());
@@ -600,7 +636,7 @@ impl Device {
 
 #[derive(Clone)]
 pub(crate) struct DeviceState {
-    id: SlotId,
+    pub(crate) id: SlotId,
     inner: Arc<Mutex<DeviceStateInner>>,
     pub root: RootHub,
 }

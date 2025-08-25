@@ -21,6 +21,13 @@ impl Direction {
         }
     }
     const MASK: u8 = 0x80;
+
+    pub fn from_raw(raw: u8) -> Direction {
+        match raw {
+            0 => Self::Out,
+            _ => Self::In,
+        }
+    }
 }
 
 #[repr(C)]

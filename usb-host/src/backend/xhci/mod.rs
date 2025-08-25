@@ -93,7 +93,7 @@ impl usb_if::host::Controller for Xhci {
                 sts.clear_event_interrupt();
             }
             if sts.port_change_detect() {
-                debug!("Port Change Detected");
+                // debug!("Port Change Detected");
                 if let Some(data) = self.port_wake.take() {
                     data.wake();
                 }
@@ -102,7 +102,7 @@ impl usb_if::host::Controller for Xhci {
             }
 
             if sts.host_system_error() {
-                debug!("Host System Error");
+                // debug!("Host System Error");
                 sts.clear_host_system_error();
             }
 
@@ -348,9 +348,9 @@ impl Mapper for MemMapper {
 
 fn parse_default_max_packet_size_from_port_speed(speed: u8) -> u16 {
     match speed {
-        1 | 3 => 64,
-        2 => 8,
-        4 => 512,
+        1 => 8,
+        2 | 3 => 64,
+        5 | 6 => 512,
         v => unimplemented!("PSI: {}", v),
     }
 }
