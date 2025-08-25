@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.4...crab-usb-v0.3.5) - 2025-08-25
+
+### Fixed
+
+- correct direction handling in EndpointControl for transfer status
+
 ## [0.3.3](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.2...crab-usb-v0.3.3) - 2025-08-12
 
 ### Fixed
