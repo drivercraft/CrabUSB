@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.3.1...usb-if-v0.3.2) - 2025-08-25
+
+### Other
+
+- update Rust toolchain version and enhance logging in USB handling
+
 ## [0.3.1](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.3.0...usb-if-v0.3.1) - 2025-08-12
 
 ### Other
