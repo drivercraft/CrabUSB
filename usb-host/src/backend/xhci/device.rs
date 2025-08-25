@@ -5,7 +5,7 @@ use core::{
 };
 
 use futures::FutureExt;
-use log::{debug, trace};
+use log::{debug, error, trace, warn};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
@@ -13,7 +13,8 @@ use usb_if::{
         self, ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor,
         InterfaceDescriptor, LanguageId,
     },
-    host::{ControlSetup, ResultTransfer},
+    err::TransferError,
+    host::{ControlSetup, Device as UsbDevice, ResultTransfer},
     transfer::{Recipient, Request, RequestType},
 };
 use xhci::{registers::doorbell, ring::trb::command};
@@ -212,8 +213,6 @@ impl Device {
         // Perform initialization logic here
         self.address().await?;
 
-        sleep(Duration::from_secs(1)).await;
-
         let max_packet_size = self.control_max_packet_size().await?;
 
         trace!("Max packet size: {max_packet_size}");
@@ -363,7 +362,6 @@ impl Device {
         trace!("control_fetch_control_point_packet_size");
 
         let mut data = alloc::vec![0u8; 8];
-
         self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
             .await?;
 
