@@ -203,10 +203,10 @@ impl EndpointControl {
         let mut status = transfer::StatusStage::default();
         status.set_interrupt_on_completion();
 
-        if matches!(dir, Direction::Out) && buff.is_some() {
-            status.set_direction();
-        } else {
+        if matches!(dir, Direction::In) && buff.is_some() {
             status.clear_direction();
+        } else {
+            status.set_direction();
         }
 
         trbs.push(setup.into());
