@@ -1,4 +1,5 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
+
 use dma_api::{DBox, DVec};
 use xhci::context::{Device32Byte, Device64Byte, Input32Byte, Input64Byte, InputHandler};
 
@@ -102,6 +103,16 @@ impl ContextData {
             let mut input = ctx32.input.read();
             f(&mut input);
             ctx32.input.write(input);
+        } else {
+            panic!("No context available");
+        }
+    }
+
+    pub fn output(&self) -> Box<dyn xhci::context::DeviceHandler> {
+        if let Some(ctx64) = &self.ctx64 {
+            Box::new(ctx64.out.read())
+        } else if let Some(ctx32) = &self.ctx32 {
+            Box::new(ctx32.out.read())
         } else {
             panic!("No context available");
         }

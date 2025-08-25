@@ -170,6 +170,7 @@ impl EndpointControl {
             .set_request(urb.request.into())
             .set_value(urb.value)
             .set_index(urb.index)
+            .set_length(0)
             .set_transfer_type(transfer::TransferType::No);
 
         let mut data = None;
@@ -202,7 +203,9 @@ impl EndpointControl {
         let mut status = transfer::StatusStage::default();
         status.set_interrupt_on_completion();
 
-        if matches!(dir, Direction::In) {
+        if matches!(dir, Direction::In) && buff.is_some() {
+            status.clear_direction();
+        } else {
             status.set_direction();
         }
 

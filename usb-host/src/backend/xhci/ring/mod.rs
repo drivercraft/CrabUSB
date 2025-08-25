@@ -43,7 +43,7 @@ unsafe impl Send for Ring {}
 
 impl Ring {
     pub fn new_with_len(len: usize, link: bool, direction: Direction) -> Result<Self> {
-        let trbs = DVec::zeros(len, 64, direction).ok_or(USBError::NoMemory)?;
+        let trbs = DVec::zeros(len, page_size(), direction).ok_or(USBError::NoMemory)?;
 
         Ok(Self {
             link,

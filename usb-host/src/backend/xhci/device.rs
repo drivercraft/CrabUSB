@@ -5,7 +5,7 @@ use core::{
 };
 
 use futures::FutureExt;
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
@@ -17,7 +17,7 @@ use usb_if::{
     host::{ControlSetup, Device as UsbDevice, ResultTransfer},
     transfer::{Recipient, Request, RequestType},
 };
-use xhci::{registers::doorbell, ring::trb::command};
+use xhci::{context::EndpointState, registers::doorbell, ring::trb::command};
 
 use crate::{
     backend::{
@@ -212,7 +212,7 @@ impl Device {
         trace!("Initializing device with ID: {}", self.id.as_u8());
         // Perform initialization logic here
         self.address().await?;
-
+        // self.dump_device_out();
         let max_packet_size = self.control_max_packet_size().await?;
 
         trace!("Max packet size: {max_packet_size}");
@@ -228,16 +228,64 @@ impl Device {
         Ok(())
     }
 
+    // fn dump_device_out(&self) {
+    //     let dev = self.ctx.output();
+
+    //     let slot_handler = dev.slot();
+    //     let num_valid_context_entries = slot_handler.context_entries();
+
+    //     info!(
+    //         " slot {} OutputContext: SlotState={:?}, ContextEntries={}",
+    //         self.id,
+    //         slot_handler.slot_state(),
+    //         num_valid_context_entries
+    //     );
+
+    //     // DCI 0 is the Slot Context
+    //     if num_valid_context_entries > 0 {
+    //         info!(
+    //             "    OutputContext DCI 0 (SlotContext): State={:?} (Details: Speed={}, RHPort={}, MaxExitLat={}, Route=0x{:X})",
+    //             slot_handler.slot_state(),
+    //             slot_handler.speed(),
+    //             slot_handler.root_hub_port_number(),
+    //             slot_handler.max_exit_latency(),
+    //             slot_handler.route_string()
+    //         );
+    //     }
+
+    //     // Endpoint Contexts are DCI 1 to (num_valid_context_entries - 1)
+    //     for dci in 1..(num_valid_context_entries as usize + 1) {
+    //         // Now dci is guaranteed to be >= 1
+    //         let ep_ctx = dev.endpoint(dci);
+    //         let ep_state = ep_ctx.endpoint_state();
+
+    //         if ep_state != EndpointState::Disabled {
+    //             info!(
+    //                 "    OutputContext DCI {}: State={:?}, Type={:?}, TR_DeqPtr=0x{:X}, MaxPktSize={}, AvgTRBLen={}, MaxBurstSize={}, ErrCnt={}",
+    //                 dci,
+    //                 ep_state,
+    //                 ep_ctx.endpoint_type(),
+    //                 ep_ctx.tr_dequeue_pointer(),
+    //                 ep_ctx.max_packet_size(),
+    //                 ep_ctx.average_trb_length(),
+    //                 ep_ctx.max_burst_size(),
+    //                 ep_ctx.error_count()
+    //             );
+    //         }
+    //     }
+    // }
+
     async fn address(&mut self) -> Result<(), USBError> {
         trace!("Addressing device with ID: {}", self.id.as_u8());
         let port_speed = self.root.lock().port_speed(self.port_id);
         let max_packet_size = parse_default_max_packet_size_from_port_speed(port_speed);
 
         let ctrl_ring_addr = self.ctrl_ep.bus_addr();
+        let route_string = append_port_to_route_string(0, 0);
         // ctrl dci
         let dci = 1;
         trace!(
-            "ctrl ring: {ctrl_ring_addr:x?}, port speed: {port_speed}, max packet size: {max_packet_size}"
+            "ctrl ring: {ctrl_ring_addr:x?}, port speed: {port_speed}, max packet size: {max_packet_size}, route string: {route_string}"
         );
 
         // let ring_cycle_bit = self.ctrl_ep.cycle;
@@ -264,7 +312,7 @@ impl Device {
             let slot_context = input.device_mut().slot_mut();
             slot_context.clear_multi_tt();
             slot_context.clear_hub();
-            slot_context.set_route_string(append_port_to_route_string(0, 0)); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
+            slot_context.set_route_string(route_string); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
             slot_context.set_context_entries(1);
             slot_context.set_max_exit_latency(0);
             slot_context.set_root_hub_port_number(self.port_id.raw() as _); //todo: to use port number
@@ -362,6 +410,7 @@ impl Device {
         trace!("control_fetch_control_point_packet_size");
 
         let mut data = alloc::vec![0u8; 8];
+
         self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
             .await?;
 
