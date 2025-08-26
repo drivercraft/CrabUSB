@@ -13,7 +13,7 @@ mod tests {
         fdt_parser::PciSpace,
         globals::{PlatformInfoKind, global_val},
         irq::{IrqHandleResult, IrqInfo, IrqParam},
-        mem::mmu::{iomap, page_size},
+        mem::{iomap, page_size},
         platform::fdt::GetPciIrqConfig,
         println,
     };
