@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.5...crab-usb-v0.3.6) - 2025-08-29
+
+### Other
+
+- improve event handling and memory safety in USBHost and EventHandler
+
 ## [0.3.5](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.4...crab-usb-v0.3.5) - 2025-08-26
 
 ### Fixed
