@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
-use core::{fmt::Display, ptr::NonNull, sync::atomic::AtomicBool};
-use log::trace;
+use core::{cell::UnsafeCell, fmt::Display, ptr::NonNull, sync::atomic::AtomicBool};
+use log::{info, trace};
 use usb_if::{
     descriptor::{Class, ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor},
     host::{Controller, ResultTransfer, USBError},
@@ -12,11 +12,9 @@ mod device;
 pub use device::*;
 
 pub struct EventHandler {
-    ptr: *mut USBHost,
+    raw: Arc<HostRaw>,
     running: Arc<AtomicBool>,
 }
-unsafe impl Send for EventHandler {}
-unsafe impl Sync for EventHandler {}
 
 impl EventHandler {
     pub fn handle_event(&self) -> bool {
@@ -24,21 +22,32 @@ impl EventHandler {
             return false;
         }
         unsafe {
-            (*self.ptr).handle_event();
+            (&mut *self.raw.0.get()).handle_event();
         }
         true
     }
 }
 
+struct HostRaw(UnsafeCell<Box<dyn Controller>>);
+
+unsafe impl Sync for HostRaw {}
+unsafe impl Send for HostRaw {}
+
+impl HostRaw {
+    fn new(raw: Box<dyn Controller>) -> Arc<Self> {
+        Arc::new(Self(UnsafeCell::new(raw)))
+    }
+}
+
 pub struct USBHost {
-    raw: Box<dyn Controller>,
+    raw: Arc<HostRaw>,
     running: Arc<AtomicBool>,
 }
 
 impl USBHost {
     pub fn from_trait(raw: impl Controller) -> Self {
         USBHost {
-            raw: Box::new(raw),
+            raw: HostRaw::new(Box::new(raw)),
             running: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -46,7 +55,7 @@ impl USBHost {
     pub fn new_xhci(mmio_base: NonNull<u8>) -> Self {
         let xhci = Xhci::new(mmio_base);
         Self {
-            raw: xhci,
+            raw: HostRaw::new(xhci),
             running: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -61,11 +70,11 @@ impl USBHost {
     }
 
     pub async fn init(&mut self) -> Result<(), USBError> {
-        self.raw.init().await
+        self.host_mut().init().await
     }
 
     pub async fn device_list(&mut self) -> Result<impl Iterator<Item = DeviceInfo>, USBError> {
-        let devices = self.raw.device_list().await?;
+        let devices = self.host_mut().device_list().await?;
         let mut device_infos = Vec::with_capacity(devices.len());
         for device in devices {
             let device_info = DeviceInfo::from_box(device).await?;
@@ -74,13 +83,17 @@ impl USBHost {
         Ok(device_infos.into_iter())
     }
 
+    fn host_mut(&mut self) -> &mut Box<dyn Controller> {
+        unsafe { &mut *self.raw.0.get() }
+    }
+
     fn handle_event(&mut self) {
-        self.raw.handle_event();
+        self.host_mut().handle_event();
     }
 
     pub fn event_handler(&mut self) -> EventHandler {
         EventHandler {
-            ptr: self as *mut USBHost,
+            raw: self.raw.clone(),
             running: self.running.clone(),
         }
     }

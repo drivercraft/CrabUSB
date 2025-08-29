@@ -235,7 +235,6 @@ impl Root {
 
     fn clean_events(&mut self) -> usize {
         let mut count = 0;
-
         while let Some(allowed) = self.event_ring.next() {
             unsafe {
                 match allowed {
