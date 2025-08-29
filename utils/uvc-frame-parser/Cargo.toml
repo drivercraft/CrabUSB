@@ -6,7 +6,7 @@ publish = false
 repository.workspace = true
 version = "0.1.0"
 
-[dependencies]
+[target.'cfg(not(target_os = "none"))'.dependencies]
 log = "0.4"
 env_logger = "0.11"
 image = "0.24"

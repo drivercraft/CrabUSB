@@ -1,3 +1,5 @@
+#![cfg(not(target_os = "none"))]
+
 use crab_uvc::{UncompressedFormat, UvcDeviceState, VideoControlEvent, VideoFormat};
 
 #[test]

@@ -14,3 +14,4 @@ log = "0.4"
 thiserror = {version = "2", default-features = false}
 usb-if = {path = "usb-if", version = "0.3" }
 crab-uvc = {path = "usb-device/uvc", version = "0.1" }
+bare-test = {version = "0.6"}

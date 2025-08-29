@@ -1,4 +1,4 @@
-#![cfg(test)]
+#![cfg(not(target_os = "none"))]
 
 use std::{hint::spin_loop, thread};
 
