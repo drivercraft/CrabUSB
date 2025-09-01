@@ -135,19 +135,19 @@ mod tests {
 
                             // 检查是否为完整帧（有EOF标志）
                             if frame.eof && !frame.data.is_empty() {
-                                info!("=== CAPTURED FIRST COMPLETE FRAME ===");
+                                println!("=== CAPTURED FIRST COMPLETE FRAME ===");
 
                                 // 输出视频格式信息到串口日志
-                                info!("VIDEO_FORMAT_START");
-                                info!("VIDEO_FORMAT: {:?}", current_format);
-                                info!("VIDEO_FORMAT_END");
+                                println!("VIDEO_FORMAT_START");
+                                println!("VIDEO_FORMAT: {:?}", current_format);
+                                println!("VIDEO_FORMAT_END");
 
                                 // 输出原始图像数据到串口日志（分块输出避免日志缓冲区溢出）
-                                info!("FRAME_DATA_START");
-                                info!("FRAME_SIZE: {}", frame.data.len());
-                                info!("FRAME_NUMBER: {}", frame.frame_number);
+                                println!("FRAME_DATA_START");
+                                println!("FRAME_SIZE: {}", frame.data.len());
+                                println!("FRAME_NUMBER: {}", frame.frame_number);
                                 if let Some(pts) = frame.pts_90khz {
-                                    info!("FRAME_PTS: {}", pts);
+                                    println!("FRAME_PTS: {}", pts);
                                 }
 
                                 // 将数据按4KB块分割输出，使用十六进制编码
@@ -163,13 +163,13 @@ mod tests {
                                         .collect::<Vec<_>>()
                                         .join("");
 
-                                    info!(
+                                    println!(
                                         "CHUNK_{:04}_{:04}: {}",
                                         chunk_idx, total_chunks, hex_data
                                     );
                                 }
 
-                                info!("FRAME_DATA_END");
+                                println!("FRAME_DATA_END");
 
                                 first_frame_captured = true;
                                 break;
