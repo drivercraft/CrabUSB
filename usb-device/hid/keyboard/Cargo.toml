@@ -7,7 +7,7 @@ repository.workspace = true
 version = "0.1.0"
 
 [dependencies]
-crab-usb = {workspace = true, features = ["libusb"]}
+crab-usb = {workspace = true}
 keyboard-types = "0.7"
 log = "0.4"
 

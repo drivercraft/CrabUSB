@@ -64,7 +64,7 @@ impl USBHost {
     pub fn new_libusb() -> Self {
         let libusb = crate::backend::libusb::Libusb::new();
         Self {
-            raw: Box::new(libusb),
+            raw: HostRaw::new(Box::new(libusb)),
             running: Arc::new(AtomicBool::new(true)),
         }
     }

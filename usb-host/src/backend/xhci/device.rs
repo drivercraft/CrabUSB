@@ -162,7 +162,6 @@ impl usb_if::host::Device for Device {
     {
         async move {
             trace!("Claiming interface {interface}, alternate {alternate}");
-            self.set_interface(interface, alternate).await?;
             let ep_map = self.set_interface(interface, alternate).await?;
             let desc = self.find_interface_desc(interface, alternate)?;
             let interface = Interface::new(desc, ep_map, self.ctrl_ep.clone());
@@ -217,6 +216,9 @@ impl Device {
 
         trace!("Max packet size: {max_packet_size}");
         self.set_ep_packet_size(Dci::CTRL, max_packet_size).await?;
+
+        self.get_configuration().await?;
+
         let desc = self.descriptor().await?;
         for i in 0..desc.num_configurations {
             let config = self.read_configuration_descriptor(i).await?;
@@ -486,18 +488,6 @@ impl Device {
         .await?;
         Ok(())
     }
-
-    // pub async fn string_descriptor(
-    //     &mut self,
-    //     index: NonZero<u8>,
-    //     language_id: u16,
-    // ) -> Result<String, USBError> {
-    //     let mut data = alloc::vec![0u8; 256];
-    //     self.get_descriptor(DescriptorType::STRING, index.get(), language_id, &mut data)
-    //         .await?;
-    //     let res = decode_string_descriptor(&data).map_err(|e| USBError::Other(e.into()))?;
-    //     Ok(res)
-    // }
 
     async fn read_configuration_descriptor(&mut self, index: u8) -> Result<Vec<u8>, USBError> {
         let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN]; // 配置描述符头部固定为9字节

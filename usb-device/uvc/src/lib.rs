@@ -1,3 +1,12 @@
+#![no_std]
+
+#[macro_use]
+extern crate alloc;
+
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use crab_usb::{
     Class, Device, DeviceInfo, Direction, EndpointType, Interface, Recipient, Request, RequestType,
     err::USBError,
@@ -461,7 +470,7 @@ impl UvcDevice {
         }
 
         // 获取完整的配置描述符
-        let mut full_buffer = vec![0u8; total_length];
+        let mut full_buffer = alloc::vec![0u8; total_length];
         let setup_full = ControlSetup {
             request_type: RequestType::Standard,
             recipient: Recipient::Device,
@@ -675,7 +684,7 @@ impl UvcDevice {
             index: interface_num as u16,
         };
 
-        let mut buffer = vec![0u8; 1024]; // 1KB缓冲区
+        let mut buffer = alloc::vec![0u8; 1024]; // 1KB缓冲区
 
         // 使用video control接口发送请求
         let transfer = self
@@ -945,11 +954,7 @@ impl UvcDevice {
             }
         }
 
-        let ep = vs_interface.endpoint_iso_in(
-            ep.expect("No isochronous IN endpoint found")
-                .descriptor
-                .address,
-        )?;
+        let ep = ep.expect("Failed to find isochronous IN endpoint");
 
         debug!("Starting video streaming");
         self.state = UvcDeviceState::Streaming;

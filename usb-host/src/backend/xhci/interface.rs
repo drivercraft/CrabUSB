@@ -1,4 +1,5 @@
 use alloc::{boxed::Box, collections::btree_map::BTreeMap};
+use log::{trace, warn};
 use usb_if::descriptor::{EndpointDescriptor, InterfaceDescriptor};
 
 use crate::{
@@ -24,6 +25,11 @@ impl Interface {
         ep_map: BTreeMap<Dci, EndpointRaw>,
         ctrl_ep: EndpointControl,
     ) -> Self {
+        trace!(
+            "Interface created: {:?}, endpoints: {:?}",
+            desc,
+            ep_map.keys()
+        );
         Self {
             desc,
             ep_map,
@@ -37,7 +43,16 @@ impl Interface {
     ) -> Result<Endpoint<T, D>, USBError> {
         let desc = self.find_ep_desc(address)?.clone();
         let dci = desc.dci().into();
-        let ep_raw = self.ep_map.remove(&dci).ok_or(USBError::NotFound)?;
+        let ep_raw = match self.ep_map.remove(&dci) {
+            Some(v) => v,
+            None => {
+                warn!(
+                    "Endpoint 0x{address:02x} (DCI={dci}) not found in interface endpoint map {:?}",
+                    self.ep_map.keys()
+                );
+                return Err(USBError::NotFound);
+            }
+        };
         Endpoint::new(desc, ep_raw)
     }
 

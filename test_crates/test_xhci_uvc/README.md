@@ -1,0 +1,1 @@
+cargo test --package test_xhci_uvc --test test --target aarch64-unknown-none-softfloat -- --show-output --uboot

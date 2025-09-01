@@ -11,7 +11,7 @@ use bare_test::{
     fdt_parser::PciSpace,
     globals::{PlatformInfoKind, global_val},
     irq::{IrqHandleResult, IrqInfo, IrqParam},
-    mem::mmu::{iomap, page_size},
+    mem::page_size,
     platform::fdt::GetPciIrqConfig,
     println,
 };
@@ -36,6 +36,8 @@ impl_trait! {
 mod tests {
     use alloc::{boxed::Box, vec::Vec};
 
+    use bare_test::mem::iomap;
+    use crab_uvc::{UvcDevice, VideoControlEvent};
     use log::*;
     use pcie::*;
 
@@ -57,98 +59,57 @@ mod tests {
 
             let ls = host.device_list().await.unwrap();
 
-            for mut info in ls {
-                info!("{info}");
+            let mut dev_info = find_camera(ls).expect("no camera found");
 
-                let mut interface_desc = None;
-                let mut config_desc: Option<ConfigurationDescriptor> = None;
-                for config in &info.configurations {
-                    info!("config: {:?}", config.configuration_value);
+            info!("found camera: {dev_info}");
 
-                    for interface in &config.interfaces {
-                        for alt in &interface.alt_settings {
-                            info!(
-                                "interface[{}.{}] class {:?}",
-                                alt.interface_number,
-                                alt.alternate_setting,
-                                alt.class()
-                            );
-                            if interface_desc.is_none() {
-                                interface_desc = Some(alt.clone());
-                                config_desc = Some(config.clone());
-                            }
-                        }
-                    }
+            let dev = dev_info.open().await.unwrap();
+
+            let mut uvc = UvcDevice::new(dev).await.unwrap();
+
+            // 获取设备信息
+            let device_info = uvc.get_device_info().await.unwrap();
+            info!("Device info: {}", device_info);
+
+            // 获取支持的视频格式
+            let formats = uvc.get_supported_formats().await.unwrap();
+            info!("Supported formats:");
+            for format in &formats {
+                info!("  {:?}", format);
+            }
+
+            // 设置视频格式 (选择第一个可用格式)
+            if let Some(format) = formats.first() {
+                info!("Setting format: {:?}", format);
+                uvc.set_format(format.clone()).await.unwrap();
+            } else {
+                panic!("No supported formats available");
+            }
+
+            // 开始视频流
+            info!("Starting video streaming...");
+            let mut stream = uvc.start_streaming().await.unwrap();
+
+            // 获取当前视频格式信息
+            let current_format = stream.vedio_format.clone();
+            info!("Current video format: {:?}", current_format);
+
+            // 设置一些控制参数的示例
+            info!("Setting video controls...");
+
+            // 尝试设置亮度（如果失败也继续）
+            if let Err(e) = uvc
+                .send_control_command(VideoControlEvent::BrightnessChanged(100))
+                .await
+            {
+                warn!("Failed to set brightness: {:?}", e);
+            }
+
+            for _ in 0..300 {
+                let frames = stream.recv().await.unwrap();
+                for frame in frames {
+                    info!("Received frame: {} bytes", frame.data.len());
                 }
-                let interface_desc = interface_desc.unwrap();
-                let config_desc = config_desc.unwrap();
-
-                let mut device = info.open().await.unwrap();
-
-                info!("open device ok: {device:?}");
-
-                device
-                    .set_configuration(config_desc.configuration_value)
-                    .await
-                    .unwrap();
-                info!("set configuration ok");
-
-                // let config_value = device.current_configuration_descriptor().await.unwrap();
-                // info!("get configuration: {config_value:?}");
-
-                let mut interface = device
-                    .claim_interface(
-                        interface_desc.interface_number,
-                        interface_desc.alternate_setting,
-                    )
-                    .await
-                    .unwrap();
-                info!(
-                    "claim interface ok: {interface}  class {:?} subclass {:?}",
-                    interface.descriptor.class, interface.descriptor.subclass
-                );
-
-                for ep_desc in &interface_desc.endpoints {
-                    info!("endpoint: {ep_desc:?}");
-
-                    match (ep_desc.transfer_type, ep_desc.direction) {
-                        (EndpointType::Bulk, Direction::In) => {
-                            let mut bulk_in = interface.endpoint_bulk_in(ep_desc.address).unwrap();
-                            // You can use bulk_in to transfer data
-
-                            let mut buff = alloc::vec![0u8; 64];
-                            while let Ok(n) = bulk_in.submit(&mut buff).unwrap().await {
-                                let data = &buff[..n];
-                                info!("bulk in data: {data:?}",);
-                                break; // For testing, break after first transfer
-                            }
-                        }
-                        // (EndpointType::Isochronous, Direction::In) => {
-                        //     let _iso_in = interface
-                        //         .endpoint::<Isochronous, In>(ep_desc.address)
-                        //         .unwrap();
-                        //     // You can use iso_in to transfer data
-                        // }
-                        _ => {
-                            info!(
-                                "unsupported {:?} {:?}",
-                                ep_desc.transfer_type, ep_desc.direction
-                            );
-                        }
-                    }
-                }
-
-                // let mut _bulk_in = interface.endpoint::<Bulk, In>(0x81).unwrap();
-
-                // let mut buff = alloc::vec![0u8; 64];
-
-                // while let Ok(n) = bulk_in.transfer(&mut buff).await {
-                //     let data = &buff[..n];
-
-                //     info!("bulk in data: {data:?}",);
-                // }
-
-                drop(device);
             }
         });
     }
@@ -309,6 +270,15 @@ mod tests {
             .register();
             break;
         }
+    }
+
+    fn find_camera(ls: impl Iterator<Item = DeviceInfo>) -> Option<DeviceInfo> {
+        for info in ls {
+            if UvcDevice::check(&info) {
+                return Some(info);
+            }
+        }
+        None
     }
 }
 

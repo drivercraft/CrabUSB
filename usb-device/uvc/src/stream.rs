@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use crab_usb::{EndpointIsoIn, Interface};
 
 use crate::{

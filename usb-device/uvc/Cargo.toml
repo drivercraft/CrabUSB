@@ -7,7 +7,7 @@ repository.workspace = true
 version = "0.1.0"
 
 [dependencies]
-crab-usb = {workspace = true, features = ["libusb"]}
+crab-usb = {workspace = true}
 log = "0.4"
 usb-if = {workspace = true}
 

@@ -1,4 +1,5 @@
 use crate::descriptors::payload_header_flags as flags;
+use alloc::vec::Vec;
 use crab_usb::TransferError;
 use log::{debug, trace};
 
