@@ -21,7 +21,7 @@ use crab_usb::{
     *,
 };
 use futures::FutureExt;
-use log::{error, info, warn};
+use log::{info, warn};
 
 struct KernelImpl;
 impl_trait! {
@@ -119,9 +119,10 @@ mod tests {
             }
 
             let mut total_frames = 0;
-            let mut error_check_interval = 0;
+            let mut first_frame_captured = false;
 
-            loop {
+            // 获取第一帧完整图像后跳出循环
+            while !first_frame_captured {
                 match stream.recv().await {
                     Ok(frames) => {
                         for frame in frames {
@@ -131,6 +132,48 @@ mod tests {
                                 total_frames,
                                 frame.data.len()
                             );
+
+                            // 检查是否为完整帧（有EOF标志）
+                            if frame.eof && !frame.data.is_empty() {
+                                info!("=== CAPTURED FIRST COMPLETE FRAME ===");
+
+                                // 输出视频格式信息到串口日志
+                                info!("VIDEO_FORMAT_START");
+                                info!("VIDEO_FORMAT: {:?}", current_format);
+                                info!("VIDEO_FORMAT_END");
+
+                                // 输出原始图像数据到串口日志（分块输出避免日志缓冲区溢出）
+                                info!("FRAME_DATA_START");
+                                info!("FRAME_SIZE: {}", frame.data.len());
+                                info!("FRAME_NUMBER: {}", frame.frame_number);
+                                if let Some(pts) = frame.pts_90khz {
+                                    info!("FRAME_PTS: {}", pts);
+                                }
+
+                                // 将数据按4KB块分割输出，使用十六进制编码
+                                const CHUNK_SIZE: usize = 4096;
+                                let chunks = frame.data.chunks(CHUNK_SIZE);
+                                let total_chunks = chunks.len();
+
+                                for (chunk_idx, chunk) in chunks.enumerate() {
+                                    // 将每个字节转换为十六进制字符串
+                                    let hex_data = chunk
+                                        .iter()
+                                        .map(|b| alloc::format!("{:02x}", b))
+                                        .collect::<Vec<_>>()
+                                        .join("");
+
+                                    info!(
+                                        "CHUNK_{:04}_{:04}: {}",
+                                        chunk_idx, total_chunks, hex_data
+                                    );
+                                }
+
+                                info!("FRAME_DATA_END");
+
+                                first_frame_captured = true;
+                                break;
+                            }
                         }
                     }
                     Err(e) => {
@@ -147,31 +190,11 @@ mod tests {
                         continue;
                     }
                 }
-
-                // 每处理100次接收后检查错误状态
-                error_check_interval += 1;
-                if error_check_interval % 100 == 0 {
-                    let error_count = stream.error_packet_count();
-                    if error_count > 0 {
-                        warn!("Error packets detected: {}", error_count);
-
-                        // 查询设备的流错误代码
-                        match uvc.get_stream_error_code().await {
-                            Ok(error_code) => {
-                                if error_code != 0 {
-                                    warn!("Device stream error code: 0x{:02x}", error_code);
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Failed to get stream error code: {:?}", e);
-                            }
-                        }
-
-                        // 重置计数器以避免重复警告
-                        stream.reset_error_count();
-                    }
-                }
             }
+
+            info!("First frame captured successfully, stopping stream...");
+            // 停止视频流
+            drop(stream);
         });
     }
 

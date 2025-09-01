@@ -19,3 +19,6 @@ crab-uvc = { path = "../../usb-device/uvc" }
 
 [dev-dependencies]
 tempfile = "3.8"
+
+[dependencies]
+regex = "1.11.2"
