@@ -147,7 +147,7 @@ impl FrameParser {
                 return Ok(None);
             }
         };
-        debug!("UVC payload header: {:?}", hdr);
+        // debug!("UVC payload header: {:?}", hdr);
         if hdr.has_err {
             // 记录统计信息，了解错误频率
             self.error_packet_count += 1;

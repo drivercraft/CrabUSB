@@ -164,6 +164,14 @@ impl VideoFormat {
             }
         }
     }
+
+    pub fn frame_rate(&self) -> u32 {
+        match self {
+            VideoFormat::Uncompressed { frame_rate, .. } => *frame_rate,
+            VideoFormat::Mjpeg { frame_rate, .. } => *frame_rate,
+            VideoFormat::H264 { frame_rate, .. } => *frame_rate,
+        }
+    }
 }
 
 /// 未压缩视频格式类型
@@ -915,7 +923,8 @@ impl UvcDevice {
 
                     // 选择适中的端点大小以获得稳定的带宽
                     // 避免选择太小（<256）或太大（>1024）的端点
-                    if packet_size >= 256 && packet_size <= 1024 && packet_size > best_endpoint_size {
+                    if packet_size >= 256 && packet_size <= 1024 && packet_size > best_endpoint_size
+                    {
                         best_alt_setting = Some(alt_setting.alternate_setting);
                         best_endpoint_size = packet_size;
                     } else if best_alt_setting.is_none() && packet_size > best_endpoint_size {
