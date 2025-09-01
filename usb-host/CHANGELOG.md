@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.7...crab-usb-v0.3.8) - 2025-09-01
+
+### Added
+
+- 添加测试和设备支持，优化依赖项配置
+
+### Fixed
+
+- set_interface
+
+### Other
+
+- xhci init
+
 ## [0.3.7](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.6...crab-usb-v0.3.7) - 2025-08-29
 
 ### Other
