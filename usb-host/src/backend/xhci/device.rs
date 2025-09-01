@@ -514,7 +514,9 @@ impl Device {
             .current_config_value
             .ok_or(USBError::Other("Configuration not set".into()))?;
         let ar = self.root.clone();
+
         let mut root = ar.lock();
+        let port_speed = root.port_speed(self.port_id);
         let mut max_dci = 1;
         let mut out: BTreeMap<Dci, EndpointRaw> = Default::default();
         self.ctx.input_perper_modify();
@@ -552,7 +554,19 @@ impl Device {
                 );
 
                 let ep_mut = input.device_mut().endpoint_mut(dci as _);
-                ep_mut.set_interval(ep.interval);
+
+                // 根据 XHCI 规范计算正确的 interval 值
+                let xhci_interval = match ep.transfer_type {
+                    descriptor::EndpointType::Isochronous | descriptor::EndpointType::Interrupt => {
+                        Self::calculate_xhci_interval(ep.interval, ep.transfer_type, port_speed)
+                    }
+                    _ => ep.interval, // 控制和批量端点使用原始值
+                };
+                debug!(
+                    "Set XHCI interval: {} (original bInterval: {})",
+                    xhci_interval, ep.interval
+                );
+                ep_mut.set_interval(xhci_interval);
                 ep_mut.set_endpoint_type(ep.endpoint_type());
                 ep_mut.set_tr_dequeue_pointer(ring_addr.raw());
                 ep_mut.set_max_packet_size(ep.max_packet_size);
@@ -619,8 +633,8 @@ impl Device {
                 request_type: RequestType::Standard,
                 recipient: Recipient::Interface,
                 request: usb_if::transfer::Request::SetInterface,
-                value: interface as _,
-                index: alternate as _,
+                value: alternate as _, // alternate setting goes in value
+                index: interface as _, // interface number goes in index
             },
             &[],
         )?
@@ -668,6 +682,81 @@ impl Device {
             }
         }
         Err(USBError::NotFound)
+    }
+
+    /// 根据 XHCI 规范计算端点的 interval 值
+    /// 参考 xHCI 规范第 6.2.3.6 节
+    fn calculate_xhci_interval(
+        binterval: u8,
+        transfer_type: descriptor::EndpointType,
+        port_speed: u8,
+    ) -> u8 {
+        match transfer_type {
+            descriptor::EndpointType::Isochronous => {
+                match port_speed {
+                    2 | 3 | 4 | 5 => {
+                        // HighSpeed, SuperSpeed, SuperSpeedPlus ISO 端点
+                        // Interval = max(1, min(16, bInterval))
+                        let interval = binterval.max(1).min(16);
+                        info!(
+                            "ISO endpoint HS/SS: bInterval={} -> XHCI interval={}",
+                            binterval, interval
+                        );
+                        interval
+                    }
+                    _ => {
+                        // FullSpeed/LowSpeed ISO 端点
+                        // Interval = max(1, min(16, floor(log2(bInterval)) + 3))
+                        if binterval == 0 {
+                            1
+                        } else {
+                            // 计算 floor(log2(bInterval))
+                            let log2_binterval = 31 - (binterval as u32).leading_zeros() as u8 - 1;
+                            let interval = (log2_binterval + 3).max(1).min(16);
+                            info!(
+                                "ISO endpoint FS/LS: bInterval={} -> log2={} -> XHCI interval={}",
+                                binterval, log2_binterval, interval
+                            );
+                            interval
+                        }
+                    }
+                }
+            }
+            descriptor::EndpointType::Interrupt => {
+                match port_speed {
+                    2 | 3 | 4 | 5 => {
+                        // HighSpeed, SuperSpeed, SuperSpeedPlus 中断端点
+                        // Interval = max(1, min(16, bInterval))
+                        let interval = binterval.max(1).min(16);
+                        info!(
+                            "INT endpoint HS/SS: bInterval={} -> XHCI interval={}",
+                            binterval, interval
+                        );
+                        interval
+                    }
+                    _ => {
+                        // FullSpeed/LowSpeed 中断端点
+                        // Interval = max(1, min(16, floor(log2(bInterval)) + 3))
+                        if binterval == 0 {
+                            1
+                        } else {
+                            // 计算 floor(log2(bInterval))
+                            let log2_binterval = 31 - (binterval as u32).leading_zeros() as u8 - 1;
+                            let interval = (log2_binterval + 3).max(1).min(16);
+                            info!(
+                                "INT endpoint FS/LS: bInterval={} -> log2={} -> XHCI interval={}",
+                                binterval, log2_binterval, interval
+                            );
+                            interval
+                        }
+                    }
+                }
+            }
+            _ => {
+                // 控制和批量端点不使用 interval
+                0
+            }
+        }
     }
 }
 

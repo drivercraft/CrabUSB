@@ -15,6 +15,12 @@ impl ConvertXhciError for CompletionCode {
             CompletionCode::Success => Ok(()),
             CompletionCode::ShortPacket => Ok(()),
             CompletionCode::StallError => Err(TransferError::Stall),
+            CompletionCode::MissedServiceError => {
+                // MissedServiceError 通常是暂时性的，可以重试
+                Err(TransferError::Other(format!(
+                    "XHCI temporary error: {self:?}"
+                )))
+            }
             _ => Err(TransferError::Other(format!("XHCI error: {self:?}"))),
         }
     }

@@ -1,7 +1,8 @@
 use crate::descriptors::payload_header_flags as flags;
 use alloc::vec::Vec;
 use crab_usb::TransferError;
-use log::{debug, trace};
+use core::fmt::Debug;
+use log::{debug, trace, warn};
 
 /// UVC 载荷头（2.4.3.3）
 #[derive(Debug, Clone, Default)]
@@ -98,8 +99,9 @@ pub struct FrameEvent {
 pub struct FrameParser {
     buffer: Vec<u8>,
     last_fid: Option<bool>,
-    frame_number: u32,
     last_pts: Option<u32>,
+    frame_number: u32,
+    error_packet_count: u32, // 统计错误包数量
 }
 
 impl Default for FrameParser {
@@ -115,7 +117,18 @@ impl FrameParser {
             last_fid: None,
             frame_number: 0,
             last_pts: None,
+            error_packet_count: 0,
         }
+    }
+
+    /// 获取错误包统计信息
+    pub fn error_packet_count(&self) -> u32 {
+        self.error_packet_count
+    }
+
+    /// 重置错误包统计
+    pub fn reset_error_count(&mut self) {
+        self.error_packet_count = 0;
     }
 
     /// 处理一包 UVC 传输数据；返回完整帧事件（若 EOF 收到）
@@ -134,15 +147,37 @@ impl FrameParser {
                 return Ok(None);
             }
         };
-
+        debug!("UVC payload header: {:?}", hdr);
         if hdr.has_err {
-            trace!(
-                "UVC payload ERR set; dropping current buffer ({} bytes)",
-                self.buffer.len()
+            // 记录统计信息，了解错误频率
+            self.error_packet_count += 1;
+            debug!(
+                "UVC payload ERR set; dropping current buffer ({} bytes), total error packets: {}",
+                self.buffer.len(),
+                self.error_packet_count
             );
+            debug!(
+                "Error details: FID={}, EOF={}, PTS={:?}, SCR={:?}, info=0x{:02x}",
+                hdr.fid, hdr.eof, hdr.pts, hdr.scr, hdr.info
+            );
+            
+            // UVC 载荷头中的 ERR 标志表示设备端检测到错误，常见原因包括：
+            // 1. 带宽不足：USB 总线带宽不够，导致数据传输延迟或丢失
+            // 2. 设备内部错误：传感器或编码器出现临时故障
+            // 3. 时序问题：主机请求数据的时机与设备生成数据的时机不匹配
+            // 4. 缓冲区溢出：设备内部缓冲区满了，无法继续接收数据
+            
+            // 分析错误模式
+            if self.error_packet_count % 32 == 1 {
+                warn!(
+                    "UVC error pattern analysis: {} errors so far, current PTS={:?}, last good PTS={:?}",
+                    self.error_packet_count, hdr.pts, self.last_pts
+                );
+            }
+            
             self.buffer.clear();
             self.last_pts = None;
-            // 继续后面的包
+            // 继续后面的包，不要因为单个错误包就停止
             return Ok(None);
         }
 

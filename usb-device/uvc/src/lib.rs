@@ -881,9 +881,10 @@ impl UvcDevice {
     pub async fn start_streaming(&mut self) -> Result<VideoStream, USBError> {
         let vs_interface_num = self.video_streaming_interface_num;
 
-        if self.current_format.is_none() {
-            return Err(USBError::Other("No format selected".into()));
-        }
+        let current_format = self
+            .current_format
+            .clone()
+            .ok_or(USBError::Other("No format selected".into()))?;
 
         // 参考 libuvc 的实现，根据 dwMaxPayloadTransferSize 选择合适的 alternate setting
         let config = &self.device.configurations()[0];
@@ -893,9 +894,7 @@ impl UvcDevice {
             .find(|iface| iface.first_alt_setting().interface_number == vs_interface_num)
             .ok_or(USBError::NotFound)?;
 
-        // 获取 commit 后的 dwMaxPayloadTransferSize (从上次 commit 获取)
-        // 暂时使用默认值，后续可以优化为从实际的 commit 响应中获取
-        let max_payload_size = 614400_u32; // 640x480 的合理大小
+        let max_payload_size = current_format.frame_bytes();
 
         debug!("Looking for alternate setting with payload size >= {max_payload_size}");
 
@@ -908,24 +907,19 @@ impl UvcDevice {
                 if matches!(endpoint.transfer_type, EndpointType::Isochronous)
                     && matches!(endpoint.direction, Direction::In)
                 {
-                    // 计算端点的实际包大小 (参考 libuvc)
-                    let raw_packet_size = endpoint.max_packet_size as usize;
-                    let packet_size =
-                        (raw_packet_size & 0x07ff) * (((raw_packet_size >> 11) & 3) + 1);
-
+                    let packet_size = endpoint.max_packet_size as usize;
                     debug!(
-                        "Alt setting {}: endpoint size = {} (raw: {})",
-                        alt_setting.alternate_setting, packet_size, raw_packet_size
+                        "Alt setting {}: endpoint size = {}",
+                        alt_setting.alternate_setting, packet_size
                     );
 
-                    // 如果这个端点能满足要求，且比之前找到的更好
-                    if packet_size >= max_payload_size as usize
-                        && (best_alt_setting.is_none() || packet_size < best_endpoint_size)
-                    {
+                    // 选择适中的端点大小以获得稳定的带宽
+                    // 避免选择太小（<256）或太大（>1024）的端点
+                    if packet_size >= 256 && packet_size <= 1024 && packet_size > best_endpoint_size {
                         best_alt_setting = Some(alt_setting.alternate_setting);
                         best_endpoint_size = packet_size;
                     } else if best_alt_setting.is_none() && packet_size > best_endpoint_size {
-                        // 如果没有找到完全满足的，选择最大的
+                        // 如果没有找到理想范围内的，选择最大的
                         best_alt_setting = Some(alt_setting.alternate_setting);
                         best_endpoint_size = packet_size;
                     }
@@ -1281,5 +1275,16 @@ impl UvcDevice {
     pub async fn get_device_info(&self) -> Result<String, USBError> {
         // 在实际实现中，这里可以读取设备的字符串描述符
         Ok("UVC Video Device".to_string())
+    }
+
+    /// 获取流错误代码
+    pub async fn get_stream_error_code(&mut self) -> Result<u8, USBError> {
+        debug!("Getting stream error code");
+        let response = self
+            .get_vs_control(vs_controls::STREAM_ERROR_CODE, 1)
+            .await?;
+        let error_code = response.get(0).copied().unwrap_or(0);
+        debug!("Stream error code: 0x{:02x}", error_code);
+        Ok(error_code)
     }
 }

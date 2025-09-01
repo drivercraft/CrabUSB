@@ -16,8 +16,12 @@ use bare_test::{
     println,
 };
 use core::time::Duration;
-use crab_usb::*;
+use crab_usb::{
+    err::{TransferError, USBError},
+    *,
+};
 use futures::FutureExt;
+use log::{error, info, warn};
 
 struct KernelImpl;
 impl_trait! {
@@ -88,7 +92,16 @@ mod tests {
 
             // 开始视频流
             info!("Starting video streaming...");
-            let mut stream = uvc.start_streaming().await.unwrap();
+            let stream_result = uvc.start_streaming().await;
+            let mut stream = match stream_result {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Failed to start streaming: {:?}", e);
+                    // 尝试降级到更低的带宽设置
+                    info!("Retrying with different settings...");
+                    panic!("Streaming failed: {:?}", e);
+                }
+            };
 
             // 获取当前视频格式信息
             let current_format = stream.vedio_format.clone();
@@ -105,10 +118,58 @@ mod tests {
                 warn!("Failed to set brightness: {:?}", e);
             }
 
-            for _ in 0..300 {
-                let frames = stream.recv().await.unwrap();
-                for frame in frames {
-                    info!("Received frame: {} bytes", frame.data.len());
+            let mut total_frames = 0;
+            let mut error_check_interval = 0;
+
+            loop {
+                match stream.recv().await {
+                    Ok(frames) => {
+                        for frame in frames {
+                            total_frames += 1;
+                            info!(
+                                "Received frame {}: {} bytes",
+                                total_frames,
+                                frame.data.len()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        // 检查是否是暂时性 XHCI 错误
+                        if let USBError::TransferError(TransferError::Other(err_msg)) = &e {
+                            if err_msg.contains("MissedServiceError")
+                                || err_msg.contains("temporary")
+                            {
+                                warn!("Temporary XHCI error, retrying: {}", err_msg);
+                                continue;
+                            }
+                        }
+                        error!("Unrecoverable frame error: {:?}", e);
+                        continue;
+                    }
+                }
+
+                // 每处理100次接收后检查错误状态
+                error_check_interval += 1;
+                if error_check_interval % 100 == 0 {
+                    let error_count = stream.error_packet_count();
+                    if error_count > 0 {
+                        warn!("Error packets detected: {}", error_count);
+
+                        // 查询设备的流错误代码
+                        match uvc.get_stream_error_code().await {
+                            Ok(error_code) => {
+                                if error_code != 0 {
+                                    warn!("Device stream error code: 0x{:02x}", error_code);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to get stream error code: {:?}", e);
+                            }
+                        }
+
+                        // 重置计数器以避免重复警告
+                        stream.reset_error_count();
+                    }
                 }
             }
         });

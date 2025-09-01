@@ -8,7 +8,7 @@ use core::{
 
 use alloc::sync::Arc;
 use log::{debug, info, trace};
-use mbarrier::wmb;
+use mbarrier::{mb, wmb};
 use usb_if::{err::TransferError, transfer::wait::CallbackOnReady};
 use xhci::{
     registers::doorbell,
@@ -87,6 +87,7 @@ impl Root {
         // enumerating devices. System software may follow the procedures described in
         // section 4.3, to enumerate attached devices.
         self.start();
+        mb();
         Ok(())
     }
 
@@ -432,16 +433,22 @@ impl RootHub {
     }
 
     pub async fn wait_for_running(&self) {
-        let mut reg = { self.lock().reg.clone() };
-        trace!("Waiting for HC to run");
-        while reg.operational.usbsts.read_volatile().hc_halted() {
-            sleep(Duration::from_millis(10)).await;
-            trace!("Waiting for HC to run");
+        loop {
+            // Give the HC some time to start
+            sleep(Duration::from_millis(20)).await;
+            if let Some(reg) = self.try_lock() {
+                let sts = reg.reg.operational.usbsts.read_volatile();
+                if (!sts.hc_halted()) && (!sts.controller_not_ready()) {
+                    // trace!("{sts:?}");
+                    break;
+                }
+            }
         }
 
         info!("Running");
-
-        reg.doorbell
+        self.lock()
+            .reg
+            .doorbell
             .write_volatile_at(0, doorbell::Register::default());
     }
 

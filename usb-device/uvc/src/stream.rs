@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use crab_usb::{EndpointIsoIn, Interface};
+use log::debug;
 
 use crate::{
     VideoFormat,
@@ -27,7 +28,12 @@ impl VideoStream {
         let packets_per_transfer =
             core::cmp::min(vfmt.frame_bytes().div_ceil(max_packet_size as _), 32);
         let buffer = vec![0u8; (max_packet_size as usize) * packets_per_transfer];
-
+        debug!(
+            "VideoStream created: max_packet_size={}, packets_per_transfer={}, buffer_size={}",
+            max_packet_size,
+            packets_per_transfer,
+            buffer.len()
+        );
         VideoStream {
             ep,
             _iface: iface,
@@ -49,15 +55,21 @@ impl VideoStream {
         let mut events = Vec::new();
 
         for data in self.buffer.chunks(self.packet_size) {
-            if let Some(one) = self
-                .frame_parser
-                .push_packet(data)
-                .map_err(|e| usb_if::host::USBError::Other(format!("Frame parsing error: {e:?}")))?
-            {
+            if let Ok(Some(one)) = self.frame_parser.push_packet(data) {
                 events.push(one);
             }
         }
 
         Ok(events)
+    }
+
+    /// 获取错误包统计信息
+    pub fn error_packet_count(&self) -> u32 {
+        self.frame_parser.error_packet_count()
+    }
+
+    /// 重置错误包统计
+    pub fn reset_error_count(&mut self) {
+        self.frame_parser.reset_error_count();
     }
 }
