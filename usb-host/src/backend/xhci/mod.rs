@@ -56,6 +56,11 @@ impl usb_if::host::Controller for Xhci {
             self.root()?.wait_for_running().await;
             self.root()?.lock().enable_irq();
             self.root()?.lock().reset_ports();
+
+            // Additional delay after port reset for device detection stability
+            // Linux kernel typically waits for device connection stabilization
+            sleep(Duration::from_millis(100)).await;
+
             Ok(())
         }
         .boxed_local()

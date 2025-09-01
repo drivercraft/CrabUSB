@@ -283,7 +283,10 @@ impl Root {
                 port.portsc.set_port_reset();
             });
         }
+
+        // Wait for port reset completion with proper timing
         for i in 0..port_len {
+            let mut timeout = 0;
             while regs
                 .port_register_set
                 .read_volatile_at(i)
@@ -291,7 +294,33 @@ impl Root {
                 .port_reset()
             {
                 spin_loop();
+                timeout += 1;
+                // Add timeout protection to avoid infinite loop
+                if timeout > 100000 {
+                    debug!("Port {i} reset timeout");
+                    break;
+                }
             }
+
+            // After reset completion, wait for device to settle
+            // This is critical for device detection - Linux kernel waits ~50ms
+            // Reference: USB 2.0 spec requires minimum 10ms recovery time
+            // after port reset, but some devices need more time
+            let mut delay_count = 0;
+            while delay_count < 50000 {
+                // ~50ms at typical CPU speeds
+                spin_loop();
+                delay_count += 1;
+            }
+
+            debug!("Port {i} reset completed, checking status");
+            let portsc = regs.port_register_set.read_volatile_at(i).portsc;
+            debug!(
+                "Port {i} status after reset: enabled={}, connected={}, speed={}",
+                portsc.port_enabled_disabled(),
+                portsc.current_connect_status(),
+                portsc.port_speed()
+            );
         }
     }
 
@@ -434,8 +463,9 @@ impl RootHub {
 
     pub async fn wait_for_running(&self) {
         loop {
-            // Give the HC some time to start
-            sleep(Duration::from_millis(20)).await;
+            // Give the HC more time to start - Linux uses longer delays
+            // for device detection stability
+            sleep(Duration::from_millis(50)).await;
             if let Some(reg) = self.try_lock() {
                 let sts = reg.reg.operational.usbsts.read_volatile();
                 if (!sts.hc_halted()) && (!sts.controller_not_ready()) {
@@ -446,6 +476,10 @@ impl RootHub {
         }
 
         info!("Running");
+        // Add additional delay after controller is ready but before port operations
+        // This helps with device detection timing
+        sleep(Duration::from_millis(100)).await;
+
         self.lock()
             .reg
             .doorbell
