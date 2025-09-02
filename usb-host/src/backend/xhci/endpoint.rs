@@ -76,7 +76,7 @@ impl EndpointRaw {
             self.device.root.wait_for_transfer(
                 trb_ptr,
                 CallbackOnReady {
-                    on_ready: on_ready,
+                    on_ready,
                     param1: buff_addr as *mut (),
                     param2: buff_len as *mut (),
                     param3: direction as u8 as usize as *mut (),
@@ -349,6 +349,7 @@ impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
                     .set_data_buffer_pointer(addr_bus as _)
                     .set_trb_transfer_length(len as _)
                     .set_interrupter_target(0)
+                    .set_interrupt_on_short_packet()
                     .set_interrupt_on_completion(),
             )
         } else {

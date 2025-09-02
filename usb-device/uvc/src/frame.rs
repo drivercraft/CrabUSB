@@ -131,6 +131,8 @@ impl FrameParser {
 
         debug!("FID toggled ({last} -> {fid})",);
 
+        self.last_fid = Some(fid);
+
         self.buffer = Some(Vec::with_capacity(self.frame_size));
     }
 
