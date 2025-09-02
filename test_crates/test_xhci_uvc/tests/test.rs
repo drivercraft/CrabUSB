@@ -41,7 +41,7 @@ mod tests {
     use alloc::{boxed::Box, vec::Vec};
 
     use bare_test::mem::iomap;
-    use crab_uvc::{UvcDevice, VideoControlEvent};
+    use crab_uvc::{UvcDevice, VideoControlEvent, VideoFormatType};
     use log::*;
     use pcie::*;
 
@@ -82,23 +82,17 @@ mod tests {
                 info!("  {:?}", format);
             }
 
-            let mut format = formats.first().cloned().expect("no format found");
+            let format = formats.first().cloned().expect("no format found");
 
-            for fmt in &formats {
-                if fmt.frame_bytes() == 640 && fmt.height == 480 {
-                    format = fmt.clone();
-                    break;
-                }
-            }
+            // for fmt in &formats {
+            //     if fmt.width < format.width
+            //         && !matches!(fmt.format_type, VideoFormatType::Uncompressed(_))
+            //     {
+            //         format = fmt.clone();
+            //     }
+            // }
 
-
-            // 设置视频格式 (选择第一个可用格式)
-            if let Some(format) = formats.first() {
-                info!("Setting format: {:?}", format);
-                uvc.set_format(format.clone()).await.unwrap();
-            } else {
-                panic!("No supported formats available");
-            }
+            uvc.set_format(format.clone()).await.unwrap();
 
             // 开始视频流
             info!("Starting video streaming...");
@@ -145,6 +139,8 @@ mod tests {
 
                             // 检查是否为完整帧（有EOF标志）
                             if frame.eof && !frame.data.is_empty() {
+                        
+
                                 println!("=== CAPTURED FIRST COMPLETE FRAME ===");
 
                                 // 输出视频格式信息到串口日志

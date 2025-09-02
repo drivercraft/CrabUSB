@@ -37,7 +37,7 @@ impl VideoStream {
         VideoStream {
             ep,
             _iface: iface,
-            frame_parser: FrameParser::new(),
+            frame_parser: FrameParser::new(vfmt.frame_bytes()),
             vedio_format: vfmt,
             packets_per_transfer,
             buffer,

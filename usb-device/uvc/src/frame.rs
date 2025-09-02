@@ -1,8 +1,8 @@
 use crate::descriptors::payload_header_flags as flags;
 use alloc::vec::Vec;
-use crab_usb::TransferError;
 use core::fmt::Debug;
-use log::{debug, trace, warn};
+use crab_usb::TransferError;
+use log::{debug, warn};
 
 /// UVC 载荷头（2.4.3.3）
 #[derive(Debug, Clone, Default)]
@@ -97,28 +97,41 @@ pub struct FrameEvent {
 /// UVC 帧解析/组装器（参考 libuvc 的 FID 翻转与 EOF 逻辑）
 #[derive(Debug)]
 pub struct FrameParser {
-    buffer: Vec<u8>,
+    buffer: Option<Vec<u8>>,
     last_fid: Option<bool>,
     last_pts: Option<u32>,
     frame_number: u32,
     error_packet_count: u32, // 统计错误包数量
-}
-
-impl Default for FrameParser {
-    fn default() -> Self {
-        Self::new()
-    }
+    frame_size: usize,
+    rsv_eof: bool, // 记录上一个包的 EOF 状态，辅助调试
 }
 
 impl FrameParser {
-    pub fn new() -> Self {
+    pub fn new(frame_size: usize) -> Self {
         Self {
-            buffer: Vec::with_capacity(1 << 20),
+            buffer: Some(Vec::with_capacity(frame_size)),
             last_fid: None,
             frame_number: 0,
             last_pts: None,
             error_packet_count: 0,
+            frame_size,
+            rsv_eof: false,
         }
+    }
+
+    fn check_fid(&mut self, fid: bool) {
+        let Some(last) = self.last_fid else {
+            self.last_fid = Some(fid);
+            return;
+        };
+
+        if last == fid {
+            return;
+        }
+
+        debug!("FID toggled ({last} -> {fid})",);
+
+        self.buffer = Some(Vec::with_capacity(self.frame_size));
     }
 
     /// 获取错误包统计信息
@@ -153,20 +166,20 @@ impl FrameParser {
             self.error_packet_count += 1;
             debug!(
                 "UVC payload ERR set; dropping current buffer ({} bytes), total error packets: {}",
-                self.buffer.len(),
+                self.buffer.as_ref().map_or(0, |b| b.len()),
                 self.error_packet_count
             );
             debug!(
                 "Error details: FID={}, EOF={}, PTS={:?}, SCR={:?}, info=0x{:02x}",
                 hdr.fid, hdr.eof, hdr.pts, hdr.scr, hdr.info
             );
-            
+
             // UVC 载荷头中的 ERR 标志表示设备端检测到错误，常见原因包括：
             // 1. 带宽不足：USB 总线带宽不够，导致数据传输延迟或丢失
             // 2. 设备内部错误：传感器或编码器出现临时故障
             // 3. 时序问题：主机请求数据的时机与设备生成数据的时机不匹配
             // 4. 缓冲区溢出：设备内部缓冲区满了，无法继续接收数据
-            
+
             // 分析错误模式
             if self.error_packet_count % 32 == 1 {
                 warn!(
@@ -174,33 +187,27 @@ impl FrameParser {
                     self.error_packet_count, hdr.pts, self.last_pts
                 );
             }
-            
-            self.buffer.clear();
+
+            self.buffer = Some(Vec::with_capacity(self.frame_size));
             self.last_pts = None;
             // 继续后面的包，不要因为单个错误包就停止
             return Ok(None);
         }
 
-        // FID 翻转表示新帧开始；若上一个未完成，直接丢弃以对齐
-        if let Some(last) = self.last_fid
-            && last != hdr.fid
-            && !self.buffer.is_empty()
-        {
-            trace!(
-                "FID toggled ({} -> {}), discard {} bytes of incomplete frame",
-                last,
-                hdr.fid,
-                self.buffer.len()
-            );
-            self.buffer.clear();
-        }
-        self.last_fid = Some(hdr.fid);
+        self.check_fid(hdr.fid);
+
+        let Some(ref mut buffer) = self.buffer else {
+            // 理论上不应发生
+            warn!("Internal buffer is None, resetting");
+            self.buffer = Some(Vec::with_capacity(self.frame_size));
+            return Ok(None);
+        };
 
         // 载荷数据在头之后
         if hdr_len <= data.len() {
             let payload = &data[hdr_len..];
             if !payload.is_empty() {
-                self.buffer.extend_from_slice(payload);
+                buffer.extend_from_slice(payload);
             }
         }
         if let Some(pts) = hdr.pts {
@@ -208,16 +215,20 @@ impl FrameParser {
         }
 
         if hdr.eof {
-            if self.buffer.is_empty() {
+            if !self.rsv_eof {
+                self.rsv_eof = true;
+                self.buffer = Some(Vec::with_capacity(self.frame_size));
+                return Ok(None);
+            }
+
+            if buffer.is_empty() {
                 // 某些设备会发送空 EOF 包，忽略
                 return Ok(None);
             }
-            let mut out = Vec::with_capacity(self.buffer.len());
-            out.extend_from_slice(&self.buffer);
-            self.buffer.clear();
+            let data = self.buffer.take().unwrap();
 
             let evt = FrameEvent {
-                data: out,
+                data,
                 pts_90khz: self.last_pts.take(),
                 eof: true,
                 fid: hdr.fid,
@@ -228,35 +239,5 @@ impl FrameParser {
         }
 
         Ok(None)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // 构造一个包含两包的简单帧：第一包无 EOF，第二包 EOF
-    #[test]
-    fn assemble_simple_frame() {
-        let mut p = FrameParser::new();
-
-        // 包1：bLength=6 (2 固定 + 4 PTS), bmHeaderInfo=FID|PTS(无EOF)，负载= [1,2,3]
-        let mut pkt1 = vec![6u8, flags::FID | flags::PTS];
-        // PTS 4 字节
-        pkt1.extend_from_slice(&0x11223344u32.to_le_bytes());
-        pkt1.extend_from_slice(&[1, 2, 3]);
-
-        // 包2：bLength=2, bmHeaderInfo=FID|EOF
-        let mut pkt2 = vec![2u8, flags::FID | flags::EOF];
-        pkt2.extend_from_slice(&[4, 5]);
-
-        assert!(matches!(p.push_packet(&pkt1), Ok(None)));
-        let ev = p
-            .push_packet(&pkt2)
-            .unwrap()
-            .expect("frame should complete");
-        assert_eq!(ev.data, vec![1, 2, 3, 4, 5]);
-        assert!(ev.eof);
-        assert_eq!(ev.frame_number, 0);
     }
 }

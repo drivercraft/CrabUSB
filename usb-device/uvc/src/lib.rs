@@ -880,8 +880,7 @@ impl UvcDevice {
 
                     // 选择适中的端点大小以获得稳定的带宽
                     // 避免选择太小（<256）或太大（>1024）的端点
-                    if (256..=1024).contains(&packet_size) && packet_size > best_endpoint_size
-                    {
+                    if (256..=1024).contains(&packet_size) && packet_size > best_endpoint_size {
                         best_alt_setting = Some(alt_setting.alternate_setting);
                         best_endpoint_size = packet_size;
                     } else if best_alt_setting.is_none() && packet_size > best_endpoint_size {
@@ -1013,13 +1012,13 @@ impl UvcDevice {
     }
 
     /// 构建 Stream Control 结构体
-    /// 
+    ///
     /// 此函数参考了 libuvc 的 uvc_get_stream_ctrl_format_size 实现，包括：
     /// 1. 通过遍历设备描述符来查找匹配的格式和帧索引（而不是使用硬编码的值）
     /// 2. 正确计算帧间隔（frame interval），使用100ns为单位
     /// 3. 根据不同的格式类型估算最大帧大小
     /// 4. 设置适当的 bmHint 标志位
-    /// 
+    ///
     /// libuvc 参考：
     /// - src/stream.c:uvc_get_stream_ctrl_format_size (line 474-524)
     /// - src/stream.c:_uvc_find_frame_desc_stream_if (line 415-444)
@@ -1033,8 +1032,8 @@ impl UvcDevice {
         let formats = self.get_supported_formats().await?;
 
         // 查找匹配的格式和帧索引（参考 libuvc 的实现逻辑）
-        let (format_index, frame_index) = self.find_format_indices(&formats, format)
-            .ok_or_else(|| {
+        let (format_index, frame_index) =
+            self.find_format_indices(&formats, format).ok_or_else(|| {
                 debug!("Failed to find matching format for: {format:?}");
                 USBError::Other("No matching format found".into())
             })?;
@@ -1049,7 +1048,7 @@ impl UvcDevice {
         // 根据格式类型估算最大帧大小
         let width = format.width as u32;
         let height = format.height as u32;
-        
+
         let max_frame_size = match format.format_type {
             VideoFormatType::Mjpeg => {
                 // MJPEG 压缩格式：参考 libuvc，通常为未压缩大小的一半左右
@@ -1075,24 +1074,24 @@ impl UvcDevice {
             format_index,
             frame_index,
             frame_interval,
-            key_frame_rate: 0, // 默认为 0，让设备决定
-            p_frame_rate: 0,   // 默认为 0，让设备决定
-            comp_quality: 0,   // 默认为 0，让设备决定
+            key_frame_rate: 0,   // 默认为 0，让设备决定
+            p_frame_rate: 0,     // 默认为 0，让设备决定
+            comp_quality: 0,     // 默认为 0，让设备决定
             comp_window_size: 0, // 默认为 0
-            delay: 0,          // 默认为 0
+            delay: 0,            // 默认为 0
             max_video_frame_size: max_frame_size,
             max_payload_transfer_size: 0, // 让设备决定，参考 libuvc
         })
     }
 
     /// 查找格式和帧索引
-    /// 
+    ///
     /// 此函数参考了 libuvc 的 _uvc_find_frame_desc_stream_if 实现，提供了：
     /// 1. 精确的格式类型匹配（包括未压缩格式的子类型）
     /// 2. 分辨率匹配检查
     /// 3. 优雅的降级策略（exact match -> format type match -> default）
     /// 4. 符合 UVC 规范的索引计算（从1开始）
-    /// 
+    ///
     /// libuvc 参考：
     /// - src/stream.c:_uvc_find_frame_desc_stream_if (line 415-444)
     /// - src/stream.c:uvc_find_frame_desc (line 444-474)
@@ -1104,38 +1103,52 @@ impl UvcDevice {
         // 遍历所有支持的格式，寻找匹配的格式和帧配置
         for (format_idx, format) in formats.iter().enumerate() {
             // 检查格式类型是否匹配
-            if core::mem::discriminant(&format.format_type) != core::mem::discriminant(&target.format_type) {
+            if core::mem::discriminant(&format.format_type)
+                != core::mem::discriminant(&target.format_type)
+            {
                 continue;
             }
-            
+
             // 对于未压缩格式，还需要检查具体的子格式
-            if let (VideoFormatType::Uncompressed(format_type), VideoFormatType::Uncompressed(target_type)) = 
-                (&format.format_type, &target.format_type) && format_type != target_type {
+            if let (
+                VideoFormatType::Uncompressed(format_type),
+                VideoFormatType::Uncompressed(target_type),
+            ) = (&format.format_type, &target.format_type)
+                && format_type != target_type
+            {
                 continue;
             }
-            
+
             // 检查分辨率是否匹配
             if format.width == target.width && format.height == target.height {
                 // 找到匹配的格式，返回索引（从 1 开始，符合 UVC 规范）
                 let format_index = (format_idx + 1) as u8;
                 let frame_index = 1u8; // 简化实现，假设每个格式只有一个帧配置
-                
-                debug!("Found matching format: format_index={}, frame_index={}", format_index, frame_index);
+
+                debug!(
+                    "Found matching format: format_index={}, frame_index={}",
+                    format_index, frame_index
+                );
                 return Some((format_index, frame_index));
             }
         }
-        
+
         // 如果没有找到完全匹配的，尝试找到相同格式类型的第一个配置
         for (format_idx, format) in formats.iter().enumerate() {
-            if core::mem::discriminant(&format.format_type) == core::mem::discriminant(&target.format_type) {
+            if core::mem::discriminant(&format.format_type)
+                == core::mem::discriminant(&target.format_type)
+            {
                 let format_index = (format_idx + 1) as u8;
                 let frame_index = 1u8;
-                
-                debug!("Using fallback format: format_index={}, frame_index={}", format_index, frame_index);
+
+                debug!(
+                    "Using fallback format: format_index={}, frame_index={}",
+                    format_index, frame_index
+                );
                 return Some((format_index, frame_index));
             }
         }
-        
+
         // 如果还是没有找到，使用默认值（参考 libuvc 的错误处理）
         debug!("No matching format found, using default indices");
         None
