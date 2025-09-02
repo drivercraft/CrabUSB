@@ -139,29 +139,45 @@ mod tests {
 
                             // 检查是否为完整帧（有EOF标志）
                             if frame.eof && !frame.data.is_empty() {
-                        
-
                                 println!("=== CAPTURED FIRST COMPLETE FRAME ===");
+
+                                // 预处理帧数据，移除0值填充
+                                let cleaned_data = if matches!(current_format.format_type, VideoFormatType::Mjpeg) {
+                                    clean_mjpeg_frame_data(&frame.data)
+                                } else {
+                                    frame.data.clone()
+                                };
+
+                                info!("Frame data cleaned: original {} bytes -> {} bytes", 
+                                      frame.data.len(), cleaned_data.len());
 
                                 // 输出视频格式信息到串口日志
                                 println!("VIDEO_FORMAT_START");
                                 println!("VIDEO_FORMAT: {:?}", current_format);
                                 println!("VIDEO_FORMAT_END");
 
-                                // 输出原始图像数据到串口日志（分块输出避免日志缓冲区溢出）
+                                // 输出处理后的图像数据到串口日志（分块输出避免日志缓冲区溢出）
                                 println!("FRAME_DATA_START");
-                                println!("FRAME_SIZE: {}", frame.data.len());
+                                println!("FRAME_SIZE: {}", cleaned_data.len());
+                                println!("ORIGINAL_SIZE: {}", frame.data.len());
                                 println!("FRAME_NUMBER: {}", frame.frame_number);
                                 if let Some(pts) = frame.pts_90khz {
                                     println!("FRAME_PTS: {}", pts);
                                 }
 
-                                // 将数据按4KB块分割输出，使用十六进制编码
+                                // 将数据按4KB块分割输出，跳过全0块
                                 const CHUNK_SIZE: usize = 4096 * 4;
-                                let chunks = frame.data.chunks(CHUNK_SIZE);
+                                let chunks = cleaned_data.chunks(CHUNK_SIZE);
                                 let total_chunks = chunks.len();
+                                let mut output_chunks = 0;
 
                                 for (chunk_idx, chunk) in chunks.enumerate() {
+                                    // 跳过全0的块（除了第一块，可能包含重要的头信息）
+                                    if chunk_idx > 0 && is_chunk_all_zeros(chunk) {
+                                        info!("Skipping all-zero chunk {}", chunk_idx);
+                                        continue;
+                                    }
+
                                     // 将每个字节转换为十六进制字符串
                                     let hex_data = chunk
                                         .iter()
@@ -171,8 +187,9 @@ mod tests {
 
                                     println!(
                                         "CHUNK_{:04}_{:04}: {}",
-                                        chunk_idx, total_chunks, hex_data
+                                        output_chunks, total_chunks, hex_data
                                     );
+                                    output_chunks += 1;
                                 }
 
                                 println!("FRAME_DATA_END");
@@ -359,6 +376,41 @@ mod tests {
             }
         }
         None
+    }
+
+    /// 清理MJPEG帧数据，移除末尾的0值填充
+    fn clean_mjpeg_frame_data(data: &[u8]) -> Vec<u8> {
+        // 查找JPEG结束标记 (FFD9)
+        for i in 0..data.len().saturating_sub(1) {
+            if data[i] == 0xFF && data[i + 1] == 0xD9 {
+                // 找到结束标记，截断到此处（包含结束标记）
+                return data[..=i+1].to_vec();
+            }
+        }
+        
+        // 如果没有找到结束标记，移除末尾的大块0值填充
+        let mut end_pos = data.len();
+        let mut zero_count = 0;
+        const MIN_ZERO_BLOCK_SIZE: usize = 1024; // 只移除大于1KB的连续0块
+        
+        for i in (0..data.len()).rev() {
+            if data[i] == 0 {
+                zero_count += 1;
+            } else {
+                if zero_count >= MIN_ZERO_BLOCK_SIZE {
+                    end_pos = i + 1;
+                    break;
+                }
+                zero_count = 0;
+            }
+        }
+        
+        data[..end_pos].to_vec()
+    }
+
+    /// 检查数据块是否为全0
+    fn is_chunk_all_zeros(chunk: &[u8]) -> bool {
+        chunk.iter().all(|&b| b == 0)
     }
 }
 

@@ -208,8 +208,10 @@ impl FrameParser {
         // 载荷数据在头之后
         if hdr_len <= data.len() {
             let payload = &data[hdr_len..];
-            if !payload.is_empty() {
-                buffer.extend_from_slice(payload);
+
+            // 高效地trim尾部全0：找到最后一个非0字节，直接截取
+            if let Some(last_non_zero_pos) = payload.iter().rposition(|&b| b != 0) {
+                buffer.extend_from_slice(&payload[..=last_non_zero_pos]);
             }
         }
         if let Some(pts) = hdr.pts {

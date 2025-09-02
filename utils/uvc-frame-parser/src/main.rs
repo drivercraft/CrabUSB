@@ -159,16 +159,20 @@ async fn parse_serial_log(
         }
     }
 
+    // 解析完成后，清理和重建帧数据
     let format = video_format.ok_or("No video format found in log")?;
 
+    // 对于MJPEG格式，尝试清理数据
+    if matches!(format.format_type, VideoFormatType::Mjpeg) {
+        frame_data = clean_mjpeg_data(frame_data)?;
+    }
+
     if let Some(expected_size) = frame_size {
-        if frame_data.len() != expected_size {
-            warn!(
-                "Frame data size mismatch: expected {}, got {}",
-                expected_size,
-                frame_data.len()
-            );
-        }
+        info!(
+            "Frame data size after processing: expected {}, got {}",
+            expected_size,
+            frame_data.len()
+        );
     }
 
     Ok((format, frame_data))
@@ -236,7 +240,7 @@ fn extract_field_value(text: &str, field: &str) -> Result<u32, Box<dyn std::erro
     if let Some(start) = text.find(&pattern) {
         let value_start = start + pattern.len();
         let value_end = text[value_start..]
-            .find(|c: char| c == ',' || c == ' ' || c == '}')
+            .find([',', ' ', '}'])
             .map(|pos| value_start + pos)
             .unwrap_or(text.len());
 
@@ -245,6 +249,62 @@ fn extract_field_value(text: &str, field: &str) -> Result<u32, Box<dyn std::erro
     } else {
         Err(format!("Field '{}' not found", field).into())
     }
+}
+
+/// 清理MJPEG数据，移除大块的0值填充
+fn clean_mjpeg_data(mut data: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    // 查找JPEG结束标记 (FFD9)
+    if let Some(end_pos) = find_jpeg_end(&data) {
+        info!(
+            "Found JPEG end marker at position {}, truncating from {} to {} bytes",
+            end_pos,
+            data.len(),
+            end_pos + 2
+        );
+        data.truncate(end_pos + 2);
+        return Ok(data);
+    }
+
+    // 如果没有找到结束标记，尝试移除末尾的大块0值
+    let original_len = data.len();
+
+    // 从末尾开始扫描，移除连续的0字节块（但保留可能的有效0字节）
+    const MIN_ZERO_BLOCK_SIZE: usize = 1024; // 只移除大于1KB的连续0块
+
+    let mut end_pos = data.len();
+    let mut zero_count = 0;
+
+    for i in (0..data.len()).rev() {
+        if data[i] == 0 {
+            zero_count += 1;
+        } else {
+            if zero_count >= MIN_ZERO_BLOCK_SIZE {
+                end_pos = i + 1;
+                break;
+            }
+            zero_count = 0;
+        }
+    }
+
+    if end_pos < original_len {
+        info!(
+            "Removed {} trailing zero bytes from MJPEG data",
+            original_len - end_pos
+        );
+        data.truncate(end_pos);
+    }
+
+    Ok(data)
+}
+
+/// 查找JPEG结束标记的位置
+fn find_jpeg_end(data: &[u8]) -> Option<usize> {
+    for i in 0..data.len().saturating_sub(1) {
+        if data[i] == 0xFF && data[i + 1] == 0xD9 {
+            return Some(i);
+        }
+    }
+    None
 }
 
 /// 将十六进制字符串转换为字节数组

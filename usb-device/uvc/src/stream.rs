@@ -55,6 +55,10 @@ impl VideoStream {
         let mut events = Vec::new();
 
         for data in self.buffer.chunks(self.packet_size) {
+            if data.iter().all(|&b| b == 0) {
+                // 空包，跳过
+                continue;
+            }
             if let Ok(Some(one)) = self.frame_parser.push_packet(data) {
                 events.push(one);
             }
