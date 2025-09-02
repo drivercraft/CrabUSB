@@ -7,7 +7,7 @@ keywords = ["os", "usb", "xhci", "driver"]
 license = "MIT"
 name = "crab-usb"
 repository = "https://github.com/drivercraft/CrabUSB"
-version = "0.3.8"
+version = "0.3.9"
 
 [features]
 libusb = ["libusb1-sys"]
