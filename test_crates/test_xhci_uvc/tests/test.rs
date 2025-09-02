@@ -82,6 +82,16 @@ mod tests {
                 info!("  {:?}", format);
             }
 
+            let mut format = formats.first().cloned().expect("no format found");
+
+            for fmt in &formats {
+                if fmt.frame_bytes() == 640 && fmt.height == 480 {
+                    format = fmt.clone();
+                    break;
+                }
+            }
+
+
             // 设置视频格式 (选择第一个可用格式)
             if let Some(format) = formats.first() {
                 info!("Setting format: {:?}", format);
@@ -177,17 +187,7 @@ mod tests {
                         }
                     }
                     Err(e) => {
-                        // 检查是否是暂时性 XHCI 错误
-                        if let USBError::TransferError(TransferError::Other(err_msg)) = &e {
-                            if err_msg.contains("MissedServiceError")
-                                || err_msg.contains("temporary")
-                            {
-                                warn!("Temporary XHCI error, retrying: {}", err_msg);
-                                continue;
-                            }
-                        }
-                        error!("Unrecoverable frame error: {:?}", e);
-                        continue;
+                        panic!("Error receiving frame: {:?}", e);
                     }
                 }
             }

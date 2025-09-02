@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crab_uvc::{UncompressedFormat, VideoFormat};
+use crab_uvc::{UncompressedFormat, VideoFormat, VideoFormatType};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
@@ -72,10 +72,10 @@ impl Parser {
         video_format: &VideoFormat,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let (width, height, pixel) = match video_format {
-            VideoFormat::Uncompressed {
+            VideoFormat {
                 width,
                 height,
-                format_type,
+                format_type: VideoFormatType::Uncompressed(format_type),
                 ..
             } => {
                 let pixel = match format_type {
@@ -86,20 +86,22 @@ impl Parser {
                 };
                 (*width as usize, *height as usize, pixel)
             }
-            VideoFormat::Mjpeg { width, height, .. } => {
-                (*width as usize, *height as usize, Pixel::Mjpeg)
-            }
-            VideoFormat::H264 { width, height, .. } => {
-                (*width as usize, *height as usize, Pixel::H264)
-            }
+            VideoFormat {
+                width,
+                height,
+                format_type: VideoFormatType::Mjpeg,
+                ..
+            } => (*width as usize, *height as usize, Pixel::Mjpeg),
+            VideoFormat {
+                width,
+                height,
+                format_type: VideoFormatType::H264,
+                ..
+            } => (*width as usize, *height as usize, Pixel::H264),
         };
 
         // 获取帧率，优先使用参数传入的值，否则从 video_format 中获取
-        let default_fps = match video_format {
-            VideoFormat::Uncompressed { frame_rate, .. } => *frame_rate as f32,
-            VideoFormat::Mjpeg { frame_rate, .. } => *frame_rate as f32,
-            VideoFormat::H264 { frame_rate, .. } => *frame_rate as f32,
-        };
+        let default_fps = video_format.frame_rate as f32;
         let fps_value = default_fps;
 
         let video_info = VideoInfo {
@@ -149,10 +151,10 @@ impl Parser {
 
         // 根据 VideoFormat 确定 FFmpeg 参数
         let (width, height, pixel_format) = match video_format {
-            VideoFormat::Uncompressed {
+            VideoFormat {
                 width,
                 height,
-                format_type,
+                format_type: VideoFormatType::Uncompressed(format_type),
                 ..
             } => {
                 let ffmpeg_format = match format_type {
@@ -163,13 +165,23 @@ impl Parser {
                 };
                 (*width, *height, ffmpeg_format)
             }
-            VideoFormat::Mjpeg { width, height, .. } => {
+            VideoFormat {
+                width,
+                height,
+                format_type: VideoFormatType::Mjpeg,
+                ..
+            } => {
                 // MJPEG 数据直接从帧解码，不需要指定像素格式
                 return self
                     .create_video_from_mjpeg_frames(frame_numbers, fps, *width, *height)
                     .await;
             }
-            VideoFormat::H264 { width, height, .. } => {
+            VideoFormat {
+                width,
+                height,
+                format_type: VideoFormatType::H264,
+                ..
+            } => {
                 // H.264 数据直接从帧解码
                 return self
                     .create_video_from_h264_frames(frame_numbers, fps, *width, *height)
@@ -470,14 +482,24 @@ impl Parser {
         fs::create_dir_all(&images_dir).await?;
 
         let (width, height, format_info) = match video_format {
-            VideoFormat::Uncompressed {
+            VideoFormat {
                 width,
                 height,
-                format_type,
+                format_type: VideoFormatType::Uncompressed(format_type),
                 ..
             } => (*width, *height, format!("{:?}", format_type)),
-            VideoFormat::Mjpeg { width, height, .. } => (*width, *height, "MJPEG".to_string()),
-            VideoFormat::H264 { width, height, .. } => (*width, *height, "H264".to_string()),
+            VideoFormat {
+                width,
+                height,
+                format_type: VideoFormatType::Mjpeg,
+                ..
+            } => (*width, *height, "MJPEG".to_string()),
+            VideoFormat {
+                width,
+                height,
+                format_type: VideoFormatType::H264,
+                ..
+            } => (*width, *height, "H264".to_string()),
         };
 
         info!(
@@ -529,7 +551,10 @@ impl Parser {
         use tokio::io::AsyncWriteExt;
 
         match video_format {
-            VideoFormat::Uncompressed { format_type, .. } => {
+            VideoFormat {
+                format_type: VideoFormatType::Uncompressed(format_type),
+                ..
+            } => {
                 // 对于未压缩格式，我们可以尝试使用 image crate 进行转换
                 match format_type {
                     UncompressedFormat::Yuy2 => {
@@ -562,7 +587,10 @@ impl Parser {
                     }
                 }
             }
-            VideoFormat::Mjpeg { .. } => {
+            VideoFormat {
+                format_type: VideoFormatType::Mjpeg,
+                ..
+            } => {
                 // MJPEG 数据可以直接保存为 JPEG 文件
                 let jpeg_path = output_path.replace(".png", ".jpg");
                 let mut file = File::create(&jpeg_path).await?;
@@ -574,7 +602,10 @@ impl Parser {
                     debug!("Kept JPEG file: {}", jpeg_path);
                 }
             }
-            VideoFormat::H264 { .. } => {
+            VideoFormat {
+                format_type: VideoFormatType::H264,
+                ..
+            } => {
                 // H.264 帧需要特殊处理，暂时保存原始数据
                 let mut file = File::create(output_path).await?;
                 file.write_all(raw_data).await?;
@@ -831,11 +862,17 @@ impl Parser {
         let video_format = video_format.clone();
 
         match &video_format {
-            VideoFormat::Mjpeg { .. } => {
+            VideoFormat {
+                format_type: VideoFormatType::Mjpeg,
+                ..
+            } => {
                 info!("Converting MJPEG frames to JPEG images...");
                 self.convert_mjpeg_frames_to_images(frame_numbers).await
             }
-            VideoFormat::Uncompressed { format_type, .. } => {
+            VideoFormat {
+                format_type: VideoFormatType::Uncompressed(format_type),
+                ..
+            } => {
                 info!(
                     "Converting uncompressed frames ({:?}) to PNG images...",
                     format_type
@@ -843,7 +880,10 @@ impl Parser {
                 self.convert_raw_frames_to_images(frame_numbers, format_type, &video_format)
                     .await
             }
-            VideoFormat::H264 { .. } => {
+            VideoFormat {
+                format_type: VideoFormatType::H264,
+                ..
+            } => {
                 warn!("H264 format is not supported for frame-to-image conversion");
                 Ok(())
             }
@@ -925,10 +965,10 @@ impl Parser {
                             // 对于 YUY2 格式，我们需要转换为RGB并保存为PNG
 
                             match &video_format {
-                                VideoFormat::Uncompressed {
+                                VideoFormat {
                                     width,
                                     height,
-                                    format_type,
+                                    format_type: VideoFormatType::Uncompressed(format_type),
                                     ..
                                 } => {
                                     match format_type {

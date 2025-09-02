@@ -113,69 +113,47 @@ pub mod uvc_guids {
     pub use crate::descriptors::format_guids::*;
 }
 
-/// UVC 视频格式类型
-#[derive(Debug, Clone, PartialEq)]
-pub enum VideoFormat {
-    /// 未压缩格式 (如 YUV)
-    Uncompressed {
-        width: u16,
-        height: u16,
-        frame_rate: u32, // 帧率 (fps)
-        format_type: UncompressedFormat,
-    },
-    /// MJPEG 压缩格式
-    Mjpeg {
-        width: u16,
-        height: u16,
-        frame_rate: u32,
-    },
-    /// H.264 压缩格式
-    H264 {
-        width: u16,
-        height: u16,
-        frame_rate: u32,
-    },
+#[derive(Debug, Clone)]
+pub struct VideoFormat {
+    pub width: u16,
+    pub height: u16,
+    pub frame_rate: u32, // 帧率 (fps)
+    pub format_type: VideoFormatType,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum VideoFormatType {
+    Uncompressed(UncompressedFormat),
+    Mjpeg,
+    H264,
 }
 
 impl VideoFormat {
     pub fn frame_bytes(&self) -> usize {
-        match self {
-            VideoFormat::Uncompressed {
-                width,
-                height,
-                format_type,
-                ..
-            } => {
-                let pixel_size = match format_type {
+        match self.format_type {
+            VideoFormatType::Uncompressed(t) => {
+                let pixel_size = match t {
                     UncompressedFormat::Yuy2 => 2,  // YUY2 每像素2字节
                     UncompressedFormat::Nv12 => 1,  // NV12 每像素1字节 (平均)
                     UncompressedFormat::Rgb24 => 3, // RGB24 每像素3字节
                     UncompressedFormat::Rgb32 => 4, // RGB32 每像素4字节
                 };
-                (*width as usize) * (*height as usize) * pixel_size
+                (self.width as usize) * (self.height as usize) * pixel_size
             }
-            VideoFormat::Mjpeg { width, height, .. } => {
+            VideoFormatType::Mjpeg => {
                 // MJPEG 压缩后大小不定，这里返回一个估算值（假设压缩比为10:1）
-                ((*width as usize) * (*height as usize) * 3) / 10
+                ((self.width as usize) * (self.height as usize) * 3) / 10
             }
-            VideoFormat::H264 { width, height, .. } => {
+            VideoFormatType::H264 => {
                 // H.264 压缩后大小不定，这里返回一个估算值（假设压缩比为20:1）
-                ((*width as usize) * (*height as usize) * 3) / 20
+                ((self.width as usize) * (self.height as usize) * 3) / 20
             }
-        }
-    }
-
-    pub fn frame_rate(&self) -> u32 {
-        match self {
-            VideoFormat::Uncompressed { frame_rate, .. } => *frame_rate,
-            VideoFormat::Mjpeg { frame_rate, .. } => *frame_rate,
-            VideoFormat::H264 { frame_rate, .. } => *frame_rate,
         }
     }
 }
 
 /// 未压缩视频格式类型
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UncompressedFormat {
     /// YUY2 (YUYV) 格式
     Yuy2,
@@ -230,14 +208,6 @@ pub enum UvcDeviceState {
     Streaming,
     /// 错误状态
     Error(String),
-}
-
-/// 当前正在解析的格式类型
-#[derive(Debug, Clone)]
-enum CurrentFormatType {
-    Mjpeg,
-    Uncompressed(UncompressedFormat),
-    H264,
 }
 
 /// UVC Stream Control 结构体 (参考 UVC 规范 4.3.1.1)
@@ -504,7 +474,7 @@ impl UvcDevice {
         let mut formats = Vec::new();
         let mut pos = 0;
         let mut found_vs_interface = false;
-        let mut current_format_type: Option<CurrentFormatType> = None;
+        let mut current_format_type: Option<VideoFormatType> = None;
 
         trace!(
             "Parsing configuration descriptor of {} bytes for VS interface {}",
@@ -562,7 +532,7 @@ impl UvcDevice {
                         match subtype {
                             uvc_interface_subtypes::VS_FORMAT_MJPEG => {
                                 trace!("Parsing MJPEG format descriptor");
-                                current_format_type = Some(CurrentFormatType::Mjpeg);
+                                current_format_type = Some(VideoFormatType::Mjpeg);
                             }
                             uvc_interface_subtypes::VS_FORMAT_UNCOMPRESSED => {
                                 trace!("Parsing uncompressed format descriptor");
@@ -570,17 +540,17 @@ impl UvcDevice {
                                     .parse_uncompressed_format_type(&config_data[pos..pos + length])
                                 {
                                     current_format_type =
-                                        Some(CurrentFormatType::Uncompressed(format_type));
+                                        Some(VideoFormatType::Uncompressed(format_type));
                                 }
                             }
                             uvc_interface_subtypes::VS_FORMAT_H264 => {
                                 trace!("Found H264 format descriptor");
-                                current_format_type = Some(CurrentFormatType::H264);
+                                current_format_type = Some(VideoFormatType::H264);
                             }
                             uvc_interface_subtypes::VS_FRAME_MJPEG
                             | uvc_interface_subtypes::VS_FRAME_UNCOMPRESSED => {
                                 trace!("Parsing frame descriptor subtype 0x{subtype:02x}");
-                                if let Some(ref format_type) = current_format_type
+                                if let Some(format_type) = current_format_type
                                     && let Ok(frame_formats) = self.parse_frame_descriptor(
                                         &config_data[pos..pos + length],
                                         format_type,
@@ -642,7 +612,7 @@ impl UvcDevice {
     fn parse_frame_descriptor(
         &self,
         data: &[u8],
-        format_type: &CurrentFormatType,
+        format_type: VideoFormatType,
     ) -> Result<Vec<VideoFormat>, USBError> {
         match self.descriptor_parser.parse_frame_descriptor(data) {
             Ok(frame_desc) => {
@@ -651,25 +621,11 @@ impl UvcDevice {
                     DescriptorParser::interval_to_fps(frame_desc.default_frame_interval);
 
                 // 根据格式类型创建VideoFormat
-                let video_format = match format_type {
-                    CurrentFormatType::Mjpeg => VideoFormat::Mjpeg {
-                        width: frame_desc.width,
-                        height: frame_desc.height,
-                        frame_rate: default_frame_rate,
-                    },
-                    CurrentFormatType::Uncompressed(uncompressed_type) => {
-                        VideoFormat::Uncompressed {
-                            width: frame_desc.width,
-                            height: frame_desc.height,
-                            frame_rate: default_frame_rate,
-                            format_type: uncompressed_type.clone(),
-                        }
-                    }
-                    CurrentFormatType::H264 => VideoFormat::H264 {
-                        width: frame_desc.width,
-                        height: frame_desc.height,
-                        frame_rate: default_frame_rate,
-                    },
+                let video_format = VideoFormat {
+                    width: frame_desc.width,
+                    height: frame_desc.height,
+                    frame_rate: default_frame_rate,
+                    format_type,
                 };
 
                 trace!("Parsed frame format: {video_format:?}");
@@ -781,10 +737,11 @@ impl UvcDevice {
 
         // 添加一些常见的MJPEG分辨率，实际应该从帧描述符中解析
         for &(width, height) in &[(640, 480), (1280, 720), (1920, 1080)] {
-            formats.push(VideoFormat::Mjpeg {
+            formats.push(VideoFormat {
                 width,
                 height,
-                frame_rate: 30, // 默认帧率，实际应该从帧描述符解析
+                frame_rate: 30,
+                format_type: VideoFormatType::Mjpeg,
             });
         }
 
@@ -840,11 +797,11 @@ impl UvcDevice {
 
         // 添加一些常见的分辨率，实际应该从帧描述符中解析
         for &(width, height) in &[(320, 240), (640, 480), (1280, 720)] {
-            formats.push(VideoFormat::Uncompressed {
+            formats.push(VideoFormat {
                 width,
                 height,
                 frame_rate: 30, // 默认帧率，实际应该从帧描述符解析
-                format_type: format_type.clone(),
+                format_type: VideoFormatType::Uncompressed(format_type),
             });
         }
 
@@ -923,7 +880,7 @@ impl UvcDevice {
 
                     // 选择适中的端点大小以获得稳定的带宽
                     // 避免选择太小（<256）或太大（>1024）的端点
-                    if packet_size >= 256 && packet_size <= 1024 && packet_size > best_endpoint_size
+                    if (256..=1024).contains(&packet_size) && packet_size > best_endpoint_size
                     {
                         best_alt_setting = Some(alt_setting.alternate_setting);
                         best_endpoint_size = packet_size;
@@ -1056,84 +1013,132 @@ impl UvcDevice {
     }
 
     /// 构建 Stream Control 结构体
+    /// 
+    /// 此函数参考了 libuvc 的 uvc_get_stream_ctrl_format_size 实现，包括：
+    /// 1. 通过遍历设备描述符来查找匹配的格式和帧索引（而不是使用硬编码的值）
+    /// 2. 正确计算帧间隔（frame interval），使用100ns为单位
+    /// 3. 根据不同的格式类型估算最大帧大小
+    /// 4. 设置适当的 bmHint 标志位
+    /// 
+    /// libuvc 参考：
+    /// - src/stream.c:uvc_get_stream_ctrl_format_size (line 474-524)
+    /// - src/stream.c:_uvc_find_frame_desc_stream_if (line 415-444)
     async fn build_stream_control(
         &mut self,
         format: &VideoFormat,
     ) -> Result<StreamControl, USBError> {
         debug!("Building stream control for format: {format:?}");
 
-        // 获取支持的格式列表找到对应的格式索引
+        // 获取支持的格式列表来查找对应的格式索引
         let formats = self.get_supported_formats().await?;
 
-        // 查找匹配的格式索引（简化版本，实际应该从描述符解析获得）
-        let (format_index, frame_index) = match format {
-            VideoFormat::Mjpeg { .. } => {
-                // 为 MJPEG 格式查找索引
-                self.find_format_indices(&formats, format).unwrap_or((1, 1))
-            }
-            VideoFormat::Uncompressed { .. } => {
-                // 为未压缩格式查找索引
-                self.find_format_indices(&formats, format).unwrap_or((1, 1))
-            }
-            VideoFormat::H264 { .. } => {
-                // 为 H264 格式查找索引
-                self.find_format_indices(&formats, format).unwrap_or((1, 1))
-            }
-        };
+        // 查找匹配的格式和帧索引（参考 libuvc 的实现逻辑）
+        let (format_index, frame_index) = self.find_format_indices(&formats, format)
+            .ok_or_else(|| {
+                debug!("Failed to find matching format for: {format:?}");
+                USBError::Other("No matching format found".into())
+            })?;
 
-        // 计算帧间隔 (100ns 单位)
-        let frame_rate = match format {
-            VideoFormat::Mjpeg { frame_rate, .. } => *frame_rate,
-            VideoFormat::Uncompressed { frame_rate, .. } => *frame_rate,
-            VideoFormat::H264 { frame_rate, .. } => *frame_rate,
-        };
-        let frame_interval = if frame_rate > 0 {
-            10_000_000 / frame_rate // 100ns units
+        // 计算帧间隔 (100ns 单位)，参考 libuvc 的计算方式
+        let frame_interval = if format.frame_rate > 0 {
+            10_000_000 / format.frame_rate // 100ns units，与 libuvc 一致
         } else {
-            333333 // 默认 30fps
+            333333 // 默认 30fps (10,000,000 / 30)
         };
 
-        // 估算最大帧大小
-        let (width, height) = match format {
-            VideoFormat::Mjpeg { width, height, .. } => (*width as u32, *height as u32),
-            VideoFormat::Uncompressed { width, height, .. } => (*width as u32, *height as u32),
-            VideoFormat::H264 { width, height, .. } => (*width as u32, *height as u32),
-        };
-
-        let max_frame_size = match format {
-            VideoFormat::Mjpeg { .. } => width * height * 2, // MJPEG 压缩估算
-            VideoFormat::Uncompressed { .. } => width * height * 2, // YUY2 格式
-            VideoFormat::H264 { .. } => width * height / 2,  // H264 压缩估算
+        // 根据格式类型估算最大帧大小
+        let width = format.width as u32;
+        let height = format.height as u32;
+        
+        let max_frame_size = match format.format_type {
+            VideoFormatType::Mjpeg => {
+                // MJPEG 压缩格式：参考 libuvc，通常为未压缩大小的一半左右
+                width * height * 2
+            }
+            VideoFormatType::Uncompressed(uncompressed_format) => {
+                // 未压缩格式：根据具体格式计算
+                match uncompressed_format {
+                    UncompressedFormat::Yuy2 => width * height * 2, // YUY2: 2 bytes per pixel
+                    UncompressedFormat::Nv12 => width * height * 3 / 2, // NV12: 1.5 bytes per pixel
+                    UncompressedFormat::Rgb24 => width * height * 3, // RGB24: 3 bytes per pixel
+                    UncompressedFormat::Rgb32 => width * height * 4, // RGB32: 4 bytes per pixel
+                }
+            }
+            VideoFormatType::H264 => {
+                // H264 压缩格式：估算为未压缩大小的 1/4 到 1/8
+                width * height / 2
+            }
         };
 
         Ok(StreamControl {
-            hint: 0x0001, // dwFrameInterval field shall be kept fixed
+            hint: 0x0001, // bmHint: dwFrameInterval field shall be kept fixed (参考 libuvc)
             format_index,
             frame_index,
             frame_interval,
-            key_frame_rate: 0,
-            p_frame_rate: 0,
-            comp_quality: 0,
-            comp_window_size: 0,
-            delay: 0,
+            key_frame_rate: 0, // 默认为 0，让设备决定
+            p_frame_rate: 0,   // 默认为 0，让设备决定
+            comp_quality: 0,   // 默认为 0，让设备决定
+            comp_window_size: 0, // 默认为 0
+            delay: 0,          // 默认为 0
             max_video_frame_size: max_frame_size,
-            max_payload_transfer_size: 0, // 让设备决定
+            max_payload_transfer_size: 0, // 让设备决定，参考 libuvc
         })
     }
 
     /// 查找格式和帧索引
+    /// 
+    /// 此函数参考了 libuvc 的 _uvc_find_frame_desc_stream_if 实现，提供了：
+    /// 1. 精确的格式类型匹配（包括未压缩格式的子类型）
+    /// 2. 分辨率匹配检查
+    /// 3. 优雅的降级策略（exact match -> format type match -> default）
+    /// 4. 符合 UVC 规范的索引计算（从1开始）
+    /// 
+    /// libuvc 参考：
+    /// - src/stream.c:_uvc_find_frame_desc_stream_if (line 415-444)
+    /// - src/stream.c:uvc_find_frame_desc (line 444-474)
     fn find_format_indices(
         &self,
-        _formats: &[VideoFormat],
+        formats: &[VideoFormat],
         target: &VideoFormat,
     ) -> Option<(u8, u8)> {
-        // 简化实现：返回固定索引
-        // 在完整实现中，应该根据实际的描述符解析结果返回正确的索引
-        match target {
-            VideoFormat::Mjpeg { .. } => Some((1, 1)), // MJPEG 通常是格式索引 1
-            VideoFormat::Uncompressed { .. } => Some((2, 1)), // 未压缩格式通常是格式索引 2
-            VideoFormat::H264 { .. } => Some((3, 1)),  // H264 格式
+        // 遍历所有支持的格式，寻找匹配的格式和帧配置
+        for (format_idx, format) in formats.iter().enumerate() {
+            // 检查格式类型是否匹配
+            if core::mem::discriminant(&format.format_type) != core::mem::discriminant(&target.format_type) {
+                continue;
+            }
+            
+            // 对于未压缩格式，还需要检查具体的子格式
+            if let (VideoFormatType::Uncompressed(format_type), VideoFormatType::Uncompressed(target_type)) = 
+                (&format.format_type, &target.format_type) && format_type != target_type {
+                continue;
+            }
+            
+            // 检查分辨率是否匹配
+            if format.width == target.width && format.height == target.height {
+                // 找到匹配的格式，返回索引（从 1 开始，符合 UVC 规范）
+                let format_index = (format_idx + 1) as u8;
+                let frame_index = 1u8; // 简化实现，假设每个格式只有一个帧配置
+                
+                debug!("Found matching format: format_index={}, frame_index={}", format_index, frame_index);
+                return Some((format_index, frame_index));
+            }
         }
+        
+        // 如果没有找到完全匹配的，尝试找到相同格式类型的第一个配置
+        for (format_idx, format) in formats.iter().enumerate() {
+            if core::mem::discriminant(&format.format_type) == core::mem::discriminant(&target.format_type) {
+                let format_index = (format_idx + 1) as u8;
+                let frame_index = 1u8;
+                
+                debug!("Using fallback format: format_index={}, frame_index={}", format_index, frame_index);
+                return Some((format_index, frame_index));
+            }
+        }
+        
+        // 如果还是没有找到，使用默认值（参考 libuvc 的错误处理）
+        debug!("No matching format found, using default indices");
+        None
     }
 
     /// 发送 VS 控制请求

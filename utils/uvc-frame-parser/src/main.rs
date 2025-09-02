@@ -3,7 +3,7 @@
 #![cfg(not(target_os = "none"))]
 
 use clap::{Arg, Command};
-use crab_uvc::{UncompressedFormat, VideoFormat};
+use crab_uvc::{UncompressedFormat, VideoFormat, VideoFormatType};
 use env_logger;
 use log::{error, info, warn};
 use regex::Regex;
@@ -184,10 +184,11 @@ fn parse_video_format_from_log(line: &str) -> Result<VideoFormat, Box<dyn std::e
         let height = extract_field_value(line, "height")?;
         let frame_rate = extract_field_value(line, "frame_rate").unwrap_or(30);
 
-        Ok(VideoFormat::Mjpeg {
+        Ok(VideoFormat {
             width: width as u16,
             height: height as u16,
             frame_rate,
+            format_type: VideoFormatType::Mjpeg,
         })
     } else if line.contains("Uncompressed") {
         let width = extract_field_value(line, "width")?;
@@ -207,21 +208,22 @@ fn parse_video_format_from_log(line: &str) -> Result<VideoFormat, Box<dyn std::e
             UncompressedFormat::Yuy2 // 默认
         };
 
-        Ok(VideoFormat::Uncompressed {
+        Ok(VideoFormat {
             width: width as u16,
             height: height as u16,
             frame_rate,
-            format_type,
+            format_type: VideoFormatType::Uncompressed(format_type),
         })
     } else if line.contains("H264") {
         let width = extract_field_value(line, "width")?;
         let height = extract_field_value(line, "height")?;
         let frame_rate = extract_field_value(line, "frame_rate").unwrap_or(30);
 
-        Ok(VideoFormat::H264 {
+        Ok(VideoFormat {
             width: width as u16,
             height: height as u16,
             frame_rate,
+            format_type: VideoFormatType::H264,
         })
     } else {
         Err("Unsupported video format in log".into())
