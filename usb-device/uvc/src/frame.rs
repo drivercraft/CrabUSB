@@ -35,35 +35,35 @@ impl UvcPayloadHeader {
         let has_err = (info & flags::ERR) != 0;
 
         // 可选字段顺序：PTS(4) -> SCR(6)
-        let mut offset = 2usize;
+        let mut _offset = 2usize;
         let pts = if has_pts {
-            if offset + 4 > b_length {
+            if _offset + 4 > b_length {
                 return None;
             }
             let v = u32::from_le_bytes([
-                buf[offset],
-                buf[offset + 1],
-                buf[offset + 2],
-                buf[offset + 3],
+                buf[_offset],
+                buf[_offset + 1],
+                buf[_offset + 2],
+                buf[_offset + 3],
             ]);
-            offset += 4;
+            _offset += 4;
             Some(v)
         } else {
             None
         };
 
         let scr = if has_scr {
-            if offset + 6 > b_length {
+            if _offset + 6 > b_length {
                 return None;
             }
             let stc = u32::from_le_bytes([
-                buf[offset],
-                buf[offset + 1],
-                buf[offset + 2],
-                buf[offset + 3],
+                buf[_offset],
+                buf[_offset + 1],
+                buf[_offset + 2],
+                buf[_offset + 3],
             ]);
-            let sof = u16::from_le_bytes([buf[offset + 4], buf[offset + 5]]);
-            offset += 6;
+            let sof = u16::from_le_bytes([buf[_offset + 4], buf[_offset + 5]]);
+            _offset += 6;
             Some((stc, sof))
         } else {
             None
@@ -200,7 +200,7 @@ impl FrameParser {
 
         let Some(ref mut buffer) = self.buffer else {
             // 理论上不应发生
-            warn!("Internal buffer is None, resetting");
+            // warn!("Internal buffer is None, resetting");
             self.buffer = Some(Vec::with_capacity(self.frame_size));
             return Ok(None);
         };

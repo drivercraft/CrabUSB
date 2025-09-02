@@ -1288,15 +1288,15 @@ impl UvcDevice {
         })
     }
 
-    /// 获取当前的 Stream Control 参数
-    async fn get_current_stream_control(&mut self) -> Result<StreamControl, USBError> {
-        // 发送 GET_CUR 请求获取当前的 commit 参数
-        debug!("Getting current stream control parameters");
-        let response = self
-            .get_vs_control(vs_controls::VS_COMMIT_CONTROL, 26)
-            .await?;
-        self.parse_stream_control(&response)
-    }
+    // /// 获取当前的 Stream Control 参数
+    // async fn get_current_stream_control(&mut self) -> Result<StreamControl, USBError> {
+    //     // 发送 GET_CUR 请求获取当前的 commit 参数
+    //     debug!("Getting current stream control parameters");
+    //     let response = self
+    //         .get_vs_control(vs_controls::VS_COMMIT_CONTROL, 26)
+    //         .await?;
+    //     self.parse_stream_control(&response)
+    // }
 
     /// 获取设备信息字符串
     pub async fn get_device_info(&self) -> Result<String, USBError> {
@@ -1310,7 +1310,7 @@ impl UvcDevice {
         let response = self
             .get_vs_control(vs_controls::STREAM_ERROR_CODE, 1)
             .await?;
-        let error_code = response.get(0).copied().unwrap_or(0);
+        let error_code = response.first().copied().unwrap_or(0);
         debug!("Stream error code: 0x{:02x}", error_code);
         Ok(error_code)
     }
