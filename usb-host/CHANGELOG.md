@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.8...crab-usb-v0.3.9) - 2025-09-02
+
+### Other
+
+- Merge branch 'main' of github.com:drivercraft/CrabUSB
+- update
+- update
+
 ## [0.3.8](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.7...crab-usb-v0.3.8) - 2025-09-01
 
 ### Added
