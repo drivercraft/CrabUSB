@@ -7,18 +7,16 @@ repository.workspace = true
 version = "0.1.0"
 
 [target.'cfg(not(target_os = "none"))'.dependencies]
-log = "0.4"
-env_logger = "0.11"
-image = "0.24"
-tokio = {version = "1", features = ["full"]}
-ffmpeg-next = "7.1.0"
-toml = "0.9"
-serde = {version = "1.0", features = ["derive"]}
 clap = {version = "4", features = ["derive"]}
-crab-uvc = { path = "../../usb-device/uvc" }
+crab-uvc = {path = "../../usb-device/uvc"}
+env_logger = "0.11"
+ffmpeg-next = "7.1.0"
+image = "0.24"
+log = "0.4"
+regex = "1.0"
+serde = {version = "1.0", features = ["derive"]}
+tokio = {version = "1", features = ["full"]}
+toml = "0.9"
 
 [dev-dependencies]
 tempfile = "3.8"
-
-[dependencies]
-regex = "1.11.2"

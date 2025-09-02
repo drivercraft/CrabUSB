@@ -29,10 +29,22 @@ use crate::{
     err::USBError,
 };
 
+/// ISO传输帧调度信息
+#[derive(Debug, Clone, Copy)]
+pub struct IsoFrameSchedule {
+    /// 目标帧号（微帧）
+    pub target_frame: u16,
+    /// 是否使用ASAP模式
+    pub start_asap: bool,
+    /// 端点的传输间隔（以微帧为单位）
+    pub interval: u8,
+}
+
 pub(crate) struct EndpointRaw {
     dci: Dci,
     pub ring: Ring,
     device: DeviceState,
+    iso_schedule: Option<IsoFrameSchedule>,
 }
 
 unsafe impl Send for EndpointRaw {}
@@ -43,6 +55,7 @@ impl EndpointRaw {
             dci,
             ring: Ring::new(true, dma_api::Direction::Bidirectional)?,
             device: device.clone(),
+            iso_schedule: None,
         })
     }
 
@@ -87,6 +100,36 @@ impl EndpointRaw {
 
     pub fn bus_addr(&self) -> BusAddr {
         self.ring.bus_addr()
+    }
+
+    /// 为ISO端点设置帧调度信息
+    pub fn set_iso_schedule(&mut self, schedule: IsoFrameSchedule) {
+        self.iso_schedule = Some(schedule);
+    }
+
+    /// 获取当前的ISO调度信息
+    pub fn get_iso_schedule(&self) -> Option<&IsoFrameSchedule> {
+        self.iso_schedule.as_ref()
+    }
+
+    /// 计算下一个ISO传输的帧号
+    pub fn calculate_next_frame(&mut self) -> u16 {
+        if let Some(schedule) = &mut self.iso_schedule {
+            if schedule.start_asap {
+                // 使用当前微帧索引 + 一些安全边距
+                let current_mfindex = self.device.get_microframe_index();
+                let next_frame = (current_mfindex + 8) & 0x7FF; // 8个微帧的边距
+                schedule.target_frame = next_frame;
+                next_frame
+            } else {
+                // 使用预设的目标帧
+                schedule.target_frame
+            }
+        } else {
+            // 没有调度信息，使用ASAP
+            let current_mfindex = self.device.get_microframe_index();
+            (current_mfindex + 8) & 0x7FF
+        }
     }
 }
 
@@ -284,6 +327,18 @@ impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
         Ok(())
     }
 
+    /// 为ISO端点设置帧调度信息（仅对ISO端点有效）
+    pub fn set_iso_schedule(&mut self, target_frame: u16, start_asap: bool, interval: u8) {
+        if self.desc.transfer_type == usb_if::descriptor::EndpointType::Isochronous {
+            let schedule = IsoFrameSchedule {
+                target_frame,
+                start_asap,
+                interval,
+            };
+            self.raw.set_iso_schedule(schedule);
+        }
+    }
+
     /// 准备DMA缓冲区（输入方向）
     fn prepare_in_buffer(&self, data: &mut [u8]) -> (usize, usize, usize) {
         let len = data.len();
@@ -326,14 +381,29 @@ impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
     }
 
     /// 创建Isoch TRB，根据xHCI规范优化
-    fn create_isoch_trb(&self, addr_bus: usize, len: usize) -> transfer::Allowed {
-        transfer::Allowed::Isoch(
-            *Isoch::new()
-                .set_data_buffer_pointer(addr_bus as _)
-                .set_trb_transfer_length(len as _)
-                .set_interrupter_target(0)
-                .set_interrupt_on_completion(), // .set_start_isoch_asap() // 如果方法可用则启用
-        )
+    fn create_isoch_trb(&mut self, addr_bus: usize, len: usize) -> transfer::Allowed {
+        // 计算帧号
+        let _frame_number = self.raw.calculate_next_frame();
+
+        // 检查是否使用SIA (Start Isoch ASAP)
+        let use_sia = if let Some(schedule) = self.raw.get_iso_schedule() {
+            schedule.start_asap
+        } else {
+            true // 默认使用SIA
+        };
+
+        let mut trb = Isoch::new();
+        trb.set_data_buffer_pointer(addr_bus as _)
+            .set_trb_transfer_length(len as _)
+            .set_interrupter_target(0)
+            .set_interrupt_on_completion();
+
+        if use_sia {
+            trb.set_start_isoch_asap(); // 启用SIA
+        }
+
+        // 创建Isoch TRB
+        transfer::Allowed::Isoch(trb)
     }
 
     /// 创建Normal TRB用于Isoch TD的链接
@@ -349,7 +419,6 @@ impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
                     .set_data_buffer_pointer(addr_bus as _)
                     .set_trb_transfer_length(len as _)
                     .set_interrupter_target(0)
-                    .set_interrupt_on_short_packet()
                     .set_interrupt_on_completion(),
             )
         } else {
@@ -386,7 +455,7 @@ impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
 
     /// 创建多包ISO传输的TRB列表
     fn create_iso_trb_list(
-        &self,
+        &mut self,
         addr_bus: usize,
         len: usize,
         num_iso_packets: usize,

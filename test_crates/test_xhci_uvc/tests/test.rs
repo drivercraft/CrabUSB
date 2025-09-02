@@ -157,7 +157,7 @@ mod tests {
                                 }
 
                                 // 将数据按4KB块分割输出，使用十六进制编码
-                                const CHUNK_SIZE: usize = 4096;
+                                const CHUNK_SIZE: usize = 4096 * 4;
                                 let chunks = frame.data.chunks(CHUNK_SIZE);
                                 let total_chunks = chunks.len();
 

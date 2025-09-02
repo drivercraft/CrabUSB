@@ -786,10 +786,23 @@ impl DeviceState {
             .doorbell
             .write_volatile_at(self.id.as_usize(), bell);
     }
+
+    /// 获取当前微帧索引，用于ISO传输调度
+    pub fn get_microframe_index(&self) -> u16 {
+        self.inner.lock().get_microframe_index()
+    }
 }
 
 struct DeviceStateInner {
     regs: XhciRegisters,
+}
+
+impl DeviceStateInner {
+    /// 获取当前微帧索引
+    /// 返回值范围: 0-2047 (0x7FF)
+    pub fn get_microframe_index(&self) -> u16 {
+        self.regs.runtime.mfindex.read_volatile().microframe_index()
+    }
 }
 struct DeviceContext(*mut ContextData);
 unsafe impl Send for DeviceContext {}
