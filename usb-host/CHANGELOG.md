@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.10](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.9...crab-usb-v0.3.10) - 2025-09-03
+
+### Other
+
+- 清理未使用的导入和注释掉的代码
+
 ## [0.3.9](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.8...crab-usb-v0.3.9) - 2025-09-02
 
 ### Other
