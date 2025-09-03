@@ -2,7 +2,6 @@ use core::{num::NonZeroUsize, ptr::NonNull, time::Duration};
 
 use alloc::{boxed::Box, vec::Vec};
 use futures::{FutureExt, task::AtomicWaker};
-use mbarrier::mb;
 use xhci::{
     ExtendedCapability,
     accessor::Mapper,
@@ -283,7 +282,7 @@ fn parse_default_max_packet_size_from_port_speed(speed: u8) -> u16 {
     match speed {
         1 => 8,
         2 | 3 => 64,
-        4 | 5 | 6 => 512,
+        4..=6 => 512,
         v => unimplemented!("PSI: {}", v),
     }
 }

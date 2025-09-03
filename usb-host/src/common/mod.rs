@@ -1,6 +1,5 @@
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::{cell::UnsafeCell, fmt::Display, ptr::NonNull, sync::atomic::AtomicBool};
-use log::{info, trace};
 use usb_if::{
     descriptor::{Class, ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor},
     host::{Controller, ResultTransfer, USBError},

@@ -244,11 +244,11 @@ impl Root {
                         // trace!("[Command] << {allowed:?} @{addr:X}");
                         self.wait_cmd.set_result(addr, c);
                     }
-                    Allowed::PortStatusChange(st) => {
+                    Allowed::PortStatusChange(_st) => {
                         // debug!("port change: {}", st.port_id());
                     }
                     Allowed::TransferEvent(c) => {
-                        let addr = c.trb_pointer();
+                        // let addr = c.trb_pointer();
                         // trace!("[Transfer] << {allowed:?} @{addr:X}");
                         // debug!("transfer event: {c:?}");
                         let result = match c.completion_code() {

@@ -1,23 +1,18 @@
 use alloc::{boxed::Box, collections::btree_map::BTreeMap, sync::Arc, vec::Vec};
-use core::{
-    ops::{Deref, DerefMut},
-    time::Duration,
-};
+use core::ops::{Deref, DerefMut};
 
 use futures::FutureExt;
-use log::{debug, error, info, trace, warn};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
     descriptor::{
         self, ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor,
-        InterfaceDescriptor, LanguageId,
+        InterfaceDescriptor,
     },
-    err::TransferError,
     host::{ControlSetup, Device as UsbDevice, ResultTransfer},
     transfer::{Recipient, Request, RequestType},
 };
-use xhci::{context::EndpointState, registers::doorbell, ring::trb::command};
+use xhci::{registers::doorbell, ring::trb::command};
 
 use crate::{
     backend::{
@@ -34,7 +29,6 @@ use crate::{
         },
     },
     err::USBError,
-    osal::kernel::sleep,
 };
 
 pub struct Device {
@@ -47,7 +41,6 @@ pub struct Device {
     config_desc: Vec<ConfigurationDescriptor>,
     state: DeviceState,
     pub(crate) ctrl_ep: EndpointControl,
-    lang_id: LanguageId,
 }
 
 pub struct DeviceInfo {
@@ -199,7 +192,6 @@ impl Device {
             config_desc: Default::default(),
             state,
             ctrl_ep,
-            lang_id: LanguageId::EnglishUnitedStates,
         })
     }
 
@@ -382,32 +374,7 @@ impl Device {
     pub fn control_out<'a>(&mut self, param: ControlSetup, buff: &'a [u8]) -> ResultTransfer<'a> {
         self.ctrl_ep.control_out(param, buff)
     }
-    async fn defautl_lang_id(&mut self) -> Result<LanguageId, USBError> {
-        let mut lang_buf = alloc::vec![0u8; 8];
-        self.control_in(
-            ControlSetup {
-                request_type: RequestType::Standard,
-                recipient: Recipient::Device,
-                request: Request::GetDescriptor,
-                value: ((DescriptorType::STRING.0 as u16) << 8),
-                index: 0,
-            },
-            &mut lang_buf,
-        )?
-        .await?;
-        if lang_buf.len() >= 4
-            && (lang_buf[0] as usize) <= lang_buf.len()
-            && lang_buf[1] == DescriptorType::STRING.0
-        {
-            let dlen = lang_buf[0] as usize;
-            if dlen >= 4 {
-                let langid = u16::from_le_bytes([lang_buf[2], lang_buf[3]]);
-                return Ok(langid.into());
-            }
-        }
 
-        Ok(LanguageId::EnglishUnitedStates) // 默认返回英语（美国）
-    }
     async fn control_max_packet_size(&mut self) -> Result<u16, USBError> {
         trace!("control_fetch_control_point_packet_size");
 
@@ -694,10 +661,10 @@ impl Device {
         match transfer_type {
             descriptor::EndpointType::Isochronous => {
                 match port_speed {
-                    2 | 3 | 4 | 5 => {
+                    2..=5 => {
                         // HighSpeed, SuperSpeed, SuperSpeedPlus ISO 端点
                         // Interval = max(1, min(16, bInterval))
-                        let interval = binterval.max(1).min(16);
+                        let interval = binterval.clamp(1, 16);
                         info!(
                             "ISO endpoint HS/SS: bInterval={} -> XHCI interval={}",
                             binterval, interval
@@ -712,7 +679,7 @@ impl Device {
                         } else {
                             // 计算 floor(log2(bInterval))
                             let log2_binterval = 31 - (binterval as u32).leading_zeros() as u8 - 1;
-                            let interval = (log2_binterval + 3).max(1).min(16);
+                            let interval = (log2_binterval + 3).clamp(1, 16);
                             info!(
                                 "ISO endpoint FS/LS: bInterval={} -> log2={} -> XHCI interval={}",
                                 binterval, log2_binterval, interval
@@ -724,10 +691,10 @@ impl Device {
             }
             descriptor::EndpointType::Interrupt => {
                 match port_speed {
-                    2 | 3 | 4 | 5 => {
+                    2..=5 => {
                         // HighSpeed, SuperSpeed, SuperSpeedPlus 中断端点
                         // Interval = max(1, min(16, bInterval))
-                        let interval = binterval.max(1).min(16);
+                        let interval = binterval.clamp(1, 16);
                         info!(
                             "INT endpoint HS/SS: bInterval={} -> XHCI interval={}",
                             binterval, interval
@@ -742,7 +709,7 @@ impl Device {
                         } else {
                             // 计算 floor(log2(bInterval))
                             let log2_binterval = 31 - (binterval as u32).leading_zeros() as u8 - 1;
-                            let interval = (log2_binterval + 3).max(1).min(16);
+                            let interval = (log2_binterval + 3).clamp(1, 16);
                             info!(
                                 "INT endpoint FS/LS: bInterval={} -> log2={} -> XHCI interval={}",
                                 binterval, log2_binterval, interval
