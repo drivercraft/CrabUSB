@@ -18,7 +18,7 @@ crossbeam = {version = "0.8", features = ["alloc"], default-features = false}
 crossbeam-skiplist = {version = "0.1", features = [
   "alloc",
 ], default-features = false}
-dma-api = {version = "0.4", features = ["alloc"]}
+dma-api = {version = "0.5", features = ["alloc"]}
 futures = {workspace = true, features = ["alloc"]}
 log = "0.4"
 mbarrier = "0.1"

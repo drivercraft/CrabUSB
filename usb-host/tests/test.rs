@@ -10,7 +10,7 @@ mod tests {
     use bare_test::{
         GetIrqConfig,
         async_std::time,
-        fdt_parser::PciSpace,
+        fdt_parser::{PciSpace, Status},
         globals::{PlatformInfoKind, global_val},
         irq::{IrqHandleResult, IrqInfo, IrqParam},
         mem::{iomap, page_size},
@@ -159,14 +159,14 @@ mod tests {
         irq: Option<IrqInfo>,
     }
 
-    fn get_usb_host() -> XhciInfo {
+    fn get_usb_host_pcie() -> Option<XhciInfo> {
         let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
 
         let fdt = fdt.get();
+
         let pcie = fdt
             .find_compatible(&["pci-host-ecam-generic", "brcm,bcm2711-pcie"])
-            .next()
-            .unwrap()
+            .next()?
             .into_pci()
             .unwrap();
 
@@ -262,16 +262,33 @@ mod tests {
 
                     println!("irq: {irq:?}");
 
-                    return XhciInfo {
-                        usb: USBHost::new_xhci(addr),
+                    return Some(XhciInfo {
+                        usb: USBHost::new_xhci(addr, u32::MAX as usize),
                         irq,
-                    };
+                    });
                 }
             }
         }
+        None
+    }
+
+    fn get_usb_host() -> XhciInfo {
+        if let Some(info) = get_usb_host_pcie() {
+            return info;
+        }
+
+        let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
+
+        let fdt = fdt.get();
 
         for node in fdt.all_nodes() {
-            if node.compatibles().any(|c| c.contains("xhci")) {
+            if matches!(node.status(), Some(Status::Disabled)) {
+                continue;
+            }
+            if node
+                .compatibles()
+                .any(|c| c.contains("xhci") | c.contains("snps,dwc3"))
+            {
                 println!("usb node: {}", node.name);
                 let regs = node.reg().unwrap().collect::<Vec<_>>();
                 println!("usb regs: {:?}", regs);
@@ -284,7 +301,7 @@ mod tests {
                 let irq = node.irq_info();
 
                 return XhciInfo {
-                    usb: USBHost::new_xhci(addr),
+                    usb: USBHost::new_xhci(addr, u32::MAX as usize),
                     irq,
                 };
             }

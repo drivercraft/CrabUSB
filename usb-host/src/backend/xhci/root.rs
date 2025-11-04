@@ -46,27 +46,30 @@ pub struct Root {
 
     wait_transfer: WaitMap<u64, core::result::Result<usize, TransferError>>,
     wait_cmd: WaitMap<u64, CommandCompletion>,
+    dma_mask: usize,
 }
 
 impl Root {
-    pub fn new(max_slots: usize, reg: XhciRegisters) -> Result<Self, USBError> {
+    pub fn new(max_slots: usize, reg: XhciRegisters, dma_mask: usize) -> Result<Self, USBError> {
         let cmd = Ring::new_with_len(
             0x1000 / size_of::<TrbData>(),
             true,
             dma_api::Direction::Bidirectional,
+            dma_mask as _,
         )?;
-        let event_ring = EventRing::new()?;
+        let event_ring = EventRing::new(dma_mask)?;
 
         let cmd_wait = WaitMap::new(cmd.trb_bus_addr_list().map(|a| a.raw()));
 
         Ok(Self {
-            dev_list: DeviceContextList::new(max_slots)?,
+            dev_list: DeviceContextList::new(max_slots, dma_mask)?,
             cmd,
             event_ring,
             scratchpad_buf_arr: None,
             reg,
             wait_transfer: WaitMap::empty(),
             wait_cmd: cmd_wait,
+            dma_mask,
         })
     }
 
@@ -193,7 +196,7 @@ impl Root {
             if buf_count == 0 {
                 return Ok(());
             }
-            let scratchpad_buf_arr = ScratchpadBufferArray::new(buf_count as _)?;
+            let scratchpad_buf_arr = ScratchpadBufferArray::new(buf_count as _, self.dma_mask)?;
 
             let bus_addr = scratchpad_buf_arr.bus_addr();
 
@@ -431,12 +434,14 @@ impl Root {
 #[derive(Clone)]
 pub(crate) struct RootHub {
     inner: Arc<MutexRoot>,
+    pub dma_mask: usize,
 }
 
 impl RootHub {
-    pub fn new(max_slots: usize, reg: XhciRegisters) -> Result<Self, USBError> {
+    pub fn new(max_slots: usize, reg: XhciRegisters, dma_mask: usize) -> Result<Self, USBError> {
         Ok(Self {
-            inner: Arc::new(MutexRoot::new(Root::new(max_slots, reg)?)),
+            inner: Arc::new(MutexRoot::new(Root::new(max_slots, reg, dma_mask)?)),
+            dma_mask,
         })
     }
 
@@ -535,7 +540,7 @@ impl RootHub {
                 "Creating new context for slot {slot_id}, {}",
                 if is_64 { "64-bit" } else { "32-bit" }
             );
-            let ctx = root.dev_list.new_ctx(slot_id, is_64)?;
+            let ctx = root.dev_list.new_ctx(slot_id, is_64, self.dma_mask)?;
             let device = Device::new(slot_id, self, ctx, (port_idx + 1).into())?;
             device.ctrl_ep.listen(&mut root);
 

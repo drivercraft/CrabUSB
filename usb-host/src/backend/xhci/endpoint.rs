@@ -50,10 +50,10 @@ pub(crate) struct EndpointRaw {
 unsafe impl Send for EndpointRaw {}
 
 impl EndpointRaw {
-    pub fn new(dci: Dci, device: &DeviceState) -> Result<Self, USBError> {
+    pub fn new(dci: Dci, device: &DeviceState, dma_mask: usize) -> Result<Self, USBError> {
         Ok(Self {
             dci,
-            ring: Ring::new(true, dma_api::Direction::Bidirectional)?,
+            ring: Ring::new(true, dma_api::Direction::Bidirectional, dma_mask)?,
             device: device.clone(),
             iso_schedule: None,
         })
@@ -150,7 +150,7 @@ fn on_ready(addr: *mut (), len: *mut (), direction: *mut ()) {
                 Direction::In => dma_api::Direction::FromDevice,
             },
         );
-        dm.preper_read_all();
+        dm.prepare_read_all();
         rmb();
     }
 }

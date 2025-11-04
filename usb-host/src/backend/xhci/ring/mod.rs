@@ -42,8 +42,13 @@ pub struct Ring {
 unsafe impl Send for Ring {}
 
 impl Ring {
-    pub fn new_with_len(len: usize, link: bool, direction: Direction) -> Result<Self> {
-        let trbs = DVec::zeros(len, page_size(), direction).ok_or(USBError::NoMemory)?;
+    pub fn new_with_len(
+        len: usize,
+        link: bool,
+        direction: Direction,
+        dma_mask: usize,
+    ) -> core::result::Result<Self, HostError> {
+        let trbs = DVec::zeros(dma_mask as _, len, page_size(), direction)?;
 
         Ok(Self {
             link,
@@ -53,9 +58,9 @@ impl Ring {
         })
     }
 
-    pub fn new(link: bool, direction: Direction) -> Result<Self> {
+    pub fn new(link: bool, direction: Direction, dma_mask: usize) -> Result<Self> {
         let len = page_size() / TRB_SIZE;
-        Self::new_with_len(len, link, direction)
+        Ok(Self::new_with_len(len, link, direction, dma_mask)?)
     }
 
     pub fn len(&self) -> usize {

@@ -51,8 +51,8 @@ impl USBHost {
         }
     }
 
-    pub fn new_xhci(mmio_base: NonNull<u8>) -> Self {
-        let xhci = Xhci::new(mmio_base);
+    pub fn new_xhci(mmio_base: NonNull<u8>, dma_mask: usize) -> Self {
+        let xhci = Xhci::new(mmio_base, dma_mask);
         Self {
             raw: HostRaw::new(xhci),
             running: Arc::new(AtomicBool::new(true)),

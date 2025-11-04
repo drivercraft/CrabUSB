@@ -27,23 +27,19 @@ pub struct ContextData {
 }
 
 impl ContextData {
-    fn new(is_64: bool) -> Result<Self> {
+    fn new(is_64: bool, dma_mask: usize) -> core::result::Result<Self, HostError> {
         let ctx64;
         let ctx32;
         if is_64 {
             ctx64 = Some(Context64 {
-                out: DBox::zero_with_align(dma_api::Direction::FromDevice, 64)
-                    .ok_or(USBError::NoMemory)?,
-                input: DBox::zero_with_align(dma_api::Direction::ToDevice, 64)
-                    .ok_or(USBError::NoMemory)?,
+                out: DBox::zero_with_align(dma_mask as _, dma_api::Direction::FromDevice, 64)?,
+                input: DBox::zero_with_align(dma_mask as _, dma_api::Direction::ToDevice, 64)?,
             });
             ctx32 = None;
         } else {
             ctx32 = Some(Context32 {
-                out: DBox::zero_with_align(dma_api::Direction::FromDevice, 64)
-                    .ok_or(USBError::NoMemory)?,
-                input: DBox::zero_with_align(dma_api::Direction::ToDevice, 64)
-                    .ok_or(USBError::NoMemory)?,
+                out: DBox::zero_with_align(dma_mask as _, dma_api::Direction::FromDevice, 64)?,
+                input: DBox::zero_with_align(dma_mask as _, dma_api::Direction::ToDevice, 64)?,
             });
             ctx64 = None;
         }
@@ -130,9 +126,9 @@ impl ContextData {
 }
 
 impl DeviceContextList {
-    pub fn new(max_slots: usize) -> Result<Self> {
-        let dcbaa =
-            DVec::zeros(256, 0x1000, dma_api::Direction::ToDevice).ok_or(USBError::NoMemory)?;
+    pub fn new(max_slots: usize, dma_mask: usize) -> Result<Self> {
+        let dcbaa = DVec::zeros(dma_mask as _, 256, 0x1000, dma_api::Direction::ToDevice)
+            .map_err(|_| USBError::NoMemory)?;
         let mut ctx_list = Vec::with_capacity(max_slots);
         for _ in 0..max_slots {
             ctx_list.push(None);
@@ -145,11 +141,16 @@ impl DeviceContextList {
         })
     }
 
-    pub fn new_ctx(&mut self, slot_id: SlotId, is_64: bool) -> Result<*mut ContextData> {
+    pub fn new_ctx(
+        &mut self,
+        slot_id: SlotId,
+        is_64: bool,
+        dma_mask: usize,
+    ) -> Result<*mut ContextData> {
         if slot_id.as_usize() > self.max_slots {
             Err(USBError::SlotLimitReached)?;
         }
-        let ctx = ContextData::new(is_64)?;
+        let ctx = ContextData::new(is_64, dma_mask as _)?;
         self.dcbaa.set(slot_id.as_usize(), ctx.dcbaa());
         self.ctx_list[slot_id.as_usize()] = Some(ctx);
         let ctx_ptr = self.ctx_list[slot_id.as_usize()]
@@ -166,14 +167,24 @@ pub struct ScratchpadBufferArray {
 }
 
 impl ScratchpadBufferArray {
-    pub fn new(entries: usize) -> Result<Self> {
-        let mut entries_vec = DVec::zeros(entries, 64, dma_api::Direction::Bidirectional)
-            .ok_or(USBError::NoMemory)?;
+    pub fn new(entries: usize, dma_mask: usize) -> Result<Self> {
+        let mut entries_vec = DVec::zeros(
+            dma_mask as _,
+            entries,
+            64,
+            dma_api::Direction::Bidirectional,
+        )
+        .map_err(|_| USBError::NoMemory)?;
 
         let pages: Vec<DVec<u8>> = (0..entries_vec.len())
             .map(|_| {
-                DVec::<u8>::zeros(0x1000, 0x1000, dma_api::Direction::Bidirectional)
-                    .ok_or(USBError::NoMemory)
+                DVec::<u8>::zeros(
+                    dma_mask as _,
+                    0x1000,
+                    0x1000,
+                    dma_api::Direction::Bidirectional,
+                )
+                .map_err(|_| USBError::NoMemory)
             })
             .try_collect()?;
 

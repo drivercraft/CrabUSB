@@ -21,11 +21,11 @@ unsafe impl Send for EventRing {}
 unsafe impl Sync for EventRing {}
 
 impl EventRing {
-    pub fn new() -> Result<Self> {
-        let ring = Ring::new(true, dma_api::Direction::Bidirectional)?;
+    pub fn new(dma_mask: usize) -> Result<Self> {
+        let ring = Ring::new(true, dma_api::Direction::Bidirectional, dma_mask)?;
 
-        let mut ste =
-            DVec::zeros(1, 64, dma_api::Direction::Bidirectional).ok_or(USBError::NoMemory)?;
+        let mut ste = DVec::zeros(dma_mask as _, 1, 64, dma_api::Direction::Bidirectional)
+            .map_err(|_| USBError::NoMemory)?;
 
         let ste0 = EventRingSte {
             addr: ring.trbs.bus_addr(),
