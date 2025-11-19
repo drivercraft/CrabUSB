@@ -280,11 +280,12 @@ mod tests {
         let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
 
         let fdt = fdt.get();
-
+        let mut count = 0;
         for node in fdt.all_nodes() {
             if matches!(node.status(), Some(Status::Disabled)) {
                 continue;
             }
+
             if node
                 .compatibles()
                 .any(|c| c.contains("xhci") | c.contains("snps,dwc3"))
