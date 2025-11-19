@@ -103,7 +103,7 @@ cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat -- --
 ### Real Hardware (U-Boot)
 
 ```bash
-cargo test --release --test test -- --show-output --uboot
+cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat -- --show-output uboot
 ```
 
 ### Qemu using host USB devices on a Linux host

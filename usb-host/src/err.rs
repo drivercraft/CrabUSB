@@ -1,3 +1,5 @@
+use core::fmt::Display;
+
 use alloc::format;
 pub use usb_if::err::TransferError;
 pub use usb_if::host::USBError;
@@ -23,5 +25,30 @@ impl ConvertXhciError for CompletionCode {
             }
             _ => Err(TransferError::Other(format!("XHCI error: {self:?}"))),
         }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub struct HostError(USBError);
+
+impl Display for HostError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<dma_api::DError> for HostError {
+    fn from(value: dma_api::DError) -> Self {
+        match value {
+            dma_api::DError::NoMemory => Self(USBError::NoMemory),
+            dma_api::DError::DmaMaskNotMatch { mask, got } => Self(USBError::NoMemory),
+            dma_api::DError::LayoutError => Self(USBError::NoMemory),
+        }
+    }
+}
+
+impl From<HostError> for USBError {
+    fn from(value: HostError) -> Self {
+        value.0
     }
 }

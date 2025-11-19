@@ -180,7 +180,7 @@ impl Device {
         port_id: PortId,
     ) -> Result<Self, USBError> {
         let state = DeviceState::new(id, unsafe { root.reg() }, root.clone());
-        let ctrl_ep = EndpointControl::new(EndpointRaw::new(Dci::CTRL, &state)?);
+        let ctrl_ep = EndpointControl::new(EndpointRaw::new(Dci::CTRL, &state, root.dma_mask)?);
 
         Ok(Self {
             id,
@@ -495,7 +495,7 @@ impl Device {
                 max_dci = dci;
             }
 
-            let ep_raw = EndpointRaw::new(dci.into(), &self.state)?;
+            let ep_raw = EndpointRaw::new(dci.into(), &self.state, self.root.dma_mask)?;
             // let ring = self.ctx_mut().new_ring(dci.into())?;
             root.litsen_transfer(&ep_raw.ring);
             // let ring_addr = ring.bus_addr();

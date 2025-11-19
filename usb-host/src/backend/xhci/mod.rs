@@ -29,6 +29,7 @@ pub struct Xhci {
     reg: XhciRegisters,
     root: Option<RootHub>,
     port_wake: AtomicWaker,
+    dma_mask: usize,
 }
 
 unsafe impl Send for Xhci {}
@@ -48,7 +49,7 @@ impl usb_if::host::Controller for Xhci {
             // register (5.4.7) to enable the device slots that system software is going to
             // use.
             let max_slots = self.setup_max_device_slots();
-            let root_hub = RootHub::new(max_slots as _, self.reg.clone())?;
+            let root_hub = RootHub::new(max_slots as _, self.reg.clone(), self.dma_mask)?;
             root_hub.init()?;
             self.root = Some(root_hub);
             // trace!("Root hub initialized with max slots: {max_slots}");
@@ -116,11 +117,12 @@ impl usb_if::host::Controller for Xhci {
 }
 
 impl Xhci {
-    pub fn new(mmio_base: NonNull<u8>) -> Box<Self> {
+    pub fn new(mmio_base: NonNull<u8>, dma_mask: usize) -> Box<Self> {
         Box::new(Self {
             reg: XhciRegisters::new(mmio_base),
             root: None,
             port_wake: AtomicWaker::new(),
+            dma_mask,
         })
     }
 
