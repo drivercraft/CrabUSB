@@ -8,20 +8,16 @@ extern crate crab_usb;
 use bare_test::{
     GetIrqConfig,
     async_std::time,
-    fdt_parser::PciSpace,
+    fdt_parser::{PciSpace, Status},
     globals::{PlatformInfoKind, global_val},
     irq::{IrqHandleResult, IrqInfo, IrqParam},
-    mem::page_size,
+    mem::{iomap, page_size},
     platform::fdt::GetPciIrqConfig,
     println,
 };
 use core::time::Duration;
-use crab_usb::{
-    err::{TransferError, USBError},
-    *,
-};
+use crab_usb::{impl_trait, *};
 use futures::FutureExt;
-use log::{info, warn};
 
 struct KernelImpl;
 impl_trait! {
@@ -40,7 +36,6 @@ impl_trait! {
 mod tests {
     use alloc::{boxed::Box, vec::Vec};
 
-    use bare_test::mem::iomap;
     use crab_uvc::{UvcDevice, VideoControlEvent, VideoFormatType};
     use log::*;
     use pcie::*;
@@ -142,14 +137,19 @@ mod tests {
                                 println!("=== CAPTURED FIRST COMPLETE FRAME ===");
 
                                 // 预处理帧数据，移除0值填充
-                                let cleaned_data = if matches!(current_format.format_type, VideoFormatType::Mjpeg) {
-                                    clean_mjpeg_frame_data(&frame.data)
-                                } else {
-                                    frame.data.clone()
-                                };
+                                let cleaned_data =
+                                    if matches!(current_format.format_type, VideoFormatType::Mjpeg)
+                                    {
+                                        clean_mjpeg_frame_data(&frame.data)
+                                    } else {
+                                        frame.data.clone()
+                                    };
 
-                                info!("Frame data cleaned: original {} bytes -> {} bytes", 
-                                      frame.data.len(), cleaned_data.len());
+                                info!(
+                                    "Frame data cleaned: original {} bytes -> {} bytes",
+                                    frame.data.len(),
+                                    cleaned_data.len()
+                                );
 
                                 // 输出视频格式信息到串口日志
                                 println!("VIDEO_FORMAT_START");
@@ -217,15 +217,52 @@ mod tests {
     }
 
     fn get_usb_host() -> XhciInfo {
+        if let Some(info) = get_usb_host_pcie() {
+            return info;
+        }
+
+        let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
+
+        let fdt = fdt.get();
+        for node in fdt.all_nodes() {
+            if matches!(node.status(), Some(Status::Disabled)) {
+                continue;
+            }
+
+            if node
+                .compatibles()
+                .any(|c| c.contains("xhci") | c.contains("snps,dwc3"))
+            {
+                println!("usb node: {}", node.name);
+                let regs = node.reg().unwrap().collect::<Vec<_>>();
+                println!("usb regs: {:?}", regs);
+
+                let addr = iomap(
+                    (regs[0].address as usize).into(),
+                    regs[0].size.unwrap_or(0x1000),
+                );
+
+                let irq = node.irq_info();
+
+                return XhciInfo {
+                    usb: USBHost::new_xhci(addr, u32::MAX as usize),
+                    irq,
+                };
+            }
+        }
+
+        panic!("no xhci found");
+    }
+
+    fn get_usb_host_pcie() -> Option<XhciInfo> {
         let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
 
         let fdt = fdt.get();
         let pcie = fdt
             .find_compatible(&["pci-host-ecam-generic", "brcm,bcm2711-pcie"])
-            .next()
-            .unwrap()
-            .into_pci()
-            .unwrap();
+            .next()?;
+
+        let pcie = pcie.into_pci().unwrap();
 
         let mut pcie_regs = alloc::vec![];
 
@@ -259,7 +296,6 @@ mod tests {
 
         let mut root = RootComplexGeneric::new(base_vaddr);
 
-        // for elem in root.enumerate_keep_bar(None) {
         for elem in root.enumerate(None, Some(bar_alloc)) {
             debug!("PCI {elem}");
 
@@ -319,35 +355,15 @@ mod tests {
 
                     println!("irq: {irq:?}");
 
-                    return XhciInfo {
-                        usb: USBHost::new_xhci(addr),
+                    return Some(XhciInfo {
+                        usb: USBHost::new_xhci(addr, u32::MAX as usize),
                         irq,
-                    };
+                    });
                 }
             }
         }
 
-        for node in fdt.all_nodes() {
-            if node.compatibles().any(|c| c.contains("xhci")) {
-                println!("usb node: {}", node.name);
-                let regs = node.reg().unwrap().collect::<Vec<_>>();
-                println!("usb regs: {:?}", regs);
-
-                let addr = iomap(
-                    (regs[0].address as usize).into(),
-                    regs[0].size.unwrap_or(0x1000),
-                );
-
-                let irq = node.irq_info();
-
-                return XhciInfo {
-                    usb: USBHost::new_xhci(addr),
-                    irq,
-                };
-            }
-        }
-
-        panic!("no xhci found");
+        None
     }
 
     fn register_irq(irq: IrqInfo, host: &mut USBHost) {
@@ -384,15 +400,15 @@ mod tests {
         for i in 0..data.len().saturating_sub(1) {
             if data[i] == 0xFF && data[i + 1] == 0xD9 {
                 // 找到结束标记，截断到此处（包含结束标记）
-                return data[..=i+1].to_vec();
+                return data[..=i + 1].to_vec();
             }
         }
-        
+
         // 如果没有找到结束标记，移除末尾的大块0值填充
         let mut end_pos = data.len();
         let mut zero_count = 0;
         const MIN_ZERO_BLOCK_SIZE: usize = 1024; // 只移除大于1KB的连续0块
-        
+
         for i in (0..data.len()).rev() {
             if data[i] == 0 {
                 zero_count += 1;
@@ -404,7 +420,7 @@ mod tests {
                 zero_count = 0;
             }
         }
-        
+
         data[..end_pos].to_vec()
     }
 
