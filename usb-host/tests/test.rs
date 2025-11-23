@@ -22,7 +22,7 @@ mod tests {
     use futures::FutureExt;
     use log::*;
     use pcie::*;
-    use rockchip_pm::{RockchipPM, RkBoard, PD_USB};
+    use rockchip_pm::{RockchipPM, RkBoard, PD_USB, PD_PHP};
     use usb_if::{
         descriptor::{ConfigurationDescriptor, EndpointType},
         transfer::Direction,
@@ -337,7 +337,10 @@ mod tests {
     fn ensure_rk3588_usb_power(fdt: &Fdt<'static>, usb_node: &Node<'static>) {
         let power_prop = match usb_node.find_property("power-domains") {
             Some(p) => p,
-            None => return,
+            None => {
+                debug!("{} has no power-domains, skip PMU power on", usb_node.name());
+                return;
+            }
         };
 
         let mut ls = power_prop.u32_list();
@@ -350,7 +353,20 @@ mod tests {
             None => return,
         };
 
+        debug!(
+            "power-domains for {}: ctrl=0x{:x}, domain={}",
+            usb_node.name(),
+            _ctrl,
+            domain
+        );
+
         if domain != PD_USB.0 as u32 {
+            debug!(
+                "{} power domain is {}, not USB ({}) – skip",
+                usb_node.name(),
+                domain,
+                PD_USB.0
+            );
             return;
         }
 
@@ -384,10 +400,12 @@ mod tests {
         let base = iomap(start.into(), end - start);
 
         let mut pm = RockchipPM::new(base, RkBoard::Rk3588);
-        if let Err(e) = pm.power_domain_on(PD_USB) {
-            warn!("enable usb power domain failed: {e:?}");
-        } else {
-            info!("enabled rk3588 usb power domain");
+        for pd in [PD_USB, PD_PHP] {
+            if let Err(e) = pm.power_domain_on(pd) {
+                warn!("enable {:?} power domain failed: {e:?}", pd);
+            } else {
+                info!("enabled rk3588 {:?} power domain", pd);
+            }
         }
     }
 }
