@@ -407,6 +407,68 @@ mod tests {
                 info!("enabled rk3588 {:?} power domain", pd);
             }
         }
+
+        // 使能 VBUS 5V (vcc5v0_host) GPIO，如果存在的话
+        if let Err(e) = enable_vcc5v0_host(fdt) {
+            warn!("enable vcc5v0_host gpio failed: {:?}", e);
+        }
+    }
+
+    #[derive(Debug)]
+    enum GpioError {
+        NotFound,
+        RegMissing,
+    }
+
+    fn enable_vcc5v0_host(fdt: &Fdt<'static>) -> Result<(), GpioError> {
+        // 在设备树中查找 regulator-name = "vcc5v0_host"
+        let Some(reg_node) = fdt
+            .all_nodes()
+            .find(|n| n.find_property("regulator-name").map(|p| p.str()) == Some("vcc5v0_host"))
+        else {
+            return Err(GpioError::NotFound);
+        };
+
+        let gpio_prop = reg_node
+            .find_property("gpio")
+            .or_else(|| reg_node.find_property("gpios"))
+            .ok_or(GpioError::NotFound)?;
+
+        let mut vals = gpio_prop.u32_list();
+        let ctrl = vals.next().ok_or(GpioError::NotFound)?;
+        let pin = vals.next().ok_or(GpioError::NotFound)?;
+        // flags ignored
+
+        let ctrl_node = fdt
+            .get_node_by_phandle(ctrl.into())
+            .ok_or(GpioError::NotFound)?;
+
+        let mut regs = ctrl_node.reg().ok_or(GpioError::RegMissing)?;
+        let reg = regs.next().ok_or(GpioError::RegMissing)?;
+        let base = iomap(
+            (reg.address as usize).into(),
+            reg.size.unwrap_or(0x1000).max(0x1000),
+        );
+
+        unsafe {
+            // Rockchip GPIO: 0x00 DR, 0x04 DDR
+            let dr = base.as_ptr() as *mut u32;
+            let ddr = dr.add(1);
+
+            let mut val = dr.read_volatile();
+            val |= 1 << pin;
+            dr.write_volatile(val);
+
+            let mut dir = ddr.read_volatile();
+            dir |= 1 << pin;
+            ddr.write_volatile(dir);
+        }
+
+        info!(
+            "vcc5v0_host enabled via gpio ctrl phandle 0x{:x}, pin {}",
+            ctrl, pin
+        );
+        Ok(())
     }
 }
 
