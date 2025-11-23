@@ -39,6 +39,7 @@ bare-test = {workspace = true}
 byte-unit = {version = "5.1.6", default-features = false, features = ["byte"]}
 pcie = "0.2"
 spin_on = "0.1.1"
+rockchip-pm = {workspace = true}
 
 [build-dependencies]
 bare-test-macros = "0.2"
@@ -46,4 +47,3 @@ bare-test-macros = "0.2"
 [[test]]
 harness = false
 name = "test"
-

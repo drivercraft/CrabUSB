@@ -10,7 +10,7 @@ mod tests {
     use bare_test::{
         GetIrqConfig,
         async_std::time,
-        fdt_parser::{PciSpace, Status},
+        fdt_parser::{Fdt, Node, PciSpace, Status},
         globals::{PlatformInfoKind, global_val},
         irq::{IrqHandleResult, IrqInfo, IrqParam},
         mem::{iomap, page_size},
@@ -22,6 +22,7 @@ mod tests {
     use futures::FutureExt;
     use log::*;
     use pcie::*;
+    use rockchip_pm::{RockchipPM, RkBoard, PD_USB};
     use usb_if::{
         descriptor::{ConfigurationDescriptor, EndpointType},
         transfer::Direction,
@@ -294,6 +295,8 @@ mod tests {
                 let regs = node.reg().unwrap().collect::<Vec<_>>();
                 println!("usb regs: {:?}", regs);
 
+                ensure_rk3588_usb_power(&fdt, &node);
+
                 let addr = iomap(
                     (regs[0].address as usize).into(),
                     regs[0].size.unwrap_or(0x1000),
@@ -327,6 +330,64 @@ mod tests {
             })
             .register();
             break;
+        }
+    }
+
+    /// 打开 RK3588 USB 电源域（如果设备树有 power-domains 描述）
+    fn ensure_rk3588_usb_power(fdt: &Fdt<'static>, usb_node: &Node<'static>) {
+        let power_prop = match usb_node.find_property("power-domains") {
+            Some(p) => p,
+            None => return,
+        };
+
+        let mut ls = power_prop.u32_list();
+        let _ctrl = match ls.next() {
+            Some(v) => v,
+            None => return,
+        };
+        let domain = match ls.next() {
+            Some(v) => v,
+            None => return,
+        };
+
+        if domain != PD_USB.0 as u32 {
+            return;
+        }
+
+        // 寻找 PMU syscon 基地址
+        let pmu_node = fdt
+            .all_nodes()
+            .find(|n| n.compatibles().any(|c| c.contains("rk3588-pmu")))
+            .or_else(|| fdt.all_nodes().find(|n| n.compatibles().any(|c| c.contains("rk3588-power-controller"))));
+
+        let Some(pmu_node) = pmu_node else {
+            warn!("rk3588 pmu node not found, skip powering usb domain");
+            return;
+        };
+
+        let mut regs = match pmu_node.reg() {
+            Some(r) => r,
+            None => {
+                warn!("pmu node without reg, skip powering usb domain");
+                return;
+            }
+        };
+
+        let Some(reg) = regs.next() else {
+            warn!("pmu node reg empty, skip powering usb domain");
+            return;
+        };
+
+        let start = (reg.address as usize) & !(page_size() - 1);
+        let end = (reg.address as usize + reg.size.unwrap_or(0x1000) + page_size() - 1)
+            & !(page_size() - 1);
+        let base = iomap(start.into(), end - start);
+
+        let mut pm = RockchipPM::new(base, RkBoard::Rk3588);
+        if let Err(e) = pm.power_domain_on(PD_USB) {
+            warn!("enable usb power domain failed: {e:?}");
+        } else {
+            info!("enabled rk3588 usb power domain");
         }
     }
 }
