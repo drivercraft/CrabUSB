@@ -23,6 +23,7 @@ mod tests {
     use log::*;
     use pcie::*;
     use rockchip_pm::{RockchipPM, RkBoard, PD_USB, PD_PHP};
+    use log::info;
     use usb_if::{
         descriptor::{ConfigurationDescriptor, EndpointType},
         transfer::Direction,
@@ -412,6 +413,16 @@ mod tests {
         if let Err(e) = enable_vcc5v0_host(fdt) {
             warn!("enable vcc5v0_host gpio failed: {:?}", e);
         }
+
+        // 解除 USB2 PHY suspend，确保 UTMI 时钟与上拉打开
+        if let Err(e) = force_usb2phy_active(fdt) {
+            warn!("force usb2phy active failed: {:?}", e);
+        }
+
+        // 解除 USB3 DP Combo PHY 电源/电气休眠，防止 PIPE 侧被关断
+        if let Err(e) = force_usbdp_phy_active(fdt) {
+            warn!("force usbdp phy active failed: {:?}", e);
+        }
     }
 
     #[derive(Debug)]
@@ -467,6 +478,82 @@ mod tests {
         info!(
             "vcc5v0_host enabled via gpio ctrl phandle 0x{:x}, pin {}",
             ctrl, pin
+        );
+        Ok(())
+    }
+
+    #[derive(Debug)]
+    enum PhyError {
+        NotFound,
+        RegMissing,
+    }
+
+    /// 在 RK3588 上通过 USB2PHY_GRF_CON3 强制退出 suspend
+    /// 针对 OPi5+，usb2phy-grf 基地址 fd5d4000。
+    fn force_usb2phy_active(fdt: &Fdt<'static>) -> Result<(), PhyError> {
+        // 找 usb2phy-grf syscon
+        let Some(grf_node) = fdt
+            .all_nodes()
+            .find(|n| n.compatibles().any(|c| c.contains("usb2phy-grf")))
+        else {
+            return Err(PhyError::NotFound);
+        };
+
+        let mut regs = grf_node.reg().ok_or(PhyError::RegMissing)?;
+        let reg = regs.next().ok_or(PhyError::RegMissing)?;
+        let base = iomap(
+            (reg.address as usize).into(),
+            reg.size.unwrap_or(0x1000).max(0x1000),
+        );
+
+        unsafe {
+            // USB2PHY_GRF_CON3 offset 0x0C
+            // 写使能+数据：bit11(choose override)=1，bit12(suspendm)=1
+            let val: u32 = (((1 << 11) | (1 << 12)) << 16) | (1 << 11) | (1 << 12);
+            let ptr = base.as_ptr().add(0x0C) as *mut u32;
+            ptr.write_volatile(val);
+        }
+
+        info!(
+            "usb2phy-grf {} active (CON3 suspend override set)",
+            grf_node.name()
+        );
+        Ok(())
+    }
+    /// 通过 USBDPPHY_GRF_CON3 解除 powerdown / 打开 RX Termination
+    /// 针对 OPi5+，usbdpphy-grf 基地址 fd5cc000（USB3 PHY1，与 usb@fc400000 配套）。
+    fn force_usbdp_phy_active(fdt: &Fdt<'static>) -> Result<(), PhyError> {
+        let Some(grf_node) = fdt
+            .all_nodes()
+            .find(|n| n.compatibles().any(|c| c.contains("usbdpphy-grf")))
+        else {
+            return Err(PhyError::NotFound);
+        };
+
+        let mut regs = grf_node.reg().ok_or(PhyError::RegMissing)?;
+        let reg = regs.next().ok_or(PhyError::RegMissing)?;
+        let base = iomap(
+            (reg.address as usize).into(),
+            reg.size.unwrap_or(0x1000).max(0x1000),
+        );
+
+        unsafe {
+            // USBDPPHY_GRF_CON3 offset 0x0C
+            // bit0: override enable =1
+            // bit4:3 powerdown=0
+            // bit2 tx_elecidle=0 (keep driving)
+            // bit1 rx_termination=1 (enable)
+            // 写掩码在高 16 位
+            let data: u32 = (1 << 0) | (1 << 1); // override + rx_term on, others 0
+            let wen: u32 = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4);
+            let val = (wen << 16) | data;
+            let ptr = base.as_ptr().add(0x0C) as *mut u32;
+            ptr.write_volatile(val);
+        }
+
+        info!(
+            "usbdpphy-grf {} active (CON3 override/powerdown cleared)",
+            grf_node.name()
         );
         Ok(())
     }
