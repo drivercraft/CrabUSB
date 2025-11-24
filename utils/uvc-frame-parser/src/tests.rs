@@ -2,7 +2,7 @@
 mod tests {
     use super::*;
     use crate::{Parser, Pixel};
-    use crab_uvc::{VideoFormat, UncompressedFormat};
+    use crab_uvc::{UncompressedFormat, VideoFormat};
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -11,7 +11,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let input_dir = temp_dir.path().join("input");
         let output_dir = temp_dir.path().join("output");
-        
+
         // 创建解析器
         let parser = Parser::new(input_dir, output_dir).await;
 
@@ -52,7 +52,7 @@ mod tests {
 
         parser.write_format_info(&mjpeg_format).await.unwrap();
         let video_info = parser.read_format_info().await.unwrap();
-        
+
         assert_eq!(video_info.width, 1920);
         assert_eq!(video_info.height, 1080);
         assert_eq!(video_info.fps, 30);
