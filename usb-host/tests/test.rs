@@ -292,6 +292,15 @@ mod tests {
                 .compatibles()
                 .any(|c| c.contains("xhci") | c.contains("snps,dwc3"))
             {
+                // 只选择明确为 host 模式的控制器，避免误用 OTG 端口
+                if let Some(prop) = node.find_property("dr_mode") {
+                    let mode = prop.str();
+                    if mode != "host" {
+                        debug!("skip {} because dr_mode={}", node.name(), mode);
+                        continue;
+                    }
+                }
+
                 println!("usb node: {}", node.name);
                 let regs = node.reg().unwrap().collect::<Vec<_>>();
                 println!("usb regs: {:?}", regs);
@@ -348,7 +357,7 @@ mod tests {
         };
 
         let mut ls = power_prop.u32_list();
-        let _ctrl = match ls.next() {
+        let ctrl_phandle = match ls.next() {
             Some(v) => v,
             None => return,
         };
@@ -360,7 +369,7 @@ mod tests {
         debug!(
             "power-domains for {}: ctrl=0x{:x}, domain={}",
             usb_node.name(),
-            _ctrl,
+            ctrl_phandle,
             domain
         );
 
@@ -374,15 +383,13 @@ mod tests {
             return;
         }
 
-        // 寻找 PMU syscon 基地址
+        // 精确查找 PMU syscon 基址：compatible 必须等于 "rockchip,rk3588-pmu"
         let pmu_node = fdt
             .all_nodes()
-            .find(|n| n.compatibles().any(|c| c.contains("rk3588-pmu")))
+            .find(|n| n.compatibles().any(|c| c == "rockchip,rk3588-pmu"))
             .or_else(|| {
-                fdt.all_nodes().find(|n| {
-                    n.compatibles()
-                        .any(|c| c.contains("rk3588-power-controller"))
-                })
+                // 兜底：按照 power-domains ctrl phandle 找 power-controller 本身
+                fdt.get_node_by_phandle(ctrl_phandle.into())
             });
 
         let Some(pmu_node) = pmu_node else {
