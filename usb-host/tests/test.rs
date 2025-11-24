@@ -20,10 +20,10 @@ mod tests {
     use core::time::Duration;
     use crab_usb::{impl_trait, *};
     use futures::FutureExt;
+    use log::info;
     use log::*;
     use pcie::*;
-    use rockchip_pm::{RockchipPM, RkBoard, PD_USB, PD_PHP};
-    use log::info;
+    use rockchip_pm::{PD_PHP, PD_USB, RkBoard, RockchipPM};
     use usb_if::{
         descriptor::{ConfigurationDescriptor, EndpointType},
         transfer::Direction,
@@ -339,7 +339,10 @@ mod tests {
         let power_prop = match usb_node.find_property("power-domains") {
             Some(p) => p,
             None => {
-                debug!("{} has no power-domains, skip PMU power on", usb_node.name());
+                debug!(
+                    "{} has no power-domains, skip PMU power on",
+                    usb_node.name()
+                );
                 return;
             }
         };
@@ -375,7 +378,12 @@ mod tests {
         let pmu_node = fdt
             .all_nodes()
             .find(|n| n.compatibles().any(|c| c.contains("rk3588-pmu")))
-            .or_else(|| fdt.all_nodes().find(|n| n.compatibles().any(|c| c.contains("rk3588-power-controller"))));
+            .or_else(|| {
+                fdt.all_nodes().find(|n| {
+                    n.compatibles()
+                        .any(|c| c.contains("rk3588-power-controller"))
+                })
+            });
 
         let Some(pmu_node) = pmu_node else {
             warn!("rk3588 pmu node not found, skip powering usb domain");
@@ -422,6 +430,11 @@ mod tests {
         // 解除 USB3 DP Combo PHY 电源/电气休眠，防止 PIPE 侧被关断
         if let Err(e) = force_usbdp_phy_active(fdt) {
             warn!("force usbdp phy active failed: {:?}", e);
+        }
+
+        // 释放 XHCI/PHY 相关复位，避免控制器或 PHY 仍处于 reset 状态
+        if let Err(e) = deassert_rk3588_usb_resets(fdt) {
+            warn!("deassert usb resets failed: {:?}", e);
         }
     }
 
@@ -484,6 +497,12 @@ mod tests {
 
     #[derive(Debug)]
     enum PhyError {
+        NotFound,
+        RegMissing,
+    }
+
+    #[derive(Debug)]
+    enum CruError {
         NotFound,
         RegMissing,
     }
@@ -556,6 +575,84 @@ mod tests {
             grf_node.name()
         );
         Ok(())
+    }
+
+    /// 解除 USB 控制器、UTMI、PHY 等相关复位。参照 rk3588-cru.h 中的复位编号。
+    ///
+    /// 目前只做“写掩码 + 清零”操作，不额外断言/拉高。
+    fn deassert_rk3588_usb_resets(fdt: &Fdt<'static>) -> Result<(), CruError> {
+        // 定位 CRU 基址
+        let Some(cru_node) = fdt
+            .all_nodes()
+            .find(|n| n.compatibles().any(|c| c.contains("rk3588-cru")))
+        else {
+            return Err(CruError::NotFound);
+        };
+
+        let mut regs = cru_node.reg().ok_or(CruError::RegMissing)?;
+        let reg = regs.next().ok_or(CruError::RegMissing)?;
+        let cru_base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000));
+
+        // 需要释放的 reset ID，参考 include/dt-bindings/clock/rk3588-cru.h
+        // USB1 对应 xHCI @ 0xfc400000
+        const RESET_IDS: &[u32] = &[
+            674,    // SRST_A_USB_BIU
+            675,    // SRST_H_USB_BIU
+            676,    // SRST_A_USB3OTG0 (一并释放，不影响)
+            679,    // SRST_A_USB3OTG1 (目标控制器)
+            682,    // SRST_H_HOST0
+            683,    // SRST_H_HOST_ARB0
+            684,    // SRST_H_HOST1
+            685,    // SRST_H_HOST_ARB1
+            686,    // SRST_A_USB_GRF
+            688,    // SRST_C_USB2P0_HOST1
+            689,    // SRST_HOST_UTMI0
+            690,    // SRST_HOST_UTMI1
+            1153,   // SRST_P_USBDPGRF0
+            1154,   // SRST_P_USBDPPHY0
+            1155,   // SRST_P_USBDPGRF1
+            1156,   // SRST_P_USBDPPHY1
+            1161,   // SRST_P_USB2PHY_U3_1_GRF0
+            1163,   // SRST_P_USB2PHY_U2_1_GRF0
+            1175,   // SRST_USBDP_COMBO_PHY1
+            1176,   // SRST_USBDP_COMBO_PHY1_LCPLL
+            1177,   // SRST_USBDP_COMBO_PHY1_ROPLL
+            1178,   // SRST_USBDP_COMBO_PHY1_PCS_HS
+            786503, // SRST_OTGPHY_U3_0 (宽松释放)
+            786504, // SRST_OTGPHY_U3_1
+            786505, // SRST_OTGPHY_U2_0
+            786506, // SRST_OTGPHY_U2_1
+        ];
+
+        for &id in RESET_IDS {
+            deassert_one_reset(cru_base, id);
+        }
+
+        Ok(())
+    }
+
+    /// 根据 reset ID 计算寄存器偏移并写入 deassert。
+    fn deassert_one_reset(cru_base: core::ptr::NonNull<u8>, id: u32) {
+        // RK3588：常规 reset（CRU）采用 id/16 对应 SOFTRST_CON(N)；
+        // PMU1 reset 的 id 以 0xC0_000 起始，对应 PMU1SOFTRST_CON。
+        let (offset, bit) = if id >= 0xC0_000 {
+            let rel = id - 0xC0_000;
+            let idx = rel / 16;
+            let bit = rel % 16;
+            // PMU1SOFTRST_CON00 offset = 0x30a00，后续按 4 字节递增
+            (0x30a00 + idx * 4, bit)
+        } else {
+            let idx = id / 16;
+            let bit = id % 16;
+            // SOFTRST_CON00 offset = 0xa00，后续按 4 字节递增
+            (0xa00 + idx * 4, bit)
+        };
+
+        unsafe {
+            let reg = cru_base.as_ptr().add(offset as usize) as *mut u32;
+            // hi16 作为写掩码，低 16 位写 0 解除 reset
+            reg.write_volatile(1u32 << (bit + 16));
+        }
     }
 }
 
