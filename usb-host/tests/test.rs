@@ -23,7 +23,7 @@ mod tests {
     use log::info;
     use log::*;
     use pcie::*;
-    use rockchip_pm::{PD_PHP, PD_USB, RkBoard, RockchipPM};
+    use rockchip_pm::{PowerDomain, RockchipPM};
     use usb_if::{
         descriptor::{ConfigurationDescriptor, EndpointType},
         transfer::Direction,
@@ -361,27 +361,21 @@ mod tests {
             Some(v) => v,
             None => return,
         };
-        let domain = match ls.next() {
-            Some(v) => v,
-            None => return,
-        };
-
-        debug!(
-            "power-domains for {}: ctrl=0x{:x}, domain={}",
-            usb_node.name(),
-            ctrl_phandle,
-            domain
-        );
-
-        if domain != PD_USB.0 as u32 {
+        let mut domains: Vec<u32> = ls.collect();
+        if domains.is_empty() {
             debug!(
-                "{} power domain is {}, not USB ({}) – skip",
-                usb_node.name(),
-                domain,
-                PD_USB.0
+                "{} power-domains has no domain IDs, skip PMU power on",
+                usb_node.name()
             );
             return;
         }
+
+        debug!(
+            "power-domains for {}: ctrl=0x{:x}, domains={:?}",
+            usb_node.name(),
+            ctrl_phandle,
+            domains
+        );
 
         // 精确查找 PMU syscon 基址：compatible 必须等于 "rockchip,rk3588-pmu"
         let pmu_node = fdt
@@ -415,12 +409,34 @@ mod tests {
             & !(page_size() - 1);
         let base = iomap(start.into(), end - start);
 
-        let mut pm = RockchipPM::new(base, RkBoard::Rk3588);
-        for pd in [PD_USB, PD_PHP] {
+        let compatible = pmu_node
+            .compatibles()
+            .find(|c| {
+                matches!(
+                    *c,
+                    "rockchip,rk3588-power-controller" | "rockchip,rk3568-power-controller"
+                )
+            })
+            .unwrap_or("rockchip,rk3588-power-controller");
+
+        let mut pm = RockchipPM::new_with_compatible(base, compatible);
+
+        // Power on domains described by DT, then ensure PHP (bus fabric) is on.
+        let mut pd_list: Vec<PowerDomain> =
+            domains.iter().map(|id| PowerDomain::from(*id)).collect();
+
+        if let Some(php_pd) = pm.get_power_dowain_by_name("php") {
+            // Avoid duplicates if DT already lists PHP.
+            if !pd_list.contains(&php_pd) {
+                pd_list.push(php_pd);
+            }
+        }
+
+        for pd in pd_list {
             if let Err(e) = pm.power_domain_on(pd) {
                 warn!("enable {:?} power domain failed: {e:?}", pd);
             } else {
-                info!("enabled rk3588 {:?} power domain", pd);
+                info!("enabled rk3588 power domain {:?}", pd);
             }
         }
 
