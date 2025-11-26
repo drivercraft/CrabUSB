@@ -464,6 +464,10 @@ mod tests {
         if let Err(e) = deassert_rk3588_usb_resets(fdt) {
             warn!("deassert usb resets failed: {:?}", e);
         }
+
+        // 诊断 PHY 初始化状态
+        info!("Checking USB PHY initialization status...");
+        diagnose_usbdp_phy(1); // PHY1 corresponds to usb@fc400000
     }
 
     #[derive(Debug)]
@@ -738,6 +742,99 @@ mod tests {
             reg.write_volatile(1u32 << (bit + 16));
         }
     }
+
+    /// =============================================================================
+    /// USB PHY 诊断辅助函数
+    /// =============================================================================
+
+    /// RK3588 USBDP PHY 基地址
+    const USBDP_PHY0_BASE: usize = 0xfed80000;
+    const USBDP_PHY1_BASE: usize = 0xfed90000;
+
+    /// LCPLL 锁定状态寄存器偏移
+    const CMN_ANA_LCPLL_DONE_OFFSET: usize = 0x08A0;
+
+    /// PCS 就绪状态寄存器偏移
+    const CMN_PCS_READY_OFFSET: usize = 0x08A4;
+
+    /// 诊断 USBDP PHY 状态
+    ///
+    /// 此函数检查 PHY 是否已被正确初始化，包括：
+    /// - LCPLL 锁定状态
+    /// - PCS 就绪状态
+    /// - 参考时钟配置
+    fn diagnose_usbdp_phy(phy_index: usize) {
+    let phy_base = match phy_index {
+        0 => USBDP_PHY0_BASE,
+        1 => USBDP_PHY1_BASE,
+        _ => {
+            warn!("Invalid PHY index: {}", phy_index);
+            return;
+        }
+    };
+
+    info!("=== Diagnosing USBDP PHY{} @ {:#x} ===", phy_index, phy_base);
+
+    // 映射 PHY 寄存器空间
+    let phy_ptr = iomap((phy_base).into(), 0x10000);
+
+    unsafe {
+        // 检查 LCPLL 锁定状态
+        let lcpll_done_ptr = phy_ptr.as_ptr().add(CMN_ANA_LCPLL_DONE_OFFSET) as *const u32;
+        let lcpll_done = core::ptr::read_volatile(lcpll_done_ptr);
+        info!("LCPLL Done Register: {:#010x}", lcpll_done);
+        info!("  - LCPLL Locked: {}", if lcpll_done & 0x1 != 0 { "YES ✓" } else { "NO ✗" });
+
+        // 检查 PCS 就绪状态
+        let pcs_ready_ptr = phy_ptr.as_ptr().add(CMN_PCS_READY_OFFSET) as *const u32;
+        let pcs_ready = core::ptr::read_volatile(pcs_ready_ptr);
+        info!("PCS Ready Register: {:#010x}", pcs_ready);
+        info!("  - PCS Ready: {}", if pcs_ready & 0x1 != 0 { "YES ✓" } else { "NO ✗" });
+
+        // 检查一些关键配置寄存器（参考时钟相关）
+        // 这些应该被初始化为特定值（来自 rk3588_udphy_24m_refclk_cfg）
+        let refclk_0_ptr = phy_ptr.as_ptr().add(0x0090) as *const u32;
+        let refclk_1_ptr = phy_ptr.as_ptr().add(0x0094) as *const u32;
+        let refclk_0 = core::ptr::read_volatile(refclk_0_ptr);
+        let refclk_1 = core::ptr::read_volatile(refclk_1_ptr);
+
+        info!("RefClk Config [0x0090]: {:#x} (expected: 0x68)", refclk_0);
+        info!("RefClk Config [0x0094]: {:#x} (expected: 0x68)", refclk_1);
+
+        let is_configured = refclk_0 == 0x68 && refclk_1 == 0x68;
+        info!("  - RefClk Configured: {}", if is_configured { "YES ✓" } else { "NO ✗" });
+
+        // 检查更多关键配置寄存器
+        let init_cfg_ptr = phy_ptr.as_ptr().add(0x0104) as *const u32;
+        let init_cfg = core::ptr::read_volatile(init_cfg_ptr);
+        info!("Init Config [0x0104]: {:#x} (expected: 0x44)", init_cfg);
+
+        // 总结 PHY 状态
+        let lcpll_ok = lcpll_done & 0x1 != 0;
+        let pcs_ok = pcs_ready & 0x1 != 0;
+        let init_ok = init_cfg == 0x44;
+
+        if lcpll_ok && pcs_ok && is_configured && init_ok {
+            info!("✓ PHY{} appears to be PROPERLY INITIALIZED", phy_index);
+        } else {
+            warn!("✗ PHY{} is NOT properly initialized", phy_index);
+            if !is_configured {
+                warn!("  → RefClk registers not configured (needs 70-reg sequence)");
+            }
+            if !init_ok {
+                warn!("  → Init registers not configured (needs 74-reg sequence)");
+            }
+            if !lcpll_ok {
+                warn!("  → LCPLL not locked (PHY clock not ready)");
+            }
+            if !pcs_ok {
+                warn!("  → PCS not ready (link training failed)");
+            }
+        }
+    }
+
+    info!("========================================");
+}
 }
 
 trait Align {
