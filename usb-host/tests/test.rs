@@ -440,6 +440,11 @@ mod tests {
             }
         }
 
+        // 打开 USB 时钟门控
+        if let Err(e) = enable_usb_clocks(fdt) {
+            warn!("enable usb clocks failed: {:?}", e);
+        }
+
         // 使能 VBUS 5V (vcc5v0_host) GPIO，如果存在的话
         if let Err(e) = enable_vcc5v0_host(fdt) {
             warn!("enable vcc5v0_host gpio failed: {:?}", e);
@@ -465,6 +470,62 @@ mod tests {
     enum GpioError {
         NotFound,
         RegMissing,
+    }
+
+    #[derive(Debug)]
+    enum ClkError {
+        NotFound,
+        RegMissing,
+    }
+
+    /// 使能 RK3588 USB 相关时钟
+    fn enable_usb_clocks(fdt: &Fdt<'static>) -> Result<(), ClkError> {
+        use rk3588_clk::constant::*;
+        use rk3588_clk::Rk3588Cru;
+
+        // 定位 CRU 基址
+        let Some(cru_node) = fdt
+            .all_nodes()
+            .find(|n| n.compatibles().any(|c| c.contains("rk3588-cru")))
+        else {
+            return Err(ClkError::NotFound);
+        };
+
+        let mut regs = cru_node.reg().ok_or(ClkError::RegMissing)?;
+        let reg = regs.next().ok_or(ClkError::RegMissing)?;
+        let cru_base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x20000));
+
+        let cru = Rk3588Cru::new(cru_base);
+
+        // 按照 Linux 驱动的顺序打开时钟:
+        // 1. 根时钟 (Root clocks)
+        // 2. USB 控制器时钟
+        // 3. USB PHY 时钟
+
+        let usb_clocks = [
+            // USB Root clocks
+            ACLK_USB_ROOT,
+            HCLK_USB_ROOT,
+            // USB3 OTG1 clocks (for usb@fc400000 - host mode)
+            ACLK_USB3OTG1,
+            SUSPEND_CLK_USB3OTG1,
+            REF_CLK_USB3OTG1,
+            // USB Host clocks
+            HCLK_HOST0,
+            HCLK_HOST_ARB0,
+            HCLK_HOST1,
+            HCLK_HOST_ARB1,
+        ];
+
+        for &clk_id in &usb_clocks {
+            match cru.usb_gate_enable(clk_id) {
+                Ok(true) => info!("USB clock {} enabled successfully", clk_id),
+                Ok(false) => warn!("USB clock {} already enabled", clk_id),
+                Err(e) => warn!("Failed to enable USB clock {}: {}", clk_id, e),
+            }
+        }
+
+        Ok(())
     }
 
     fn enable_vcc5v0_host(fdt: &Fdt<'static>) -> Result<(), GpioError> {

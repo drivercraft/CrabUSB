@@ -40,6 +40,7 @@ byte-unit = {version = "5.1.6", default-features = false, features = ["byte"]}
 pcie = "0.2"
 spin_on = "0.1.1"
 rockchip-pm = {workspace = true}
+rk3588-clk = {git = "https://github.com/yueneiqi/rk3588-clk", rev = "1b77f271d327d3d238ee938b12385ff0a7001ef4"}
 
 [build-dependencies]
 bare-test-macros = "0.2"
