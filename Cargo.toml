@@ -15,4 +15,3 @@ thiserror = {version = "2", default-features = false}
 usb-if = {path = "usb-if", version = "0.3" }
 crab-uvc = {path = "usb-device/uvc", version = "0.1" }
 bare-test = {version = "0.7"}
-rockchip-pm = {version = "0.3.3", git = "https://github.com/drivercraft/rockchip-pm", rev = "1a6a9c8cc7f53eec35816a517ab426026ab4b7a6"}

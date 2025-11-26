@@ -23,7 +23,6 @@ mod tests {
     use log::info;
     use log::*;
     use pcie::*;
-    use rockchip_pm::{PowerDomain, RockchipPM};
     use usb_if::{
         descriptor::{ConfigurationDescriptor, EndpointType},
         transfer::Direction,
@@ -356,89 +355,12 @@ mod tests {
             }
         };
 
-        let mut ls = power_prop.u32_list();
-        let ctrl_phandle = match ls.next() {
-            Some(v) => v,
-            None => return,
-        };
-        let mut domains: Vec<u32> = ls.collect();
-        if domains.is_empty() {
-            debug!(
-                "{} power-domains has no domain IDs, skip PMU power on",
-                usb_node.name()
-            );
-            return;
-        }
-
-        debug!(
-            "power-domains for {}: ctrl=0x{:x}, domains={:?}",
+        let domain_count = power_prop.u32_list().skip(1).count();
+        info!(
+            "power-domains for {} present ({} entries); PM control skipped",
             usb_node.name(),
-            ctrl_phandle,
-            domains
+            domain_count
         );
-
-        // 精确查找 PMU syscon 基址：compatible 必须等于 "rockchip,rk3588-pmu"
-        let pmu_node = fdt
-            .all_nodes()
-            .find(|n| n.compatibles().any(|c| c == "rockchip,rk3588-pmu"))
-            .or_else(|| {
-                // 兜底：按照 power-domains ctrl phandle 找 power-controller 本身
-                fdt.get_node_by_phandle(ctrl_phandle.into())
-            });
-
-        let Some(pmu_node) = pmu_node else {
-            warn!("rk3588 pmu node not found, skip powering usb domain");
-            return;
-        };
-
-        let mut regs = match pmu_node.reg() {
-            Some(r) => r,
-            None => {
-                warn!("pmu node without reg, skip powering usb domain");
-                return;
-            }
-        };
-
-        let Some(reg) = regs.next() else {
-            warn!("pmu node reg empty, skip powering usb domain");
-            return;
-        };
-
-        let start = (reg.address as usize) & !(page_size() - 1);
-        let end = (reg.address as usize + reg.size.unwrap_or(0x1000) + page_size() - 1)
-            & !(page_size() - 1);
-        let base = iomap(start.into(), end - start);
-
-        let compatible = pmu_node
-            .compatibles()
-            .find(|c| {
-                matches!(
-                    *c,
-                    "rockchip,rk3588-power-controller" | "rockchip,rk3568-power-controller"
-                )
-            })
-            .unwrap_or("rockchip,rk3588-power-controller");
-
-        let mut pm = RockchipPM::new_with_compatible(base, compatible);
-
-        // Power on domains described by DT, then ensure PHP (bus fabric) is on.
-        let mut pd_list: Vec<PowerDomain> =
-            domains.iter().map(|id| PowerDomain::from(*id)).collect();
-
-        if let Some(php_pd) = pm.get_power_dowain_by_name("php") {
-            // Avoid duplicates if DT already lists PHP.
-            if !pd_list.contains(&php_pd) {
-                pd_list.push(php_pd);
-            }
-        }
-
-        for pd in pd_list {
-            if let Err(e) = pm.power_domain_on(pd) {
-                warn!("enable {:?} power domain failed: {e:?}", pd);
-            } else {
-                info!("enabled rk3588 power domain {:?}", pd);
-            }
-        }
 
         // 使能 VBUS 5V (vcc5v0_host) GPIO，如果存在的话
         if let Err(e) = enable_vcc5v0_host(fdt) {
