@@ -339,6 +339,12 @@ impl Root {
             .doorbell
             .write_volatile_at(0, doorbell::Register::default());
 
+        // Ensure doorbell write is completed by performing a read-back
+        // This is critical on some platforms (like RK3588) where posted writes
+        // to MMIO may not reach the device immediately
+        let _ = self.reg.doorbell.read_volatile_at(0);
+        mb();
+
         Ok(self.wait_cmd.wait_for_result(trb_addr.raw(), None))
     }
 
