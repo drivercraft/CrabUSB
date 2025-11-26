@@ -1,4 +1,4 @@
-#![cfg_attr(target_os="none", no_std)]
+#![cfg_attr(target_os = "none", no_std)]
 
 use crab_usb::{
     Class, Device, DeviceInfo, Direction, EndpointInterruptIn, EndpointType, Interface,

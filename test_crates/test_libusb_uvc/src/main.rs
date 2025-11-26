@@ -86,10 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parser = Arc::new(Parser::new("target/frames".into(), "target/output".into()).await);
 
     // 将格式信息写入文件，供脚本使用
-    if let Err(e) = parser
-        .write_format_info(&current_format)
-        .await
-    {
+    if let Err(e) = parser.write_format_info(&current_format).await {
         warn!("Failed to write format info: {:?}", e);
     }
 
