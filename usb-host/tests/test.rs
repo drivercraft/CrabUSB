@@ -191,10 +191,6 @@ mod tests {
     struct KernelImpl;
     impl_trait! {
         impl Kernel for KernelImpl {
-            fn sleep<'a>(duration: Duration) -> BoxFuture<'a, ()> {
-                time::sleep(duration).boxed()
-            }
-
             fn page_size() -> usize {
                 page_size()
             }

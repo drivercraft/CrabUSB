@@ -1,5 +1,6 @@
 mod device;
 mod host;
+mod reg;
 mod transfer;
 
 pub use device::Device;
