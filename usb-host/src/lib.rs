@@ -5,6 +5,8 @@ extern crate alloc;
 #[macro_use]
 extern crate log;
 
+use core::ptr::NonNull;
+
 pub use usb_if::descriptor::*;
 pub use usb_if::err::*;
 pub use usb_if::transfer::*;
@@ -13,11 +15,10 @@ pub use usb_if::transfer::*;
 mod _macros;
 
 pub(crate) mod backend;
-mod common;
 pub mod err;
+mod host;
 
-pub use common::*;
-pub use futures::future::{BoxFuture, FutureExt};
+pub use host::*;
 
 #[macro_use]
 mod osal;
@@ -25,3 +26,5 @@ pub use osal::Kernel;
 pub use trait_ffi::impl_extern_trait;
 
 define_int_type!(BusAddr, u64);
+
+pub type Mmio = NonNull<u8>;

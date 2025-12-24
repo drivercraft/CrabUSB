@@ -6,21 +6,10 @@ use core::sync::atomic::Ordering;
 
 use usb_if::host::USBError;
 
+use crate::Mmio;
 use crate::backend::ty::*;
 
-define_int_type!(Dci, u8);
-
-impl Dci {
-    pub const CTRL: Self = Self(1);
-
-    pub fn as_u8(&self) -> u8 {
-        self.0
-    }
-
-    pub fn as_usize(&self) -> usize {
-        self.0 as usize
-    }
-}
+pub use crate::backend::xhci::Xhci;
 
 // ============================================================================
 // UsbHost 包装器 (线程安全)
@@ -34,7 +23,7 @@ unsafe impl<B> Send for BackendWrapper<B> {}
 /// USB 主机控制器
 ///
 /// 提供线程安全的 USB 主机控制器访问，支持事件处理
-pub struct UsbHost<B> {
+pub struct USBHost<B> {
     /// 事件处理器使用标志
     handler_used: Arc<AtomicBool>,
 
@@ -42,7 +31,13 @@ pub struct UsbHost<B> {
     backend: Arc<BackendWrapper<B>>,
 }
 
-impl<B: HostOp> UsbHost<B> {
+impl USBHost<Xhci> {
+    pub fn new_xhci(mmio: Mmio, dma_mask: usize) -> USBHost<Xhci> {
+        USBHost::new(Xhci::new(mmio, dma_mask))
+    }
+}
+
+impl<B: HostOp> USBHost<B> {
     /// 创建新的 USB 主机控制器
     pub(crate) fn new(backend: B) -> Self {
         Self {
@@ -52,7 +47,7 @@ impl<B: HostOp> UsbHost<B> {
     }
 
     /// 初始化主机控制器
-    pub async fn initialize(&mut self) -> Result<(), USBError> {
+    pub async fn init(&mut self) -> Result<(), USBError> {
         // Safety: 初始化期间独占访问后端
         let backend = unsafe { &mut *self.backend.0.get() };
         backend.initialize().await
@@ -90,7 +85,7 @@ impl<B: HostOp> EventHandler<B> {
     ///
     /// # Safety
     /// 必须在中断上下文中调用
-    pub fn handle_events(&mut self) -> Result<(), USBError> {
+    pub fn handle_events(&self) -> Result<(), USBError> {
         let backend = match self.backend.upgrade() {
             Some(b) => b,
             None => {

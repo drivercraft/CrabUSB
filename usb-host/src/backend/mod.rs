@@ -1,34 +1,19 @@
-#[cfg(feature = "libusb")]
-pub mod libusb;
+// #[cfg(feature = "libusb")]
+// pub mod libusb;
 pub mod xhci;
 
-mod ty;
+pub(crate) mod ty;
 
-define_int_type!(PortId, usize);
+define_int_type!(Dci, u8);
 
-pub mod endpoint {
-    pub mod kind {
-        pub struct Bulk;
+impl Dci {
+    pub const CTRL: Self = Self(1);
 
-        impl Sealed for Bulk {}
-
-        pub struct Isochronous;
-
-        impl Sealed for Isochronous {}
-        pub struct Interrupt;
-
-        impl Sealed for Interrupt {}
-
-        pub trait Sealed: Send + 'static {}
+    pub fn as_u8(&self) -> u8 {
+        self.0
     }
 
-    pub mod direction {
-        pub struct In;
-
-        impl Sealed for In {}
-        pub struct Out;
-
-        impl Sealed for Out {}
-        pub trait Sealed: Send + 'static {}
+    pub fn as_usize(&self) -> usize {
+        self.0 as usize
     }
 }
