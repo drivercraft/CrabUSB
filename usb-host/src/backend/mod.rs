@@ -2,6 +2,8 @@
 pub mod libusb;
 pub mod xhci;
 
+mod ty;
+
 define_int_type!(PortId, usize);
 
 pub mod endpoint {
