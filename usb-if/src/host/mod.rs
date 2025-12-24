@@ -7,6 +7,15 @@ use crate::{
     transfer::{Recipient, Request, RequestType, wait::Waiter},
 };
 
+// 导出 Hub 相关接口
+// pub mod hub;
+
+// pub use hub::{
+//     Hub, HubPortOps, RootHub, ExternalHub,
+//     HubDescriptor, HubCharacteristics, PortStatus, DeviceSpeed,
+//     PowerSwitchingMode, OverCurrentMode,
+// };
+
 pub trait Controller: Send + 'static {
     fn init(&mut self) -> LocalBoxFuture<'_, Result<(), USBError>>;
     fn device_list(&self) -> LocalBoxFuture<'_, Result<Vec<Box<dyn DeviceInfo>>, USBError>>;
