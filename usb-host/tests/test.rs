@@ -9,7 +9,7 @@ mod tests {
     use alloc::{boxed::Box, vec::Vec};
     use bare_test::{
         GetIrqConfig,
-        async_std::time,
+        async_std::time::{self, sleep},
         fdt_parser::{Fdt, Node, PciSpace, Status},
         globals::{PlatformInfoKind, global_val},
         irq::{IrqHandleResult, IrqInfo, IrqParam},
@@ -17,7 +17,11 @@ mod tests {
         platform::fdt::GetPciIrqConfig,
         println,
     };
-    use core::time::Duration;
+    use core::{
+        hint::spin_loop,
+        sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
+    };
     use crab_usb::{impl_trait, *};
     use futures::{FutureExt, future::BoxFuture};
     use log::info;
@@ -30,6 +34,8 @@ mod tests {
     };
 
     use super::*;
+
+    static PROT_CHANGED: AtomicBool = AtomicBool::new(false);
 
     #[test]
     fn test_all() {
@@ -45,7 +51,16 @@ mod tests {
             info!("usb host init ok");
             info!("usb cmd test");
 
-            // let ls = host.device_list().await.unwrap();
+            let mut timeout = 100;
+            while !PROT_CHANGED.load(Ordering::Acquire) {
+                sleep(Duration::from_millis(100)).await;
+                timeout -= 1;
+                if timeout == 0 {
+                    panic!("timeout waiting for port change");
+                }
+            }
+            info!("port changed detected");
+            let ls = host.probe_devices().await.unwrap();
 
             // for mut info in ls {
             //     info!("{info}");
@@ -330,7 +345,14 @@ mod tests {
             }
             .register_builder({
                 move |_irq| {
-                    handle.handle_event();
+                    let event = handle.handle_event();
+                    match event {
+                        Event::PortChange { .. } => {
+                            PROT_CHANGED.store(true, Ordering::Release);
+                        }
+                        _ => {}
+                    }
+
                     IrqHandleResult::Handled
                 }
             })
