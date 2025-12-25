@@ -1,4 +1,4 @@
-use core::cell::{Cell, UnsafeCell};
+use core::cell::UnsafeCell;
 
 use alloc::vec::Vec;
 use mbarrier::mb;
@@ -22,7 +22,7 @@ pub struct Xhci {
     reg: XhciRegisters,
     dma_mask: usize,
     cmd: SendRing<CommandCompletion>,
-    inited: Option<Inited>,
+    dev_ctx: Option<DeviceContextList>,
     event_handler: Option<EventHandler>,
     event_ring_info: EventRingInfo,
     scratchpad_buf_arr: Option<ScratchpadBufferArray>,
@@ -44,7 +44,7 @@ impl Xhci {
             reg: reg.clone(),
             dma_mask,
             cmd,
-            inited: None,
+            dev_ctx: None,
             event_handler: Some(EventHandler::new(reg, cmd_finished, event_ring)),
             event_ring_info,
             scratchpad_buf_arr: None,
@@ -71,11 +71,7 @@ impl HostOp for Xhci {
         // register (5.4.7) to enable the device slots that system software is going to
         // use.
         let max_slots = self.setup_max_device_slots();
-        self.inited = Some(Inited::new(
-            max_slots as _,
-            self.reg.clone(),
-            self.dma_mask,
-        )?);
+        self.dev_ctx = Some(DeviceContextList::new(max_slots as _, self.dma_mask)?);
 
         // Program the Device Context Base Address Array Pointer (DCBAAP)
         // register (5.4.6) with a 64-bit address pointing to where the Device
@@ -251,12 +247,12 @@ impl Xhci {
         max_slots
     }
 
-    fn inited(&self) -> Result<&Inited> {
-        self.inited.as_ref().ok_or(USBError::NotInitialized)
+    fn dev(&self) -> Result<&DeviceContextList> {
+        self.dev_ctx.as_ref().ok_or(USBError::NotInitialized)
     }
 
-    fn inited_mut(&mut self) -> Result<&mut Inited> {
-        self.inited.as_mut().ok_or(USBError::NotInitialized)
+    fn dev_mut(&mut self) -> Result<&mut DeviceContextList> {
+        self.dev_ctx.as_mut().ok_or(USBError::NotInitialized)
     }
 
     pub fn disable_irq(&mut self) {
@@ -274,7 +270,7 @@ impl Xhci {
     }
 
     fn setup_dcbaap(&mut self) -> Result {
-        let dcbaa_addr = self.inited()?.dev_list.dcbaa.bus_addr();
+        let dcbaa_addr = self.dev()?.dcbaa.bus_addr();
         debug!("DCBAAP: {dcbaa_addr:X}");
         self.reg.operational.dcbaap.update_volatile(|r| {
             r.set(dcbaa_addr);
@@ -367,7 +363,7 @@ impl Xhci {
 
             let bus_addr = scratchpad_buf_arr.bus_addr();
 
-            self.inited_mut()?.dev_list.dcbaa.set(0, bus_addr);
+            self.dev_mut()?.dcbaa.set(0, bus_addr);
 
             debug!("Setting up {buf_count} scratchpads, at {bus_addr:#0x}");
             scratchpad_buf_arr
@@ -410,23 +406,6 @@ impl Xhci {
                 port.portsc.set_port_reset();
             });
         }
-    }
-}
-
-struct Inited {
-    reg: XhciRegisters,
-    dma_mask: usize,
-    dev_list: DeviceContextList,
-}
-
-impl Inited {
-    fn new(max_slots: usize, reg: XhciRegisters, dma_mask: usize) -> Result<Self> {
-        let dev_list = DeviceContextList::new(max_slots, dma_mask)?;
-        Ok(Self {
-            reg,
-            dma_mask,
-            dev_list,
-        })
     }
 }
 
