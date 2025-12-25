@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use core::fmt::Debug;
 use core::future::Future;
 
 use usb_if::descriptor::DeviceDescriptor;
@@ -37,7 +38,7 @@ pub trait EventHandlerOp: Send + Sync + 'static {
     fn handle_event(&self) -> Event;
 }
 
-pub trait DeviceInfoOp: Send + 'static {
+pub trait DeviceInfoOp: Send + Debug + 'static {
     type Device: DeviceOp;
     fn descriptor(&self) -> &DeviceDescriptor;
 }
