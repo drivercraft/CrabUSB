@@ -1,8 +1,9 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cell::UnsafeCell;
+use spin::RwLock;
 
 use mbarrier::{mb, wmb};
-use usb_if::{descriptor::DeviceDescriptor, err::TransferError, host::USBError};
+use usb_if::{err::TransferError, host::USBError};
 use xhci::{
     ExtendedCapability,
     extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport},
@@ -12,9 +13,9 @@ use xhci::{
 
 use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
-use crate::queue::Finished;
 use crate::{Mmio, backend::ty::HostOp, err::Result};
 use crate::{backend::PortId, osal::SpinWhile};
+use crate::{backend::xhci::reg::SlotBell, queue::Finished};
 use crate::{
     backend::{
         ty::{Event, EventHandlerOp},
@@ -30,7 +31,7 @@ use crate::{
 };
 
 pub struct Xhci {
-    pub(crate) reg: XhciRegisters,
+    pub(crate) reg: Arc<RwLock<XhciRegisters>>,
     pub(crate) dma_mask: usize,
     cmd: SendRing<CommandCompletion>,
     dev_ctx: Option<DeviceContextList>,
@@ -54,7 +55,7 @@ impl Xhci {
         let event_ring_info = event_ring.info();
 
         Ok(Xhci {
-            reg: reg.clone(),
+            reg: Arc::new(RwLock::new(reg.clone())),
             dma_mask,
             cmd,
             dev_ctx: None,
@@ -159,17 +160,27 @@ impl Xhci {
 
     async fn chip_hardware_reset(&mut self) -> Result {
         debug!("Reset begin ...");
-        self.reg.operational.usbcmd.update_volatile(|c| {
+        self.reg.write().operational.usbcmd.update_volatile(|c| {
             c.clear_run_stop();
         });
 
-        SpinWhile::new(|| !self.reg.operational.usbsts.read_volatile().hc_halted()).await;
+        SpinWhile::new(|| {
+            !self
+                .reg
+                .read()
+                .operational
+                .usbsts
+                .read_volatile()
+                .hc_halted()
+        })
+        .await;
 
         debug!("Halted");
         debug!("Wait for ready...");
 
         SpinWhile::new(|| {
             self.reg
+                .read()
                 .operational
                 .usbsts
                 .read_volatile()
@@ -179,8 +190,7 @@ impl Xhci {
 
         debug!("Ready");
 
-        let o = &mut self.reg.operational;
-        o.usbcmd.update_volatile(|f| {
+        self.reg.write().operational.usbcmd.update_volatile(|f| {
             f.set_host_controller_reset();
         });
 
@@ -188,12 +198,14 @@ impl Xhci {
 
         SpinWhile::new(|| {
             self.reg
+                .read()
                 .operational
                 .usbcmd
                 .read_volatile()
                 .host_controller_reset()
                 || self
                     .reg
+                    .read()
                     .operational
                     .usbsts
                     .read_volatile()
@@ -207,10 +219,10 @@ impl Xhci {
     }
 
     fn extended_capabilities(&self) -> Vec<ExtendedCapability<MemMapper>> {
-        let hccparams1 = self.reg.capability.hccparams1.read_volatile();
+        let hccparams1 = self.reg.read().capability.hccparams1.read_volatile();
         let mapper = MemMapper {};
         let mut out = Vec::new();
-        let mut l = match unsafe { List::new(self.reg.mmio_base, hccparams1, mapper) } {
+        let mut l = match unsafe { List::new(self.reg.read().mmio_base, hccparams1, mapper) } {
             Some(v) => v,
             None => return out,
         };
@@ -256,7 +268,7 @@ impl Xhci {
     }
 
     fn setup_max_device_slots(&mut self) -> u8 {
-        let regs = &mut self.reg;
+        let mut regs = self.reg.write();
         let max_slots = regs
             .capability
             .hcsparams1
@@ -282,14 +294,14 @@ impl Xhci {
 
     pub fn disable_irq(&mut self) {
         debug!("Disable interrupts");
-        self.reg.operational.usbcmd.update_volatile(|r| {
+        self.reg.write().operational.usbcmd.update_volatile(|r| {
             r.clear_interrupter_enable();
         });
     }
 
     pub fn enable_irq(&mut self) {
         debug!("Enable interrupts");
-        self.reg.operational.usbcmd.update_volatile(|r| {
+        self.reg.write().operational.usbcmd.update_volatile(|r| {
             r.set_interrupter_enable();
         });
     }
@@ -297,7 +309,7 @@ impl Xhci {
     fn setup_dcbaap(&mut self) -> Result {
         let dcbaa_addr = self.dev()?.dcbaa.bus_addr();
         debug!("DCBAAP: {dcbaa_addr:X}");
-        self.reg.operational.dcbaap.update_volatile(|r| {
+        self.reg.write().operational.dcbaap.update_volatile(|r| {
             r.set(dcbaa_addr);
         });
         Ok(())
@@ -308,7 +320,7 @@ impl Xhci {
         let cycle = self.cmd.cycle();
 
         debug!("CRCR: {crcr:?}");
-        self.reg.operational.crcr.update_volatile(|r| {
+        self.reg.write().operational.crcr.update_volatile(|r| {
             r.set_command_ring_pointer(crcr.into());
             if cycle {
                 r.set_ring_cycle_state();
@@ -326,7 +338,8 @@ impl Xhci {
         let erstba = self.event_ring_info.erstba;
 
         {
-            let mut ir0 = self.reg.interrupter_register_set.interrupter_mut(0);
+            let mut reg = self.reg.write();
+            let mut ir0 = reg.interrupter_register_set.interrupter_mut(0);
 
             debug!("ERDP: {erdp:x}");
 
@@ -352,6 +365,7 @@ impl Xhci {
         {
             debug!("Enabling primary interrupter.");
             self.reg
+                .write()
                 .interrupter_register_set
                 .interrupter_mut(0)
                 .iman
@@ -362,7 +376,7 @@ impl Xhci {
         }
 
         /* Set the HCD state before we enable the irqs */
-        self.reg.operational.usbcmd.update_volatile(|r| {
+        self.reg.write().operational.usbcmd.update_volatile(|r| {
             r.set_host_system_error_enable();
             r.set_enable_wrap_event();
         });
@@ -374,6 +388,7 @@ impl Xhci {
             let buf_count = {
                 let count = self
                     .reg
+                    .read()
                     .capability
                     .hcsparams2
                     .read_volatile()
@@ -400,7 +415,7 @@ impl Xhci {
     }
 
     fn start(&mut self) {
-        self.reg.operational.usbcmd.update_volatile(|r| {
+        self.reg.write().operational.usbcmd.update_volatile(|r| {
             r.set_run_stop();
         });
         debug!("Start run");
@@ -408,7 +423,7 @@ impl Xhci {
 
     async fn wait_for_running(&mut self) {
         SpinWhile::new(|| {
-            let sts = self.reg.operational.usbsts.read_volatile();
+            let sts = self.reg.read().operational.usbsts.read_volatile();
             sts.hc_halted() || sts.controller_not_ready()
         })
         .await;
@@ -416,12 +431,13 @@ impl Xhci {
         info!("Running");
 
         self.reg
+            .write()
             .doorbell
             .write_volatile_at(0, doorbell::Register::default());
     }
 
     async fn reset_ports(&mut self) {
-        let regs = &mut self.reg;
+        let mut regs = self.reg.write();
         let port_len = regs.port_register_set.len();
 
         for i in 0..port_len {
@@ -435,8 +451,8 @@ impl Xhci {
     }
 
     fn need_init_port_idxs(&self) -> impl Iterator<Item = usize> {
-        (0..self.reg.port_register_set.len()).filter(move |&i| {
-            let portsc = &self.reg.port_register_set.read_volatile_at(i).portsc;
+        (0..self.reg.read().port_register_set.len()).filter(move |&i| {
+            let portsc = self.reg.read().port_register_set.read_volatile_at(i).portsc;
             portsc.port_enabled_disabled()
                 && portsc.current_connect_status()
                 && self.port_status[i] == ProtStaus::Uninit
@@ -451,6 +467,7 @@ impl Xhci {
 
         wmb();
         self.reg
+            .write()
             .doorbell
             .write_volatile_at(0, doorbell::Register::default());
 
@@ -466,6 +483,7 @@ impl Xhci {
 
     pub(crate) fn is_64bit_ctx(&self) -> bool {
         self.reg
+            .read()
             .capability
             .hccparams1
             .read_volatile()
@@ -479,6 +497,10 @@ impl Xhci {
         let id = device.slot_id();
         self.inited_devices.insert(id, device);
         Ok(())
+    }
+
+    pub(crate) fn new_slot_bell(&self, slot: SlotId) -> SlotBell {
+        SlotBell::new(slot, self.reg.read().clone())
     }
 
     pub(crate) async fn device_slot_assignment(
@@ -496,6 +518,7 @@ impl Xhci {
 
     pub fn port_speed(&self, port: PortId) -> u8 {
         self.reg
+            .read()
             .port_register_set
             .read_volatile_at(port.raw() - 1)
             .portsc

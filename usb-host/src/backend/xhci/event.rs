@@ -1,3 +1,5 @@
+use alloc::sync::Arc;
+
 use dma_api::DVec;
 use mbarrier::mb;
 use xhci::ring::trb::event::Allowed;
@@ -77,3 +79,7 @@ pub struct EventRingInfo {
     pub erdp: u64,
     pub erstba: u64,
 }
+
+pub(crate) struct TransEventDoolbell {}
+
+

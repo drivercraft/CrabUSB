@@ -1,9 +1,12 @@
+use alloc::sync::Arc;
+
 use mbarrier::mb;
+use spin::Mutex;
 use usb_if::descriptor::DeviceDescriptor;
 use xhci::ring::trb::command;
 
 use crate::backend::xhci::endpoint::EndpointRaw;
-use crate::backend::xhci::reg::XhciRegisters;
+use crate::backend::xhci::reg::SlotBell;
 use crate::backend::xhci::{
     append_port_to_route_string, parse_default_max_packet_size_from_port_speed,
 };
@@ -44,10 +47,10 @@ impl DeviceInfoOp for DeviceInfo {
 pub struct Device {
     id: SlotId,
     port_id: PortId,
-    reg: XhciRegisters,
     ctx: ContextData,
     desc: DeviceDescriptor,
     ctrl_ep: EndpointRaw,
+    bell: Arc<Mutex<SlotBell>>,
 }
 
 impl Device {
@@ -61,20 +64,17 @@ impl Device {
         );
         let dma_mask = host.dma_mask;
         let ctx = host.dev_mut()?.new_ctx(slot_id, is_64, dma_mask)?;
+        let bell = host.new_slot_bell(slot_id);
+        let bell = Arc::new(Mutex::new(bell));
 
         let desc = unsafe { core::mem::zeroed() };
-        let ctrl_ep = EndpointRaw::new(
-            slot_id,
-            crate::backend::Dci::CTRL,
-            host.reg.clone(),
-            dma_mask,
-        )?;
+        let ctrl_ep = EndpointRaw::new(slot_id, crate::backend::Dci::CTRL, dma_mask, bell.clone())?;
 
         Ok(Self {
             id: slot_id,
             port_id: port,
             ctx,
-            reg: host.reg.clone(),
+            bell,
             ctrl_ep,
             desc,
         })
