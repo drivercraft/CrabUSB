@@ -3,17 +3,23 @@ use core::cell::UnsafeCell;
 use alloc::vec::Vec;
 use mbarrier::mb;
 use usb_if::host::USBError;
-use xhci::ExtendedCapability;
-use xhci::extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport};
-use xhci::registers::doorbell;
-use xhci::ring::trb::event::CommandCompletion;
+use xhci::{
+    ExtendedCapability,
+    extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport},
+    registers::doorbell,
+    ring::trb::event::CommandCompletion,
+};
 
 use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
-use crate::backend::ty::EventHandlerOp;
-use crate::backend::xhci::context::{DeviceContextList, ScratchpadBufferArray};
-use crate::backend::xhci::event::{EventRing, EventRingInfo};
-use crate::backend::xhci::ring::SendRing;
+use crate::backend::{
+    ty::{Event, EventHandlerOp},
+    xhci::{
+        context::{DeviceContextList, ScratchpadBufferArray},
+        event::{EventRing, EventRingInfo},
+        ring::SendRing,
+    },
+};
 use crate::osal::SpinWhile;
 use crate::queue::Finished;
 use crate::{Mmio, backend::ty::HostOp, err::Result};
@@ -441,8 +447,9 @@ impl EventHandler {
         unsafe { &mut *self.reg.get() }
     }
 
-    fn clean_event_ring(&self) {
+    fn clean_event_ring(&self) -> Event {
         use xhci::ring::trb::event::Allowed;
+        let mut event = Event::Nothing;
 
         while let Some(allowed) = self.event_ring().next() {
             match allowed {
@@ -451,8 +458,10 @@ impl EventHandler {
                     // trace!("[Command] << {allowed:?} @{addr:X}");
                     self.cmd_finished.set_finished(addr.into(), c);
                 }
-                Allowed::PortStatusChange(_st) => {
-                    debug!("port change: {}", _st.port_id());
+                Allowed::PortStatusChange(st) => {
+                    event = Event::PortChange {
+                        port: st.port_id() as _,
+                    };
                 }
                 Allowed::TransferEvent(c) => {}
                 _ => {
@@ -460,13 +469,15 @@ impl EventHandler {
                 }
             }
         }
+        event
     }
 }
 
 impl EventHandlerOp for EventHandler {
-    fn handle_event(&self) {
+    fn handle_event(&self) -> Event {
+        let res;
         let erdp = {
-            self.clean_event_ring();
+            res = self.clean_event_ring();
             self.event_ring().erdp()
         };
         {
@@ -480,5 +491,6 @@ impl EventHandlerOp for EventHandler {
                 r.clear_interrupt_pending();
             });
         }
+        res
     }
 }
