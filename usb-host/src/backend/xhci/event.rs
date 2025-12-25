@@ -1,5 +1,3 @@
-use alloc::sync::Arc;
-
 use dma_api::DVec;
 use mbarrier::mb;
 use xhci::ring::trb::event::Allowed;
