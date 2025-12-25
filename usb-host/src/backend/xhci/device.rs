@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::fmt::Display;
 
 use alloc::sync::Arc;
 
@@ -6,7 +6,7 @@ use mbarrier::mb;
 use spin::Mutex;
 use usb_if::descriptor::{DescriptorType, DeviceDescriptor};
 use usb_if::err::TransferError;
-use usb_if::host::ControlSetup;
+use usb_if::host::{ControlSetup, USBError};
 use usb_if::transfer::{Recipient, Request, RequestType};
 use xhci::ring::trb::command;
 
@@ -60,6 +60,7 @@ pub struct Device {
     transfer_result_handler: TransferResultHandler,
     bell: Arc<Mutex<SlotBell>>,
     dma_mask: usize,
+    current_config_value: Option<u8>,
 }
 
 impl Device {
@@ -87,6 +88,7 @@ impl Device {
             desc,
             dma_mask,
             transfer_result_handler: host.transfer_result_handler.clone(),
+            current_config_value: None,
         })
     }
 
@@ -113,7 +115,9 @@ impl Device {
         // self.dump_device_out();
         let max_packet_size = self.control_max_packet_size().await?;
         trace!("Max packet size: {max_packet_size}");
-        
+        self.get_configuration().await?;
+        self.read_descriptor().await?;
+
         Ok(())
     }
 
@@ -231,6 +235,17 @@ impl Device {
             .await
     }
 
+    async fn read_descriptor(&mut self) -> Result<()> {
+        let mut buff = alloc::vec![0u8; DeviceDescriptor::LEN];
+        self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut buff)
+            .await?;
+        trace!("data: {buff:?}");
+        let desc = DeviceDescriptor::parse(&buff)
+            .ok_or(USBError::Other("device descriptor parse err".into()))?;
+        self.desc = desc;
+        Ok(())
+    }
+
     async fn get_descriptor(
         &mut self,
         desc_type: DescriptorType,
@@ -271,6 +286,24 @@ impl Device {
         trace!("Device descriptor bMaxPacketSize0: {packet_size} bytes");
 
         Ok(packet_size as _)
+    }
+
+    async fn get_configuration(&mut self) -> Result<u8> {
+        let mut buff = alloc::vec![0u8; 1];
+        self.control_in(
+            ControlSetup {
+                request_type: RequestType::Standard,
+                recipient: Recipient::Device,
+                request: Request::GetConfiguration,
+                value: 0,
+                index: 0,
+            },
+            &mut buff,
+        )
+        .await?;
+        let config_value = buff[0];
+        self.current_config_value = Some(config_value);
+        Ok(buff[0])
     }
 }
 

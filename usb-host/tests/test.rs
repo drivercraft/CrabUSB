@@ -63,99 +63,99 @@ mod tests {
             info!("port changed detected");
             let ls = host.probe_devices().await.unwrap();
 
-            // for mut info in ls {
-            //     info!("{info}");
+            for mut info in ls {
+                info!("{info:#x?}");
 
-            //     let mut interface_desc = None;
-            //     let mut config_desc: Option<ConfigurationDescriptor> = None;
-            //     for config in &info.configurations {
-            //         info!("config: {:?}", config.configuration_value);
+                //     let mut interface_desc = None;
+                //     let mut config_desc: Option<ConfigurationDescriptor> = None;
+                //     for config in &info.configurations {
+                //         info!("config: {:?}", config.configuration_value);
 
-            //         for interface in &config.interfaces {
-            //             for alt in &interface.alt_settings {
-            //                 info!(
-            //                     "interface[{}.{}] class {:?}",
-            //                     alt.interface_number,
-            //                     alt.alternate_setting,
-            //                     alt.class()
-            //                 );
-            //                 if interface_desc.is_none() {
-            //                     interface_desc = Some(alt.clone());
-            //                     config_desc = Some(config.clone());
-            //                 }
-            //             }
-            //         }
-            //     }
-            //     let interface_desc = interface_desc.unwrap();
-            //     let config_desc = config_desc.unwrap();
+                //         for interface in &config.interfaces {
+                //             for alt in &interface.alt_settings {
+                //                 info!(
+                //                     "interface[{}.{}] class {:?}",
+                //                     alt.interface_number,
+                //                     alt.alternate_setting,
+                //                     alt.class()
+                //                 );
+                //                 if interface_desc.is_none() {
+                //                     interface_desc = Some(alt.clone());
+                //                     config_desc = Some(config.clone());
+                //                 }
+                //             }
+                //         }
+                //     }
+                //     let interface_desc = interface_desc.unwrap();
+                //     let config_desc = config_desc.unwrap();
 
-            //     let mut device = info.open().await.unwrap();
+                //     let mut device = info.open().await.unwrap();
 
-            //     info!("open device ok: {device:?}");
+                //     info!("open device ok: {device:?}");
 
-            //     device
-            //         .set_configuration(config_desc.configuration_value)
-            //         .await
-            //         .unwrap();
-            //     info!("set configuration ok");
+                //     device
+                //         .set_configuration(config_desc.configuration_value)
+                //         .await
+                //         .unwrap();
+                //     info!("set configuration ok");
 
-            //     // let config_value = device.current_configuration_descriptor().await.unwrap();
-            //     // info!("get configuration: {config_value:?}");
+                //     // let config_value = device.current_configuration_descriptor().await.unwrap();
+                //     // info!("get configuration: {config_value:?}");
 
-            //     let mut interface = device
-            //         .claim_interface(
-            //             interface_desc.interface_number,
-            //             interface_desc.alternate_setting,
-            //         )
-            //         .await
-            //         .unwrap();
-            //     info!(
-            //         "claim interface ok: {interface}  class {:?} subclass {:?}",
-            //         interface.descriptor.class, interface.descriptor.subclass
-            //     );
+                //     let mut interface = device
+                //         .claim_interface(
+                //             interface_desc.interface_number,
+                //             interface_desc.alternate_setting,
+                //         )
+                //         .await
+                //         .unwrap();
+                //     info!(
+                //         "claim interface ok: {interface}  class {:?} subclass {:?}",
+                //         interface.descriptor.class, interface.descriptor.subclass
+                //     );
 
-            //     for ep_desc in &interface_desc.endpoints {
-            //         info!("endpoint: {ep_desc:?}");
+                //     for ep_desc in &interface_desc.endpoints {
+                //         info!("endpoint: {ep_desc:?}");
 
-            //         match (ep_desc.transfer_type, ep_desc.direction) {
-            //             (EndpointType::Bulk, Direction::In) => {
-            //                 let mut bulk_in = interface.endpoint_bulk_in(ep_desc.address).unwrap();
-            //                 // You can use bulk_in to transfer data
+                //         match (ep_desc.transfer_type, ep_desc.direction) {
+                //             (EndpointType::Bulk, Direction::In) => {
+                //                 let mut bulk_in = interface.endpoint_bulk_in(ep_desc.address).unwrap();
+                //                 // You can use bulk_in to transfer data
 
-            //                 let mut buff = alloc::vec![0u8; 64];
-            //                 while let Ok(n) = bulk_in.submit(&mut buff).unwrap().await {
-            //                     let data = &buff[..n];
-            //                     info!("bulk in data: {data:?}",);
-            //                     break; // For testing, break after first transfer
-            //                 }
-            //             }
-            //             // (EndpointType::Isochronous, Direction::In) => {
-            //             //     let _iso_in = interface
-            //             //         .endpoint::<Isochronous, In>(ep_desc.address)
-            //             //         .unwrap();
-            //             //     // You can use iso_in to transfer data
-            //             // }
-            //             _ => {
-            //                 info!(
-            //                     "unsupported {:?} {:?}",
-            //                     ep_desc.transfer_type, ep_desc.direction
-            //                 );
-            //             }
-            //         }
-            //     }
+                //                 let mut buff = alloc::vec![0u8; 64];
+                //                 while let Ok(n) = bulk_in.submit(&mut buff).unwrap().await {
+                //                     let data = &buff[..n];
+                //                     info!("bulk in data: {data:?}",);
+                //                     break; // For testing, break after first transfer
+                //                 }
+                //             }
+                //             // (EndpointType::Isochronous, Direction::In) => {
+                //             //     let _iso_in = interface
+                //             //         .endpoint::<Isochronous, In>(ep_desc.address)
+                //             //         .unwrap();
+                //             //     // You can use iso_in to transfer data
+                //             // }
+                //             _ => {
+                //                 info!(
+                //                     "unsupported {:?} {:?}",
+                //                     ep_desc.transfer_type, ep_desc.direction
+                //                 );
+                //             }
+                //         }
+                //     }
 
-            //     // let mut _bulk_in = interface.endpoint::<Bulk, In>(0x81).unwrap();
+                //     // let mut _bulk_in = interface.endpoint::<Bulk, In>(0x81).unwrap();
 
-            //     // let mut buff = alloc::vec![0u8; 64];
+                //     // let mut buff = alloc::vec![0u8; 64];
 
-            //     // while let Ok(n) = bulk_in.transfer(&mut buff).await {
-            //     //     let data = &buff[..n];
+                //     // while let Ok(n) = bulk_in.transfer(&mut buff).await {
+                //     //     let data = &buff[..n];
 
-            //     //     info!("bulk in data: {data:?}",);
-            //     // }
+                //     //     info!("bulk in data: {data:?}",);
+                //     // }
 
-            //     drop(device);
-            // }
+                // drop(device);
+            }
         });
     }
 
