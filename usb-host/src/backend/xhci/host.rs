@@ -1,41 +1,43 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::cell::UnsafeCell;
 
-use mbarrier::mb;
-use usb_if::{descriptor::DeviceDescriptor, host::USBError};
+use mbarrier::{mb, wmb};
+use usb_if::{descriptor::DeviceDescriptor, err::TransferError, host::USBError};
 use xhci::{
     ExtendedCapability,
     extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport},
     registers::doorbell,
-    ring::trb::event::CommandCompletion,
+    ring::trb::{command, event::CommandCompletion},
 };
 
 use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
-use crate::backend::{
-    ty::{Event, EventHandlerOp},
-    xhci::{
-        SlotId,
-        context::{DeviceContextList, ScratchpadBufferArray},
-        device::DeviceInfo,
-        event::{EventRing, EventRingInfo},
-        ring::SendRing,
-    },
-};
-use crate::osal::SpinWhile;
 use crate::queue::Finished;
 use crate::{Mmio, backend::ty::HostOp, err::Result};
+use crate::{backend::PortId, osal::SpinWhile};
+use crate::{
+    backend::{
+        ty::{Event, EventHandlerOp},
+        xhci::{
+            SlotId,
+            context::{DeviceContextList, ScratchpadBufferArray},
+            device::DeviceInfo,
+            event::{EventRing, EventRingInfo},
+            ring::SendRing,
+        },
+    },
+    err::ConvertXhciError,
+};
 
 pub struct Xhci {
-    reg: XhciRegisters,
-    dma_mask: usize,
+    pub(crate) reg: XhciRegisters,
+    pub(crate) dma_mask: usize,
     cmd: SendRing<CommandCompletion>,
     dev_ctx: Option<DeviceContextList>,
     event_handler: Option<EventHandler>,
     event_ring_info: EventRingInfo,
     scratchpad_buf_arr: Option<ScratchpadBufferArray>,
     port_status: Vec<ProtStaus>,
-    descriptors: BTreeMap<SlotId, DeviceInfo>,
     inited_devices: BTreeMap<SlotId, Device>,
 }
 
@@ -60,7 +62,6 @@ impl Xhci {
             event_ring_info,
             scratchpad_buf_arr: None,
             port_status: vec![],
-            descriptors: BTreeMap::new(),
             inited_devices: BTreeMap::new(),
         })
     }
@@ -119,7 +120,14 @@ impl HostOp for Xhci {
             self.new_device(port_idx).await?;
         }
 
-        Ok(self.descriptors.values().cloned().collect())
+        Ok(self
+            .inited_devices
+            .values()
+            .map(|d| {
+                let desc = d.descriptor().clone();
+                DeviceInfo::new(d.slot_id(), desc)
+            })
+            .collect())
     }
 
     fn create_event_handler(&mut self) -> Self::EventHandler {
@@ -264,11 +272,11 @@ impl Xhci {
         max_slots
     }
 
-    fn dev(&self) -> Result<&DeviceContextList> {
+    pub(crate) fn dev(&self) -> Result<&DeviceContextList> {
         self.dev_ctx.as_ref().ok_or(USBError::NotInitialized)
     }
 
-    fn dev_mut(&mut self) -> Result<&mut DeviceContextList> {
+    pub(crate) fn dev_mut(&mut self) -> Result<&mut DeviceContextList> {
         self.dev_ctx.as_mut().ok_or(USBError::NotInitialized)
     }
 
@@ -435,8 +443,63 @@ impl Xhci {
         })
     }
 
+    pub(crate) async fn cmd_request(
+        &mut self,
+        trb: command::Allowed,
+    ) -> core::result::Result<CommandCompletion, TransferError> {
+        let trb_addr = self.cmd.enque_command(trb);
+
+        wmb();
+        self.reg
+            .doorbell
+            .write_volatile_at(0, doorbell::Register::default());
+
+        let res = self.cmd.wait_command_finished(trb_addr).await;
+
+        match res.completion_code() {
+            Ok(code) => code.to_result()?,
+            Err(e) => Err(TransferError::Other(format!("Command failed: {e:?}")))?,
+        }
+
+        Ok(res)
+    }
+
+    pub(crate) fn is_64bit_ctx(&self) -> bool {
+        self.reg
+            .capability
+            .hccparams1
+            .read_volatile()
+            .context_size()
+    }
+
     async fn new_device(&mut self, port_idx: usize) -> Result {
+        debug!("New device on port {port_idx}");
+        let mut device = Device::new(self, (port_idx + 1).into()).await?;
+        device.init(self).await?;
+        let id = device.slot_id();
+        self.inited_devices.insert(id, device);
         Ok(())
+    }
+
+    pub(crate) async fn device_slot_assignment(
+        &mut self,
+    ) -> core::result::Result<SlotId, TransferError> {
+        // enable slot
+        let result = self
+            .cmd_request(command::Allowed::EnableSlot(command::EnableSlot::default()))
+            .await?;
+
+        let slot_id = result.slot_id();
+        trace!("assigned slot id: {slot_id}");
+        Ok(slot_id.into())
+    }
+
+    pub fn port_speed(&self, port: PortId) -> u8 {
+        self.reg
+            .port_register_set
+            .read_volatile_at(port.raw() - 1)
+            .portsc
+            .port_speed()
     }
 }
 

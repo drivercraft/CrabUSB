@@ -1,8 +1,12 @@
 use alloc::sync::Arc;
+use core::pin::Pin;
+use core::task::Context;
+use core::task::Poll;
 use core::{
     cell::UnsafeCell,
     sync::atomic::{AtomicBool, Ordering},
 };
+use futures::task::AtomicWaker;
 
 use alloc::collections::BTreeMap;
 
@@ -22,7 +26,7 @@ impl<C> Clone for Finished<C> {
 
 pub struct FinishedInner<C> {
     finished: BTreeMap<BusAddr, AtomicBool>,
-    data: UnsafeCell<BTreeMap<BusAddr, Option<C>>>,
+    data: UnsafeCell<BTreeMap<BusAddr, (AtomicWaker, Option<C>)>>,
 }
 
 unsafe impl<C> Send for FinishedInner<C> {}
@@ -35,7 +39,7 @@ impl<C> Finished<C> {
 
         for addr in addrs {
             finished.insert(addr, AtomicBool::new(false));
-            data.insert(addr, None);
+            data.insert(addr, (AtomicWaker::new(), None));
         }
         Self {
             inner: Arc::new(FinishedInner {
@@ -54,19 +58,46 @@ impl<C> Finished<C> {
     pub fn set_finished(&self, addr: BusAddr, value: C) {
         let data = unsafe { &mut *self.inner.data.get() };
         if let Some(slot) = data.get_mut(&addr) {
-            *slot = Some(value);
+            slot.1 = Some(value);
             if let Some(flag) = self.inner.finished.get(&addr) {
                 flag.store(true, Ordering::Release);
             }
+            slot.0.wake();
         }
     }
 
-    pub fn get_finished(&self, addr: BusAddr) -> Option<C> {
+    fn get_finished(&self, addr: BusAddr) -> Option<C> {
         if !self.inner.finished.get(&addr)?.load(Ordering::Acquire) {
             return None;
         }
         let data = unsafe { &mut *self.inner.data.get() };
-        data.get_mut(&addr)?.take()
+        data.get_mut(&addr)?.1.take()
+    }
+
+    pub fn wait_for_finished(&self, addr: BusAddr) -> impl Future<Output = C> + '_ {
+        Water {
+            addr,
+            finished: self,
+        }
     }
 }
 
+struct Water<'a, C> {
+    addr: BusAddr,
+    finished: &'a Finished<C>,
+}
+
+impl<C> Future for Water<'_, C> {
+    type Output = C;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if let Some(res) = self.finished.get_finished(self.addr) {
+            return Poll::Ready(res);
+        }
+        let data = unsafe { &mut *self.finished.inner.data.get() };
+        if let Some(slot) = data.get_mut(&self.addr) {
+            slot.0.register(cx.waker());
+        }
+        Poll::Pending
+    }
+}

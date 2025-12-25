@@ -173,8 +173,18 @@ impl<R> SendRing<R> {
         Ok(Self { ring, finished })
     }
 
+    pub fn enque_command(&mut self, trb: command::Allowed) -> BusAddr {
+        let addr = self.ring.enque_command(trb);
+        self.finished.clear_finished(addr);
+        addr
+    }
+
     pub fn set_finished(&self, addr: BusAddr, value: R) {
         self.finished.set_finished(addr, value);
+    }
+
+    pub async fn wait_command_finished(&self, addr: BusAddr) -> R {
+        self.finished.wait_for_finished(addr).await
     }
 
     pub fn finished_handle(&self) -> Finished<R> {
