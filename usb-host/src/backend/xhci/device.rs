@@ -4,7 +4,10 @@ use alloc::sync::Arc;
 
 use mbarrier::mb;
 use spin::Mutex;
-use usb_if::descriptor::DeviceDescriptor;
+use usb_if::descriptor::{DescriptorType, DeviceDescriptor};
+use usb_if::err::TransferError;
+use usb_if::host::ControlSetup;
+use usb_if::transfer::{Recipient, Request, RequestType};
 use xhci::ring::trb::command;
 
 use crate::backend::Dci;
@@ -107,6 +110,10 @@ impl Device {
         let ep = self.new_ep(Dci::CTRL)?;
         self.ctrl_ep = Some(EndpintControl::new(ep));
         self.address(host).await?;
+        // self.dump_device_out();
+        let max_packet_size = self.control_max_packet_size().await?;
+        trace!("Max packet size: {max_packet_size}");
+        
         Ok(())
     }
 
@@ -202,6 +209,68 @@ impl Device {
         debug!("Address slot ok {result:x?}");
 
         Ok(())
+    }
+
+    pub async fn control_in(
+        &mut self,
+        param: ControlSetup,
+        buff: &mut [u8],
+    ) -> core::result::Result<usize, TransferError> {
+        self.ctrl_ep.as_mut().unwrap().control_in(param, buff).await
+    }
+
+    pub async fn control_out(
+        &mut self,
+        param: ControlSetup,
+        buff: &[u8],
+    ) -> core::result::Result<usize, TransferError> {
+        self.ctrl_ep
+            .as_mut()
+            .unwrap()
+            .control_out(param, buff)
+            .await
+    }
+
+    async fn get_descriptor(
+        &mut self,
+        desc_type: DescriptorType,
+        desc_index: u8,
+        language_id: u16,
+        buff: &mut [u8],
+    ) -> Result<()> {
+        self.control_in(
+            ControlSetup {
+                request_type: RequestType::Standard,
+                recipient: Recipient::Device,
+                request: Request::GetDescriptor,
+                value: ((desc_type.0 as u16) << 8) | desc_index as u16,
+                index: language_id,
+            },
+            buff,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn control_max_packet_size(&mut self) -> Result<u16> {
+        trace!("control_fetch_control_point_packet_size");
+
+        let mut data = alloc::vec![0u8; 8];
+
+        self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
+            .await?;
+
+        // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
+        // 对于控制端点，这是直接的字节数值，不需要解码
+        let packet_size = data
+            .get(7) // bMaxPacketSize0 在设备描述符的第8个字节（索引7）
+            .map(|&len| if len == 0 { 8u8 } else { len })
+            .unwrap_or(8);
+
+        trace!("data@{:p}: {data:?}", data.as_ptr());
+        trace!("Device descriptor bMaxPacketSize0: {packet_size} bytes");
+
+        Ok(packet_size as _)
     }
 }
 

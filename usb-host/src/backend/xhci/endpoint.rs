@@ -1,4 +1,5 @@
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 
 use dma_api::{DSlice, DSliceMut};
 use mbarrier::mb;
