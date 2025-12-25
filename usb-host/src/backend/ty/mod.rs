@@ -16,9 +16,10 @@ use crate::err::USBError;
 /// 这是高层抽象，用于连接 HCD 层和 usb-if 接口层
 pub trait HostOp {
     type Device: DeviceOp;
+    type EventHandler: EventHandlerOp;
 
     /// 初始化后端
-    fn initialize(&mut self) -> impl Future<Output = Result<(), USBError>> + Send;
+    fn init(&mut self) -> impl Future<Output = Result<(), USBError>> + Send;
 
     /// 获取设备列表
     fn device_list(&self) -> impl Future<Output = Result<Vec<DeviceDescriptor>, USBError>> + Send;
@@ -29,8 +30,11 @@ pub trait HostOp {
         desc: &DeviceDescriptor,
     ) -> impl Future<Output = Result<Self::Device, USBError>> + Send;
 
-    /// 轮询事件（在中断上下文中调用）
-    fn poll_events(&mut self);
+    fn create_event_handler(&mut self) -> Self::EventHandler;
+}
+
+pub trait EventHandlerOp: Send + Sync + 'static {
+    fn handle_event(&self);
 }
 
 /// USB 设备特征（高层抽象）

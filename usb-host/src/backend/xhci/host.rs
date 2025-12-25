@@ -1,29 +1,53 @@
+use core::cell::{Cell, UnsafeCell};
+
 use alloc::vec::Vec;
+use usb_if::host::USBError;
 use xhci::ExtendedCapability;
 use xhci::extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport};
+use xhci::ring::trb::event::CommandCompletion;
 
 use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
+use crate::backend::ty::EventHandlerOp;
+use crate::backend::xhci::event::EventRing;
+use crate::backend::xhci::ring::SendRing;
+use crate::osal::SpinWhile;
+use crate::queue::Finished;
 use crate::{Mmio, backend::ty::HostOp, err::Result};
 
 pub struct Xhci {
     reg: XhciRegisters,
     dma_mask: usize,
+    cmd: SendRing<CommandCompletion>,
+    inited: Option<Inited>,
+    event_handler: Option<EventHandler>,
 }
 
+unsafe impl Send for Xhci {}
+
 impl Xhci {
-    pub fn new(mmio: Mmio, dma_mask: usize) -> Self {
-        Xhci {
-            reg: XhciRegisters::new(mmio),
+    pub fn new(mmio: Mmio, dma_mask: usize) -> Result<Self> {
+        let cmd: SendRing<CommandCompletion> =
+            SendRing::new(dma_api::Direction::Bidirectional, dma_mask as _)?;
+        let cmd_finished = cmd.finished_handle();
+        let event_ring = EventRing::new(dma_mask)?;
+        let reg = XhciRegisters::new(mmio);
+
+        Ok(Xhci {
+            reg: reg.clone(),
             dma_mask,
-        }
+            cmd,
+            inited: None,
+            event_handler: Some(EventHandler::new(reg, cmd_finished, event_ring)),
+        })
     }
 }
 
 impl HostOp for Xhci {
     type Device = Device;
+    type EventHandler = EventHandler;
 
-    async fn initialize(&mut self) -> Result {
+    async fn init(&mut self) -> Result {
         // 4.2 Host Controller Initialization
         self.init_ext_caps().await?;
         // After Chip Hardware Reset6 wait until the Controller Not Ready (CNR) flag
@@ -60,8 +84,10 @@ impl HostOp for Xhci {
         todo!()
     }
 
-    fn poll_events(&mut self) {
-        todo!()
+    fn create_event_handler(&mut self) -> Self::EventHandler {
+        self.event_handler
+            .take()
+            .expect("Event handler can only be created once")
     }
 }
 
@@ -85,15 +111,19 @@ impl Xhci {
             c.clear_run_stop();
         });
 
-        self.reg
-            .wait_for(|r| r.operational.usbsts.read_volatile().hc_halted())
-            .await;
+        SpinWhile::new(|| !self.reg.operational.usbsts.read_volatile().hc_halted()).await;
 
         debug!("Halted");
         debug!("Wait for ready...");
-        self.reg
-            .wait_for(|o| !o.operational.usbsts.read_volatile().controller_not_ready())
-            .await;
+
+        SpinWhile::new(|| {
+            self.reg
+                .operational
+                .usbsts
+                .read_volatile()
+                .controller_not_ready()
+        })
+        .await;
 
         debug!("Ready");
 
@@ -104,12 +134,20 @@ impl Xhci {
 
         debug!("Reset HC");
 
-        self.reg
-            .wait_for(|o| {
-                !(o.operational.usbcmd.read_volatile().host_controller_reset()
-                    || o.operational.usbsts.read_volatile().controller_not_ready())
-            })
-            .await;
+        SpinWhile::new(|| {
+            self.reg
+                .operational
+                .usbcmd
+                .read_volatile()
+                .host_controller_reset()
+                || self
+                    .reg
+                    .operational
+                    .usbsts
+                    .read_volatile()
+                    .controller_not_ready()
+        })
+        .await;
 
         debug!("Reset finish");
 
@@ -120,9 +158,7 @@ impl Xhci {
         let hccparams1 = self.reg.capability.hccparams1.read_volatile();
         let mapper = MemMapper {};
         let mut out = Vec::new();
-        let mut l = match unsafe {
-            extended_capabilities::List::new(self.reg.mmio_base, hccparams1, mapper)
-        } {
+        let mut l = match unsafe { List::new(self.reg.mmio_base, hccparams1, mapper) } {
             Some(v) => v,
             None => return out,
         };
@@ -182,5 +218,94 @@ impl Xhci {
         debug!("Max device slots: {max_slots}");
 
         max_slots
+    }
+
+    fn inited(&self) -> Result<&Inited> {
+        self.inited.as_ref().ok_or(USBError::NotInitialized)
+    }
+}
+
+struct Inited {
+    reg: XhciRegisters,
+    dma_mask: usize,
+}
+
+impl Inited {
+    fn new(max_slots: usize, reg: XhciRegisters, dma_mask: usize) -> Result<Self> {
+        Ok(Self { reg, dma_mask })
+    }
+}
+
+pub struct EventHandler {
+    reg: UnsafeCell<XhciRegisters>,
+    cmd_finished: Finished<CommandCompletion>,
+    event_ring: UnsafeCell<EventRing>,
+}
+
+unsafe impl Send for EventHandler {}
+unsafe impl Sync for EventHandler {}
+
+impl EventHandler {
+    fn new(
+        reg: XhciRegisters,
+        cmd_finished: Finished<CommandCompletion>,
+        event_ring: EventRing,
+    ) -> Self {
+        Self {
+            reg: UnsafeCell::new(reg),
+            cmd_finished,
+            event_ring: UnsafeCell::new(event_ring),
+        }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn event_ring(&self) -> &mut EventRing {
+        unsafe { &mut *self.event_ring.get() }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn reg(&self) -> &mut XhciRegisters {
+        unsafe { &mut *self.reg.get() }
+    }
+
+    fn clean_event_ring(&self) {
+        use xhci::ring::trb::event::Allowed;
+
+        while let Some(allowed) = self.event_ring().next() {
+            match allowed {
+                Allowed::CommandCompletion(c) => {
+                    let addr = c.command_trb_pointer();
+                    // trace!("[Command] << {allowed:?} @{addr:X}");
+                    self.cmd_finished.set_finished(addr.into(), c);
+                }
+                Allowed::PortStatusChange(_st) => {
+                    // debug!("port change: {}", st.port_id());
+                }
+                Allowed::TransferEvent(c) => {}
+                _ => {
+                    // debug!("unhandled event {allowed:?}");
+                }
+            }
+        }
+    }
+}
+
+impl EventHandlerOp for EventHandler {
+    fn handle_event(&self) {
+        let erdp = {
+            self.clean_event_ring();
+            self.event_ring().erdp()
+        };
+        {
+            let mut irq = self.reg().interrupter_register_set.interrupter_mut(0);
+            irq.erdp.update_volatile(|r| {
+                r.set_event_ring_dequeue_pointer(erdp);
+                r.clear_event_handler_busy();
+            });
+
+            irq.iman.update_volatile(|r| {
+                r.clear_interrupt_pending();
+            });
+        }
     }
 }
