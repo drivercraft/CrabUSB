@@ -8,7 +8,7 @@ use usb_if::descriptor::DeviceDescriptor;
 use xhci::ring::trb::command;
 
 use crate::backend::Dci;
-use crate::backend::xhci::endpoint::EndpointRaw;
+use crate::backend::xhci::endpoint::{EndpintControl, EndpointRaw};
 use crate::backend::xhci::reg::SlotBell;
 use crate::backend::xhci::transfer::TransferResultHandler;
 use crate::backend::xhci::{
@@ -53,7 +53,7 @@ pub struct Device {
     port_id: PortId,
     ctx: ContextData,
     desc: DeviceDescriptor,
-    ctrl_ep: Option<EndpointRaw>,
+    ctrl_ep: Option<EndpintControl>,
     transfer_result_handler: TransferResultHandler,
     bell: Arc<Mutex<SlotBell>>,
     dma_mask: usize,
@@ -105,7 +105,7 @@ impl Device {
 
     pub(crate) async fn init(&mut self, host: &mut Xhci) -> Result {
         let ep = self.new_ep(Dci::CTRL)?;
-        self.ctrl_ep = Some(ep);
+        self.ctrl_ep = Some(EndpintControl::new(ep));
         self.address(host).await?;
         Ok(())
     }
