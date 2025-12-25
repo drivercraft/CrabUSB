@@ -306,7 +306,7 @@ mod tests {
                     println!("irq: {irq:?}");
 
                     return Some(XhciInfo {
-                        usb: USBHost::new_xhci(addr, u32::MAX as usize),
+                        usb: USBHost::new_xhci(addr, u32::MAX as usize).unwrap(),
                         irq,
                     });
                 }
@@ -355,7 +355,7 @@ mod tests {
                 let irq = node.irq_info();
 
                 return XhciInfo {
-                    usb: USBHost::new_xhci(addr, u32::MAX as usize),
+                    usb: USBHost::new_xhci(addr, u32::MAX as usize).unwrap(),
                     irq,
                 };
             }
@@ -365,7 +365,7 @@ mod tests {
     }
 
     fn register_irq(irq: IrqInfo, host: &mut USBHost<Xhci>) {
-        let handle = host.event_handler();
+        let handle = host.create_event_handler();
 
         for one in &irq.cfgs {
             IrqParam {
@@ -374,7 +374,7 @@ mod tests {
             }
             .register_builder({
                 move |_irq| {
-                    handle.handle_events();
+                    handle.handle_event();
                     IrqHandleResult::Handled
                 }
             })

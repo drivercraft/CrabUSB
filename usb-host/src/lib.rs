@@ -17,6 +17,7 @@ mod _macros;
 pub(crate) mod backend;
 pub mod err;
 mod host;
+pub(crate) mod queue;
 
 pub use host::*;
 

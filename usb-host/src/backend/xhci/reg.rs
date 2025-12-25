@@ -59,43 +59,6 @@ impl XhciRegisters {
             enable,
         }
     }
-
-    pub fn wait_for<'a>(
-        &'a mut self,
-        condition: impl Fn(&Registers) -> bool + 'a,
-    ) -> impl core::future::Future<Output = ()> + 'a {
-        WaitCondition {
-            reg: &mut self.reg,
-            condition,
-        }
-    }
-}
-
-struct WaitCondition<'a, F>
-where
-    F: Fn(&Registers) -> bool,
-{
-    reg: &'a mut Registers,
-    condition: F,
-}
-
-impl<'a, F> Future for WaitCondition<'a, F>
-where
-    F: Fn(&Registers) -> bool,
-{
-    type Output = ();
-
-    fn poll(
-        mut self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<Self::Output> {
-        if (self.condition)(self.reg) {
-            core::task::Poll::Ready(())
-        } else {
-            cx.waker().wake_by_ref();
-            core::task::Poll::Pending
-        }
-    }
 }
 
 impl Deref for XhciRegisters {
