@@ -97,6 +97,8 @@ impl HostOp for Xhci {
 
         self.wait_for_running().await;
 
+        self.enable_irq();
+
         self.reset_ports().await;
 
         Ok(())
@@ -408,24 +410,6 @@ impl Xhci {
                 port.portsc.set_port_reset();
             });
         }
-
-        // Wait for port reset completion with proper timing
-        for i in 0..port_len {
-            SpinWhile::new(|| {
-                let portsc = regs.port_register_set.read_volatile_at(i).portsc;
-                portsc.port_reset()
-            })
-            .await;
-
-            debug!("Port {i} reset completed, checking status");
-            let portsc = regs.port_register_set.read_volatile_at(i).portsc;
-            debug!(
-                "Port {i} status after reset: enabled={}, connected={}, speed={}",
-                portsc.port_enabled_disabled(),
-                portsc.current_connect_status(),
-                portsc.port_speed()
-            );
-        }
     }
 }
 
@@ -489,7 +473,7 @@ impl EventHandler {
                     self.cmd_finished.set_finished(addr.into(), c);
                 }
                 Allowed::PortStatusChange(_st) => {
-                    // debug!("port change: {}", st.port_id());
+                    debug!("port change: {}", _st.port_id());
                 }
                 Allowed::TransferEvent(c) => {}
                 _ => {
