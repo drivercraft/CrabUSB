@@ -8,7 +8,11 @@ use crate::{
     backend::{
         Dci,
         ty::{TransferReq, TransferRes},
-        xhci::ring::SendRing,
+        xhci::{
+            reg::{XhciRegisters, XhciRegistersShared},
+            ring::SendRing,
+            sync::IrqLock,
+        },
     },
     queue::Finished,
 };
@@ -27,27 +31,29 @@ pub struct TransQueueId {
     ep_id: u8,
 }
 
+#[derive(Clone)]
 pub struct TransferResultHandler {
-    inner: BTreeMap<TransQueueId, Finished<TransferEvent>>,
+    inner: Arc<IrqLock<BTreeMap<TransQueueId, Finished<TransferEvent>>>>,
 }
 
 unsafe impl Send for TransferResultHandler {}
 
 impl TransferResultHandler {
-    pub fn new() -> Self {
+    pub fn new(reg: XhciRegistersShared) -> Self {
         Self {
-            inner: BTreeMap::new(),
+            inner: Arc::new(IrqLock::new(BTreeMap::new(), reg)),
         }
     }
 
     pub fn register_queue(&mut self, slot_id: u8, ep_id: u8, ring: &SendRing<TransferEvent>) {
         let id = TransQueueId { slot_id, ep_id };
-        self.inner.insert(id, ring.finished_handle());
+        let handle = ring.finished_handle();
+        self.inner.lock().insert(id, handle);
     }
 
-    pub fn set_finished(&self, slot_id: u8, ep_id: u8, ptr: BusAddr, res: TransferEvent) {
+    pub unsafe fn set_finished(&self, slot_id: u8, ep_id: u8, ptr: BusAddr, res: TransferEvent) {
         let queue_id = TransQueueId { slot_id, ep_id };
-        if let Some(q) = self.inner.get(&queue_id) {
+        if let Some(q) = unsafe { self.inner.force_use().get(&queue_id) } {
             q.set_finished(ptr, res);
         }
     }

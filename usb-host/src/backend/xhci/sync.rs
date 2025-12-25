@@ -1,11 +1,13 @@
+use alloc::sync::Arc;
 use core::cell::UnsafeCell;
 
-use spin::Mutex;
+use spin::{Mutex, RwLock};
 
 use crate::backend::xhci::reg::{DisableIrqGuard, XhciRegisters};
 
 pub(crate) struct IrqLock<T> {
     inner: Mutex<()>,
+    reg: Arc<RwLock<XhciRegisters>>,
     data: UnsafeCell<T>,
 }
 
@@ -13,17 +15,16 @@ unsafe impl<T> Sync for IrqLock<T> where T: Send {}
 unsafe impl<T> Send for IrqLock<T> where T: Send {}
 
 impl<T> IrqLock<T> {
-    pub fn new(data: T) -> Self {
+    pub fn new(data: T, reg: Arc<RwLock<XhciRegisters>>) -> Self {
         Self {
             inner: Mutex::new(()),
-
+            reg,
             data: UnsafeCell::new(data),
         }
     }
 
-    pub fn lock(&self, reg: &mut XhciRegisters) -> IrqLockGuard<'_, T> {
-        let _disable_guard = reg.disable_irq_guard();
-
+    pub fn lock(&self) -> IrqLockGuard<'_, T> {
+        let _disable_guard = self.reg.write().disable_irq_guard();
         let guard = self.inner.lock();
         IrqLockGuard {
             _guard: guard,

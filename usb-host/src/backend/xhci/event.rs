@@ -79,7 +79,3 @@ pub struct EventRingInfo {
     pub erdp: u64,
     pub erstba: u64,
 }
-
-pub(crate) struct TransEventDoolbell {}
-
-
