@@ -1,15 +1,18 @@
 use core::cell::{Cell, UnsafeCell};
 
 use alloc::vec::Vec;
+use mbarrier::mb;
 use usb_if::host::USBError;
 use xhci::ExtendedCapability;
 use xhci::extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport};
+use xhci::registers::doorbell;
 use xhci::ring::trb::event::CommandCompletion;
 
 use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
 use crate::backend::ty::EventHandlerOp;
-use crate::backend::xhci::event::EventRing;
+use crate::backend::xhci::context::{DeviceContextList, ScratchpadBufferArray};
+use crate::backend::xhci::event::{EventRing, EventRingInfo};
 use crate::backend::xhci::ring::SendRing;
 use crate::osal::SpinWhile;
 use crate::queue::Finished;
@@ -21,9 +24,12 @@ pub struct Xhci {
     cmd: SendRing<CommandCompletion>,
     inited: Option<Inited>,
     event_handler: Option<EventHandler>,
+    event_ring_info: EventRingInfo,
+    scratchpad_buf_arr: Option<ScratchpadBufferArray>,
 }
 
 unsafe impl Send for Xhci {}
+unsafe impl Sync for Xhci {}
 
 impl Xhci {
     pub fn new(mmio: Mmio, dma_mask: usize) -> Result<Self> {
@@ -32,6 +38,7 @@ impl Xhci {
         let cmd_finished = cmd.finished_handle();
         let event_ring = EventRing::new(dma_mask)?;
         let reg = XhciRegisters::new(mmio);
+        let event_ring_info = event_ring.info();
 
         Ok(Xhci {
             reg: reg.clone(),
@@ -39,6 +46,8 @@ impl Xhci {
             cmd,
             inited: None,
             event_handler: Some(EventHandler::new(reg, cmd_finished, event_ring)),
+            event_ring_info,
+            scratchpad_buf_arr: None,
         })
     }
 }
@@ -48,27 +57,47 @@ impl HostOp for Xhci {
     type EventHandler = EventHandler;
 
     async fn init(&mut self) -> Result {
+        self.disable_irq();
         // 4.2 Host Controller Initialization
         self.init_ext_caps().await?;
         // After Chip Hardware Reset6 wait until the Controller Not Ready (CNR) flag
         // in the USBSTS is ‘0’ before writing any xHC Operational or Runtime
         // registers.
         self.chip_hardware_reset().await?;
+
+        self.disable_irq();
+
         // Program the Max Device Slots Enabled (MaxSlotsEn) field in the CONFIG
         // register (5.4.7) to enable the device slots that system software is going to
         // use.
         let max_slots = self.setup_max_device_slots();
-        // let root_hub = RootHub::new(max_slots as _, self.reg.clone(), self.dma_mask)?;
-        // root_hub.init()?;
-        // self.root = Some(root_hub);
-        // // trace!("Root hub initialized with max slots: {max_slots}");
-        // self.root()?.wait_for_running().await;
-        // self.root()?.lock().enable_irq();
-        // self.root()?.lock().reset_ports();
+        self.inited = Some(Inited::new(
+            max_slots as _,
+            self.reg.clone(),
+            self.dma_mask,
+        )?);
 
-        // // Additional delay after port reset for device detection stability
-        // // Linux kernel typically waits for device connection stabilization
-        // sleep(Duration::from_millis(100)).await;
+        // Program the Device Context Base Address Array Pointer (DCBAAP)
+        // register (5.4.6) with a 64-bit address pointing to where the Device
+        // Context Base Address Array is located.
+        self.setup_dcbaap()?;
+
+        // Define the Command Ring Dequeue Pointer by programming the
+        // Command Ring Control Register (5.4.5) with a 64-bit address pointing to
+        // the starting address of the first TRB of the Command Ring.
+        self.set_cmd_ring()?;
+        self.init_irq()?;
+        self.setup_scratchpads()?;
+        // At this point, the host controller is up and running and the Root Hub ports
+        // (5.4.8) will begin reporting device connects, etc., and system software may begin
+        // enumerating devices. System software may follow the procedures described in
+        // section 4.3, to enumerate attached devices.
+        self.start();
+        mb();
+
+        self.wait_for_running().await;
+
+        self.reset_ports().await;
 
         Ok(())
     }
@@ -223,16 +252,197 @@ impl Xhci {
     fn inited(&self) -> Result<&Inited> {
         self.inited.as_ref().ok_or(USBError::NotInitialized)
     }
+
+    fn inited_mut(&mut self) -> Result<&mut Inited> {
+        self.inited.as_mut().ok_or(USBError::NotInitialized)
+    }
+
+    pub fn disable_irq(&mut self) {
+        debug!("Disable interrupts");
+        self.reg.operational.usbcmd.update_volatile(|r| {
+            r.clear_interrupter_enable();
+        });
+    }
+
+    pub fn enable_irq(&mut self) {
+        debug!("Enable interrupts");
+        self.reg.operational.usbcmd.update_volatile(|r| {
+            r.set_interrupter_enable();
+        });
+    }
+
+    fn setup_dcbaap(&mut self) -> Result {
+        let dcbaa_addr = self.inited()?.dev_list.dcbaa.bus_addr();
+        debug!("DCBAAP: {dcbaa_addr:X}");
+        self.reg.operational.dcbaap.update_volatile(|r| {
+            r.set(dcbaa_addr);
+        });
+        Ok(())
+    }
+
+    fn set_cmd_ring(&mut self) -> Result {
+        let crcr = self.cmd.bus_addr();
+        let cycle = self.cmd.cycle();
+
+        debug!("CRCR: {crcr:?}");
+        self.reg.operational.crcr.update_volatile(|r| {
+            r.set_command_ring_pointer(crcr.into());
+            if cycle {
+                r.set_ring_cycle_state();
+            } else {
+                r.clear_ring_cycle_state();
+            }
+        });
+
+        Ok(())
+    }
+
+    fn init_irq(&mut self) -> Result {
+        let erstz = self.event_ring_info.erstz;
+        let erdp = self.event_ring_info.erdp;
+        let erstba = self.event_ring_info.erstba;
+
+        {
+            let mut ir0 = self.reg.interrupter_register_set.interrupter_mut(0);
+
+            debug!("ERDP: {erdp:x}");
+
+            ir0.erdp.update_volatile(|r| {
+                r.set_event_ring_dequeue_pointer(erdp);
+                r.set_dequeue_erst_segment_index(0);
+                r.clear_event_handler_busy();
+            });
+
+            debug!("ERSTZ: {erstz:x}");
+            ir0.erstsz.update_volatile(|r| r.set(erstz as _));
+            debug!("ERSTBA: {erstba:X}");
+            ir0.erstba.update_volatile(|r| {
+                r.set(erstba);
+            });
+
+            ir0.imod.update_volatile(|im| {
+                im.set_interrupt_moderation_interval(0x1F);
+                im.set_interrupt_moderation_counter(0);
+            });
+        }
+
+        {
+            debug!("Enabling primary interrupter.");
+            self.reg
+                .interrupter_register_set
+                .interrupter_mut(0)
+                .iman
+                .update_volatile(|im| {
+                    im.set_interrupt_enable();
+                    im.clear_interrupt_pending();
+                });
+        }
+
+        /* Set the HCD state before we enable the irqs */
+        self.reg.operational.usbcmd.update_volatile(|r| {
+            r.set_host_system_error_enable();
+            r.set_enable_wrap_event();
+        });
+        Ok(())
+    }
+
+    fn setup_scratchpads(&mut self) -> Result {
+        let scratchpad_buf_arr = {
+            let buf_count = {
+                let count = self
+                    .reg
+                    .capability
+                    .hcsparams2
+                    .read_volatile()
+                    .max_scratchpad_buffers();
+                debug!("Scratch buf count: {count}");
+                count
+            };
+            if buf_count == 0 {
+                return Ok(());
+            }
+            let scratchpad_buf_arr = ScratchpadBufferArray::new(buf_count as _, self.dma_mask)?;
+
+            let bus_addr = scratchpad_buf_arr.bus_addr();
+
+            self.inited_mut()?.dev_list.dcbaa.set(0, bus_addr);
+
+            debug!("Setting up {buf_count} scratchpads, at {bus_addr:#0x}");
+            scratchpad_buf_arr
+        };
+
+        self.scratchpad_buf_arr = Some(scratchpad_buf_arr);
+
+        Ok(())
+    }
+
+    fn start(&mut self) {
+        self.reg.operational.usbcmd.update_volatile(|r| {
+            r.set_run_stop();
+        });
+        debug!("Start run");
+    }
+
+    async fn wait_for_running(&mut self) {
+        SpinWhile::new(|| {
+            let sts = self.reg.operational.usbsts.read_volatile();
+            sts.hc_halted() || sts.controller_not_ready()
+        })
+        .await;
+
+        info!("Running");
+
+        self.reg
+            .doorbell
+            .write_volatile_at(0, doorbell::Register::default());
+    }
+
+    async fn reset_ports(&mut self) {
+        let regs = &mut self.reg;
+        let port_len = regs.port_register_set.len();
+
+        for i in 0..port_len {
+            debug!("Port {i} start reset",);
+            regs.port_register_set.update_volatile_at(i, |port| {
+                port.portsc.set_0_port_enabled_disabled();
+                port.portsc.set_port_reset();
+            });
+        }
+
+        // Wait for port reset completion with proper timing
+        for i in 0..port_len {
+            SpinWhile::new(|| {
+                let portsc = regs.port_register_set.read_volatile_at(i).portsc;
+                portsc.port_reset()
+            })
+            .await;
+
+            debug!("Port {i} reset completed, checking status");
+            let portsc = regs.port_register_set.read_volatile_at(i).portsc;
+            debug!(
+                "Port {i} status after reset: enabled={}, connected={}, speed={}",
+                portsc.port_enabled_disabled(),
+                portsc.current_connect_status(),
+                portsc.port_speed()
+            );
+        }
+    }
 }
 
 struct Inited {
     reg: XhciRegisters,
     dma_mask: usize,
+    dev_list: DeviceContextList,
 }
 
 impl Inited {
     fn new(max_slots: usize, reg: XhciRegisters, dma_mask: usize) -> Result<Self> {
-        Ok(Self { reg, dma_mask })
+        let dev_list = DeviceContextList::new(max_slots, dma_mask)?;
+        Ok(Self {
+            reg,
+            dma_mask,
+            dev_list,
+        })
     }
 }
 
