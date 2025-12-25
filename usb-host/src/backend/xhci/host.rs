@@ -3,7 +3,7 @@ use core::cell::UnsafeCell;
 use spin::RwLock;
 
 use mbarrier::{mb, wmb};
-use usb_if::{err::TransferError, host::USBError, transfer};
+use usb_if::{err::TransferError, host::USBError};
 use xhci::{
     ExtendedCapability,
     extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport},

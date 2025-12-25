@@ -1,18 +1,11 @@
-use alloc::collections::BTreeMap;
-use alloc::sync::Arc;
-use core::cell::UnsafeCell;
+use alloc::{collections::BTreeMap, sync::Arc};
 use xhci::ring::trb::event::TransferEvent;
 
 use crate::{
     BusAddr,
     backend::{
-        Dci,
         ty::{TransferReq, TransferRes},
-        xhci::{
-            reg::{XhciRegisters, XhciRegistersShared},
-            ring::SendRing,
-            sync::IrqLock,
-        },
+        xhci::{reg::XhciRegistersShared, ring::SendRing, sync::IrqLock},
     },
     queue::Finished,
 };
