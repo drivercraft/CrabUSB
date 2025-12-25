@@ -1,10 +1,9 @@
-use core::fmt::Display;
-
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 
 use mbarrier::mb;
 use spin::Mutex;
-use usb_if::descriptor::{DescriptorType, DeviceDescriptor};
+use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
 use usb_if::err::TransferError;
 use usb_if::host::{ControlSetup, USBError};
 use usb_if::transfer::{Recipient, Request, RequestType};
@@ -31,15 +30,28 @@ use crate::{
 pub struct DeviceInfo {
     slot_id: SlotId,
     desc: DeviceDescriptor,
+    config_desc: Vec<ConfigurationDescriptor>,
 }
 
 impl DeviceInfo {
-    pub fn new(slot_id: SlotId, desc: DeviceDescriptor) -> Self {
-        Self { slot_id, desc }
+    pub fn new(
+        slot_id: SlotId,
+        desc: DeviceDescriptor,
+        config_desc: &[ConfigurationDescriptor],
+    ) -> Self {
+        Self {
+            slot_id,
+            desc,
+            config_desc: config_desc.to_vec(),
+        }
     }
 
     pub fn slot_id(&self) -> SlotId {
         self.slot_id
+    }
+
+    pub fn configurations(&self) -> &[ConfigurationDescriptor] {
+        &self.config_desc
     }
 }
 
@@ -48,6 +60,10 @@ impl DeviceInfoOp for DeviceInfo {
 
     fn descriptor(&self) -> &DeviceDescriptor {
         &self.desc
+    }
+
+    fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
+        &self.config_desc
     }
 }
 
@@ -61,6 +77,7 @@ pub struct Device {
     bell: Arc<Mutex<SlotBell>>,
     dma_mask: usize,
     current_config_value: Option<u8>,
+    config_desc: Vec<ConfigurationDescriptor>,
 }
 
 impl Device {
@@ -89,6 +106,7 @@ impl Device {
             dma_mask,
             transfer_result_handler: host.transfer_result_handler.clone(),
             current_config_value: None,
+            config_desc: vec![],
         })
     }
 
@@ -108,6 +126,10 @@ impl Device {
         &self.desc
     }
 
+    pub fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
+        &self.config_desc
+    }
+
     pub(crate) async fn init(&mut self, host: &mut Xhci) -> Result {
         let ep = self.new_ep(Dci::CTRL)?;
         self.ctrl_ep = Some(EndpintControl::new(ep));
@@ -117,6 +139,11 @@ impl Device {
         trace!("Max packet size: {max_packet_size}");
         self.get_configuration().await?;
         self.read_descriptor().await?;
+
+        for i in 0..self.desc.num_configurations {
+            let config_desc = self.read_configuration_descriptor(i).await?;
+            self.config_desc.push(config_desc);
+        }
 
         Ok(())
     }
@@ -304,6 +331,27 @@ impl Device {
         let config_value = buff[0];
         self.current_config_value = Some(config_value);
         Ok(buff[0])
+    }
+
+    async fn read_configuration_descriptor(
+        &mut self,
+        index: u8,
+    ) -> Result<ConfigurationDescriptor> {
+        let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN]; // 配置描述符头部固定为9字节
+        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut header)
+            .await?;
+
+        let total_length = u16::from_le_bytes(header[2..4].try_into().unwrap()) as usize;
+        // 获取完整的配置描述符（包括接口和端点描述符）
+        let mut full_data = alloc::vec![0u8; total_length];
+        debug!("Reading configuration descriptor for index {index}, total length: {total_length}");
+        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut full_data)
+            .await?;
+
+        let parsed_config = ConfigurationDescriptor::parse(&full_data)
+            .ok_or(USBError::Other("config descriptor parse err".into()))?;
+
+        Ok(parsed_config)
     }
 }
 

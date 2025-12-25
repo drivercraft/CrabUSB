@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::fmt::Debug;
 use core::future::Future;
 
-use usb_if::descriptor::DeviceDescriptor;
+use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
 
 use crate::err::USBError;
 
@@ -41,6 +41,7 @@ pub trait EventHandlerOp: Send + Sync + 'static {
 pub trait DeviceInfoOp: Send + Debug + 'static {
     type Device: DeviceOp;
     fn descriptor(&self) -> &DeviceDescriptor;
+    fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
 }
 
 /// USB 设备特征（高层抽象）

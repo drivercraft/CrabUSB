@@ -44,7 +44,7 @@ pub struct Xhci {
     scratchpad_buf_arr: Option<ScratchpadBufferArray>,
     port_status: Vec<ProtStaus>,
     inited_devices: BTreeMap<SlotId, Device>,
-    pub(crate)  transfer_result_handler: TransferResultHandler,
+    pub(crate) transfer_result_handler: TransferResultHandler,
 }
 
 unsafe impl Send for Xhci {}
@@ -141,7 +141,7 @@ impl HostOp for Xhci {
             .values()
             .map(|d| {
                 let desc = d.descriptor().clone();
-                DeviceInfo::new(d.slot_id(), desc)
+                DeviceInfo::new(d.slot_id(), desc, d.configuration_descriptors())
             })
             .collect())
     }
