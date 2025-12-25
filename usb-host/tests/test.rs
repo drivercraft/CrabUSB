@@ -10,7 +10,7 @@ mod tests {
     use alloc::{boxed::Box, vec::Vec};
     use bare_test::{
         GetIrqConfig,
-        async_std::time,
+        async_std::time::{self, sleep},
         fdt_parser::{Fdt, Node, PciSpace, Status},
         globals::{PlatformInfoKind, global_val},
         irq::{IrqHandleResult, IrqInfo, IrqParam},
@@ -18,7 +18,11 @@ mod tests {
         platform::fdt::GetPciIrqConfig,
         println,
     };
-    use core::time::Duration;
+    use core::{
+        hint::spin_loop,
+        sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
+    };
     use crab_usb::{impl_trait, *};
     use futures::{FutureExt, future::BoxFuture};
     use log::info;
@@ -32,49 +36,7 @@ mod tests {
 
     use super::*;
 
-    const USB3_1_BASE: usize = 0xfc400000;
-    const DWC3_OFFSET: usize = 0xC100;
-    const USBDPPHY1_PMA_BASE: usize = 0xfed90000 + 0x8000;
-    const USBDPPHY1_GRF_BASE: usize = 0xfd5cc000;
-    const USB_GRF_BASE: usize = 0xfd5ac000;
-    const USB2PHY1_GRF_BASE: usize = 0xfd5d4000;
-    const CRU_BASE: usize = 0xfd7c0000;
-    const GPIO3_BASE: usize = 0xfec40000;
-
-    const GCTL: usize = 0x10;
-    const GUSB2PHYCFG: usize = 0x100;
-    const GUSB3PIPECTL: usize = 0x1C0;
-    const DCTL: usize = 0x04;
-
-    const GCTL_PRTCAPDIR_MASK: u32 = 3 << 12;
-    const GCTL_PRTCAPDIR_HOST: u32 = 1 << 12;
-    const GCTL_CORESOFTRESET: u32 = 1 << 11;
-    const GCTL_DSBLCLKGTNG: u32 = 1 << 0;
-
-    const GUSB2PHYCFG_PHYSOFTRST: u32 = 1 << 31;
-    const GUSB2PHYCFG_U2_FREECLK_EXISTS: u32 = 1 << 30;
-    const GUSB2PHYCFG_USBTRDTIM_MASK: u32 = 0xF << 10;
-    const GUSB2PHYCFG_USBTRDTIM_16BIT: u32 = 0x5 << 10;
-    const GUSB2PHYCFG_ENBLSLPM: u32 = 1 << 8;
-    const GUSB2PHYCFG_SUSPHY: u32 = 1 << 6;
-    const GUSB2PHYCFG_PHYIF: u32 = 1 << 3;
-
-    const GUSB3PIPECTL_PHYSOFTRST: u32 = 1 << 31;
-    const GUSB3PIPECTL_STARTRXDETU3RXDET: u32 = 1 << 23;
-    const GUSB3PIPECTL_DEPOCHANGE: u32 = 1 << 18;
-    const GUSB3PIPECTL_SUSPHY: u32 = 1 << 17;
-
-    const DCTL_CSFTRST: u32 = 1 << 30;
-
-    const PORTSC_PP_BIT: u32 = 1 << 9;
-    const PORTSC_RW_MASK: u32 = 0x0e00c3e0;
-
-    const GPIO_SWPORT_DR_L: usize = 0x0000;
-    const GPIO_SWPORT_DDR_L: usize = 0x0008;
-    const GPIO3_B7_BIT: u32 = 1 << 15;
-    const WRITE_MASK_BIT15: u32 = 1 << 31;
-    const SPIN_LOOP_PER_US: u32 = 10;
-    const SPIN_LOOP_PER_MS: u64 = 10000;
+    static PROT_CHANGED: AtomicBool = AtomicBool::new(false);
 
     #[test]
     fn test_all() {
@@ -90,7 +52,16 @@ mod tests {
             info!("usb host init ok");
             info!("usb cmd test");
 
-            // let ls = host.device_list().await.unwrap();
+            let mut timeout = 100;
+            while !PROT_CHANGED.load(Ordering::Acquire) {
+                sleep(Duration::from_millis(100)).await;
+                timeout -= 1;
+                if timeout == 0 {
+                    panic!("timeout waiting for port change");
+                }
+            }
+            info!("port changed detected");
+            let ls = host.probe_devices().await.unwrap();
 
             // for mut info in ls {
             //     info!("{info}");
@@ -374,7 +345,14 @@ mod tests {
             }
             .register_builder({
                 move |_irq| {
-                    handle.handle_event();
+                    let event = handle.handle_event();
+                    match event {
+                        Event::PortChange { .. } => {
+                            PROT_CHANGED.store(true, Ordering::Release);
+                        }
+                        _ => {}
+                    }
+
                     IrqHandleResult::Handled
                 }
             })

@@ -15,11 +15,13 @@ pub use usb_if::transfer::*;
 mod _macros;
 
 pub(crate) mod backend;
+pub mod device;
 pub mod err;
 mod host;
 pub(crate) mod queue;
 
 pub use host::*;
+pub use backend::ty::Event;
 
 #[macro_use]
 mod osal;

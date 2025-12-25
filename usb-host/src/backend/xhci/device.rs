@@ -1,4 +1,33 @@
-use crate::backend::ty::DeviceOp;
+use usb_if::descriptor::DeviceDescriptor;
+
+use crate::backend::{
+    ty::{DeviceInfoOp, DeviceOp},
+    xhci::SlotId,
+};
+
+#[derive(Debug, Clone)]
+pub struct DeviceInfo {
+    slot_id: SlotId,
+    desc: DeviceDescriptor,
+}
+
+impl DeviceInfo {
+    pub fn new(slot_id: SlotId, desc: DeviceDescriptor) -> Self {
+        Self { slot_id, desc }
+    }
+
+    pub fn slot_id(&self) -> SlotId {
+        self.slot_id
+    }
+}
+
+impl DeviceInfoOp for DeviceInfo {
+    type Device = Device;
+
+    fn descriptor(&self) -> &DeviceDescriptor {
+        &self.desc
+    }
+}
 
 pub struct Device {}
 

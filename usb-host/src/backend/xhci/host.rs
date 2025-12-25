@@ -1,8 +1,8 @@
+use alloc::{collections::BTreeMap, vec::Vec};
 use core::cell::UnsafeCell;
 
-use alloc::vec::Vec;
 use mbarrier::mb;
-use usb_if::host::USBError;
+use usb_if::{descriptor::DeviceDescriptor, host::USBError};
 use xhci::{
     ExtendedCapability,
     extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport},
@@ -15,7 +15,9 @@ use super::reg::{MemMapper, XhciRegisters};
 use crate::backend::{
     ty::{Event, EventHandlerOp},
     xhci::{
+        SlotId,
         context::{DeviceContextList, ScratchpadBufferArray},
+        device::DeviceInfo,
         event::{EventRing, EventRingInfo},
         ring::SendRing,
     },
@@ -32,6 +34,9 @@ pub struct Xhci {
     event_handler: Option<EventHandler>,
     event_ring_info: EventRingInfo,
     scratchpad_buf_arr: Option<ScratchpadBufferArray>,
+    port_status: Vec<ProtStaus>,
+    descriptors: BTreeMap<SlotId, DeviceInfo>,
+    inited_devices: BTreeMap<SlotId, Device>,
 }
 
 unsafe impl Send for Xhci {}
@@ -54,12 +59,15 @@ impl Xhci {
             event_handler: Some(EventHandler::new(reg, cmd_finished, event_ring)),
             event_ring_info,
             scratchpad_buf_arr: None,
+            port_status: vec![],
+            descriptors: BTreeMap::new(),
+            inited_devices: BTreeMap::new(),
         })
     }
 }
 
 impl HostOp for Xhci {
-    type Device = Device;
+    type DeviceInfo = DeviceInfo;
     type EventHandler = EventHandler;
 
     async fn init(&mut self) -> Result {
@@ -106,21 +114,24 @@ impl HostOp for Xhci {
         Ok(())
     }
 
-    async fn device_list(&self) -> Result<Vec<usb_if::descriptor::DeviceDescriptor>> {
-        todo!()
-    }
+    async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>> {
+        for port_idx in self.need_init_port_idxs().collect::<Vec<usize>>() {
+            self.new_device(port_idx).await?;
+        }
 
-    async fn open_device(
-        &mut self,
-        desc: &usb_if::descriptor::DeviceDescriptor,
-    ) -> Result<Self::Device> {
-        todo!()
+        Ok(self.descriptors.values().cloned().collect())
     }
 
     fn create_event_handler(&mut self) -> Self::EventHandler {
         self.event_handler
             .take()
             .expect("Event handler can only be created once")
+    }
+
+    async fn open_device(&mut self, dev: &DeviceInfo) -> Result<Device> {
+        self.inited_devices
+            .remove(&dev.slot_id())
+            .ok_or(USBError::NotFound)
     }
 }
 
@@ -406,12 +417,26 @@ impl Xhci {
         let port_len = regs.port_register_set.len();
 
         for i in 0..port_len {
+            self.port_status.push(ProtStaus::Uninit);
             debug!("Port {i} start reset",);
             regs.port_register_set.update_volatile_at(i, |port| {
                 port.portsc.set_0_port_enabled_disabled();
                 port.portsc.set_port_reset();
             });
         }
+    }
+
+    fn need_init_port_idxs(&self) -> impl Iterator<Item = usize> {
+        (0..self.reg.port_register_set.len()).filter(move |&i| {
+            let portsc = &self.reg.port_register_set.read_volatile_at(i).portsc;
+            portsc.port_enabled_disabled()
+                && portsc.current_connect_status()
+                && self.port_status[i] == ProtStaus::Uninit
+        })
+    }
+
+    async fn new_device(&mut self, port_idx: usize) -> Result {
+        Ok(())
     }
 }
 
@@ -493,4 +518,10 @@ impl EventHandlerOp for EventHandler {
         }
         res
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProtStaus {
+    Uninit,
+    Inited,
 }
