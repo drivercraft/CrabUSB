@@ -1,6 +1,6 @@
 use num_enum::{FromPrimitive, IntoPrimitive};
 
-mod sync;
+pub mod sync;
 pub mod wait;
 
 #[repr(u8)]

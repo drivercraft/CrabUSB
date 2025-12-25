@@ -6,7 +6,7 @@ use core::{
 
 use xhci::accessor::Mapper;
 
-use crate::err::Result;
+use crate::backend::xhci::SlotId;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MemMapper;
@@ -86,5 +86,22 @@ impl Drop for DisableIrqGuard {
                 r.set_interrupter_enable();
             });
         }
+    }
+}
+
+pub struct SlotBell {
+    slot_id: SlotId,
+    reg: XhciRegisters,
+}
+
+impl SlotBell {
+    pub fn new(slot_id: SlotId, reg: XhciRegisters) -> Self {
+        Self { slot_id, reg }
+    }
+
+    pub fn ring(&mut self, bell: xhci::registers::doorbell::Register) {
+        self.reg
+            .doorbell
+            .write_volatile_at(self.slot_id.as_usize(), bell);
     }
 }
