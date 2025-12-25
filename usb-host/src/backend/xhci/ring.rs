@@ -180,4 +180,12 @@ impl<R> SendRing<R> {
     pub fn finished_handle(&self) -> Finished<R> {
         self.finished.clone()
     }
+
+    pub fn bus_addr(&self) -> BusAddr {
+        self.ring.bus_addr()
+    }
+
+    pub fn cycle(&self) -> bool {
+        self.ring.cycle
+    }
 }

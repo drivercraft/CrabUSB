@@ -62,4 +62,18 @@ impl EventRing {
     pub fn len(&self) -> usize {
         self.ste.len()
     }
+
+    pub fn info(&self) -> EventRingInfo {
+        EventRingInfo {
+            erstz: self.len() as _,
+            erdp: self.erdp(),
+            erstba: self.erstba(),
+        }
+    }
+}
+
+pub struct EventRingInfo {
+    pub erstz: u16,
+    pub erdp: u64,
+    pub erstba: u64,
 }

@@ -1,9 +1,13 @@
+mod context;
+mod def;
 mod device;
+mod event;
 mod host;
 mod reg;
-mod transfer;
 mod ring;
-mod event;
+mod transfer;
+
+pub(crate) use def::*;
 
 pub use device::Device;
 pub use host::Xhci;
