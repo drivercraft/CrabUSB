@@ -3,7 +3,7 @@ use core::cell::UnsafeCell;
 use spin::RwLock;
 
 use mbarrier::{mb, wmb};
-use usb_if::{err::TransferError, host::USBError};
+use usb_if::{err::TransferError, host::USBError, transfer};
 use xhci::{
     ExtendedCapability,
     extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport},
@@ -13,7 +13,11 @@ use xhci::{
 
 use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
-use crate::{Mmio, backend::ty::HostOp, err::Result};
+use crate::{
+    Mmio,
+    backend::{ty::HostOp, xhci::transfer::TransferResultHandler},
+    err::Result,
+};
 use crate::{backend::PortId, osal::SpinWhile};
 use crate::{backend::xhci::reg::SlotBell, queue::Finished};
 use crate::{
@@ -40,6 +44,7 @@ pub struct Xhci {
     scratchpad_buf_arr: Option<ScratchpadBufferArray>,
     port_status: Vec<ProtStaus>,
     inited_devices: BTreeMap<SlotId, Device>,
+    pub(crate)  transfer_result_handler: TransferResultHandler,
 }
 
 unsafe impl Send for Xhci {}
@@ -54,12 +59,22 @@ impl Xhci {
         let reg = XhciRegisters::new(mmio);
         let event_ring_info = event_ring.info();
 
+        let reg_shared = Arc::new(RwLock::new(reg.clone()));
+
+        let transfer_result_handler = TransferResultHandler::new(reg_shared.clone());
+
         Ok(Xhci {
-            reg: Arc::new(RwLock::new(reg.clone())),
+            reg: reg_shared,
             dma_mask,
             cmd,
             dev_ctx: None,
-            event_handler: Some(EventHandler::new(reg, cmd_finished, event_ring)),
+            transfer_result_handler: transfer_result_handler.clone(),
+            event_handler: Some(EventHandler::new(
+                reg,
+                cmd_finished,
+                event_ring,
+                transfer_result_handler,
+            )),
             event_ring_info,
             scratchpad_buf_arr: None,
             port_status: vec![],
@@ -530,6 +545,7 @@ pub struct EventHandler {
     reg: UnsafeCell<XhciRegisters>,
     cmd_finished: Finished<CommandCompletion>,
     event_ring: UnsafeCell<EventRing>,
+    transfer_result_handler: TransferResultHandler,
 }
 
 unsafe impl Send for EventHandler {}
@@ -540,11 +556,13 @@ impl EventHandler {
         reg: XhciRegisters,
         cmd_finished: Finished<CommandCompletion>,
         event_ring: EventRing,
+        transfer_result_handler: TransferResultHandler,
     ) -> Self {
         Self {
             reg: UnsafeCell::new(reg),
             cmd_finished,
             event_ring: UnsafeCell::new(event_ring),
+            transfer_result_handler,
         }
     }
 
@@ -574,7 +592,15 @@ impl EventHandler {
                         port: st.port_id() as _,
                     };
                 }
-                Allowed::TransferEvent(c) => {}
+                Allowed::TransferEvent(c) => {
+                    let slot_id = c.slot_id();
+                    let ep_id = c.endpoint_id();
+                    let ptr = c.trb_pointer();
+                    unsafe {
+                        self.transfer_result_handler
+                            .set_finished(slot_id, ep_id, ptr.into(), c)
+                    };
+                }
                 _ => {
                     // debug!("unhandled event {allowed:?}");
                 }

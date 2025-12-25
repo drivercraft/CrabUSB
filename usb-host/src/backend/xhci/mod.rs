@@ -6,7 +6,7 @@ mod event;
 mod host;
 mod reg;
 mod ring;
-// mod sync;
+mod sync;
 mod transfer;
 
 pub(crate) use def::*;

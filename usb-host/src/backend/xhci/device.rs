@@ -1,3 +1,5 @@
+use core::mem::MaybeUninit;
+
 use alloc::sync::Arc;
 
 use mbarrier::mb;
@@ -5,8 +7,10 @@ use spin::Mutex;
 use usb_if::descriptor::DeviceDescriptor;
 use xhci::ring::trb::command;
 
+use crate::backend::Dci;
 use crate::backend::xhci::endpoint::EndpointRaw;
 use crate::backend::xhci::reg::SlotBell;
+use crate::backend::xhci::transfer::TransferResultHandler;
 use crate::backend::xhci::{
     append_port_to_route_string, parse_default_max_packet_size_from_port_speed,
 };
@@ -49,8 +53,10 @@ pub struct Device {
     port_id: PortId,
     ctx: ContextData,
     desc: DeviceDescriptor,
-    ctrl_ep: EndpointRaw,
+    ctrl_ep: Option<EndpointRaw>,
+    transfer_result_handler: TransferResultHandler,
     bell: Arc<Mutex<SlotBell>>,
+    dma_mask: usize,
 }
 
 impl Device {
@@ -68,15 +74,16 @@ impl Device {
         let bell = Arc::new(Mutex::new(bell));
 
         let desc = unsafe { core::mem::zeroed() };
-        let ctrl_ep = EndpointRaw::new(slot_id, crate::backend::Dci::CTRL, dma_mask, bell.clone())?;
 
         Ok(Self {
             id: slot_id,
             port_id: port,
             ctx,
             bell,
-            ctrl_ep,
+            ctrl_ep: None,
             desc,
+            dma_mask,
+            transfer_result_handler: host.transfer_result_handler.clone(),
         })
     }
 
@@ -84,11 +91,21 @@ impl Device {
         self.id
     }
 
+    fn new_ep(&mut self, dci: Dci) -> Result<EndpointRaw> {
+        let ep = EndpointRaw::new(self.id, dci, self.dma_mask, self.bell.clone())?;
+        self.transfer_result_handler
+            .register_queue(self.id.as_u8(), dci.as_u8(), ep.ring());
+
+        Ok(ep)
+    }
+
     pub fn descriptor(&self) -> &DeviceDescriptor {
         &self.desc
     }
 
     pub(crate) async fn init(&mut self, host: &mut Xhci) -> Result {
+        let ep = self.new_ep(Dci::CTRL)?;
+        self.ctrl_ep = Some(ep);
         self.address(host).await?;
         Ok(())
     }
@@ -100,7 +117,7 @@ impl Device {
 
         let route_string = append_port_to_route_string(0, 0);
 
-        let ctrl_ring_addr = self.ctrl_ep.bus_addr();
+        let ctrl_ring_addr = self.ctrl_ep.as_ref().unwrap().bus_addr();
         // ctrl dci
         let dci = 1;
         trace!(

@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use spin::Mutex;
 use usb_if::err::TransferError;
-use xhci::registers::doorbell;
+use xhci::{registers::doorbell, ring::trb::event::TransferEvent};
 
 use crate::{
     BusAddr,
@@ -15,7 +15,7 @@ use crate::{
 pub(crate) struct EndpointRaw {
     dci: Dci,
     slot: SlotId,
-    pub ring: SendRing<TransferError>,
+    pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
 }
 
@@ -49,7 +49,7 @@ impl EndpointRaw {
         self.bell.lock().ring(bell);
     }
 
-    pub fn ring(&self) -> &SendRing<TransferError> {
+    pub fn ring(&self) -> &SendRing<TransferEvent> {
         &self.ring
     }
 }
