@@ -33,8 +33,14 @@ pub trait HostOp {
     fn create_event_handler(&mut self) -> Self::EventHandler;
 }
 
+#[derive(Debug, Clone)]
+pub enum Event {
+    Nothing,
+    PortChange { port: u8 },
+}
+
 pub trait EventHandlerOp: Send + Sync + 'static {
-    fn handle_event(&self);
+    fn handle_event(&self) -> Event;
 }
 
 /// USB 设备特征（高层抽象）
