@@ -66,26 +66,26 @@ mod tests {
             for mut info in ls {
                 info!("{info:#x?}");
 
-                //     let mut interface_desc = None;
-                //     let mut config_desc: Option<ConfigurationDescriptor> = None;
-                //     for config in &info.configurations {
-                //         info!("config: {:?}", config.configuration_value);
+                let mut interface_desc = None;
+                let mut config_desc: Option<ConfigurationDescriptor> = None;
+                for config in info.configurations() {
+                    info!("config: {:?}", config.configuration_value);
 
-                //         for interface in &config.interfaces {
-                //             for alt in &interface.alt_settings {
-                //                 info!(
-                //                     "interface[{}.{}] class {:?}",
-                //                     alt.interface_number,
-                //                     alt.alternate_setting,
-                //                     alt.class()
-                //                 );
-                //                 if interface_desc.is_none() {
-                //                     interface_desc = Some(alt.clone());
-                //                     config_desc = Some(config.clone());
-                //                 }
-                //             }
-                //         }
-                //     }
+                    for interface in &config.interfaces {
+                        for alt in &interface.alt_settings {
+                            info!(
+                                "interface[{}.{}] class {:?}",
+                                alt.interface_number,
+                                alt.alternate_setting,
+                                alt.class()
+                            );
+                            if interface_desc.is_none() {
+                                interface_desc = Some(alt.clone());
+                                config_desc = Some(config.clone());
+                            }
+                        }
+                    }
+                }
                 //     let interface_desc = interface_desc.unwrap();
                 //     let config_desc = config_desc.unwrap();
 
@@ -152,7 +152,7 @@ mod tests {
                 //     //     let data = &buff[..n];
 
                 //     //     info!("bulk in data: {data:?}",);
-                //     // }
+                // }
 
                 // drop(device);
             }
