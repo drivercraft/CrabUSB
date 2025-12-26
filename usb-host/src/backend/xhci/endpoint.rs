@@ -18,7 +18,7 @@ use crate::{
     BusAddr,
     backend::{
         Dci,
-        xhci::{DirectionExt, SlotId, reg::SlotBell, ring::SendRing},
+        xhci::{DirectionExt, reg::SlotBell, ring::SendRing},
     },
     err::ConvertXhciError,
 };
