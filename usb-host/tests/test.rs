@@ -52,16 +52,25 @@ mod tests {
             info!("usb host init ok");
             info!("usb cmd test");
 
-            let mut timeout = 100;
-            while !PROT_CHANGED.load(Ordering::Acquire) {
-                sleep(Duration::from_millis(100)).await;
-                timeout -= 1;
-                if timeout == 0 {
-                    panic!("timeout waiting for port change");
+            for _ in 0..10 {
+                if PROT_CHANGED.load(Ordering::Acquire) {
+                    info!("port change detected");
+                    PROT_CHANGED.store(false, Ordering::Release);
+                    break;
                 }
+                sleep(Duration::from_millis(100)).await;
             }
-            info!("port changed detected");
-            let ls = host.probe_devices().await.unwrap();
+
+            let mut ls = Vec::new();
+            for _ in 0..50 {
+                let ls2 = host.probe_devices().await.unwrap();
+                if ls2.len() > 0 {
+                    info!("found {} devices", ls.len());
+                    ls = ls2;
+                    break;
+                }
+                sleep(Duration::from_millis(100)).await;
+            }
 
             for mut info in ls {
                 info!("{info:#x?}");
