@@ -25,7 +25,6 @@ use crate::{
 
 pub(crate) struct EndpointRaw {
     dci: Dci,
-    slot: SlotId,
     pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
 }
@@ -34,20 +33,10 @@ unsafe impl Send for EndpointRaw {}
 unsafe impl Sync for EndpointRaw {}
 
 impl EndpointRaw {
-    pub fn new(
-        slot: SlotId,
-        dci: Dci,
-        dma_mask: usize,
-        bell: Arc<Mutex<SlotBell>>,
-    ) -> crate::err::Result<Self> {
+    pub fn new(dci: Dci, dma_mask: usize, bell: Arc<Mutex<SlotBell>>) -> crate::err::Result<Self> {
         let ring = SendRing::new(dma_api::Direction::Bidirectional, dma_mask)?;
 
-        Ok(Self {
-            dci,
-            slot,
-            ring,
-            bell,
-        })
+        Ok(Self { dci, ring, bell })
     }
 
     pub fn bus_addr(&self) -> BusAddr {

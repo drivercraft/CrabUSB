@@ -65,7 +65,7 @@ mod tests {
             for _ in 0..50 {
                 let ls2 = host.probe_devices().await.unwrap();
                 if ls2.len() > 0 {
-                    info!("found {} devices", ls.len());
+                    info!("found {} devices", ls2.len());
                     ls = ls2;
                     break;
                 }
@@ -95,18 +95,18 @@ mod tests {
                         }
                     }
                 }
-                //     let interface_desc = interface_desc.unwrap();
-                //     let config_desc = config_desc.unwrap();
+                let interface_desc = interface_desc.unwrap();
+                let config_desc = config_desc.unwrap();
 
-                //     let mut device = info.open().await.unwrap();
+                let mut device = host.open_device(&info).await.unwrap();
 
-                //     info!("open device ok: {device:?}");
+                info!("open device ok: {device:?}");
 
-                //     device
-                //         .set_configuration(config_desc.configuration_value)
-                //         .await
-                //         .unwrap();
-                //     info!("set configuration ok");
+                device
+                    .set_configuration(config_desc.configuration_value)
+                    .await
+                    .unwrap();
+                info!("set configuration ok");
 
                 //     // let config_value = device.current_configuration_descriptor().await.unwrap();
                 //     // info!("get configuration: {config_value:?}");

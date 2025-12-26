@@ -134,6 +134,7 @@ impl HostOp for Xhci {
     async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>> {
         for port_idx in self.need_init_port_idxs().collect::<Vec<usize>>() {
             self.new_device(port_idx).await?;
+            self.port_status[port_idx] = ProtStaus::Inited;
         }
 
         Ok(self
