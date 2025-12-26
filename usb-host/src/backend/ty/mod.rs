@@ -50,10 +50,17 @@ pub trait DeviceOp: Send + 'static {
     type Res: TransferRes;
     // type Ep: Endpint<Req = Self::Req, Res = Self::Res>;
 
+    fn descriptor(&self) -> &DeviceDescriptor;
+
     fn claim_interface(
         &mut self,
         interface: u8,
         alternate: u8,
+    ) -> impl Future<Output = Result<(), USBError>> + Send;
+
+    fn set_configuration(
+        &mut self,
+        configuration_value: u8,
     ) -> impl Future<Output = Result<(), USBError>> + Send;
 
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, USBError>;

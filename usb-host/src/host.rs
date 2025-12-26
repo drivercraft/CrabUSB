@@ -2,13 +2,12 @@ use alloc::vec::Vec;
 
 use crate::Mmio;
 use crate::backend::ty::*;
+use crate::device::*;
 use crate::err::Result;
 
 pub use crate::backend::xhci::Xhci;
 
 /// USB 主机控制器
-///
-/// 提供线程安全的 USB 主机控制器访问，支持事件处理
 pub struct USBHost<B> {
     backend: B,
 }
@@ -30,13 +29,23 @@ impl<B: HostOp> USBHost<B> {
         self.backend.init().await
     }
 
-    pub async fn probe_devices(&mut self) -> Result<Vec<B::DeviceInfo>> {
-        self.backend.probe_devices().await
+    pub async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo<B>>> {
+        self.backend.probe_devices().await.map(|infos| {
+            infos
+                .into_iter()
+                .map(|info| DeviceInfo { inner: info })
+                .collect()
+        })
     }
 
     pub fn create_event_handler(&mut self) -> EventHandler<B> {
         let handler = self.backend.create_event_handler();
         EventHandler { handler }
+    }
+
+    pub async fn open_device(&mut self, dev: &DeviceInfo<B>) -> Result<Device<B>> {
+        let device = self.backend.open_device(&dev.inner).await?;
+        Ok(Device { inner: device })
     }
 }
 

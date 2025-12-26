@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use dma_api::{DBox, DVec};
 use xhci::context::{Device32Byte, Device64Byte, Input32Byte, Input64Byte, InputHandler};
 
-use crate::{Xhci, backend::xhci::SlotId, err::*};
+use crate::{backend::xhci::SlotId, err::*};
 
 pub struct DeviceContextList {
     pub dcbaa: DVec<u64>,
@@ -54,6 +54,24 @@ impl ContextData {
             }
             ContextData::Context64(ctx) => {
                 let mut input = Input64Byte::new_64byte();
+                f(&mut input);
+                ctx.input.write(input);
+            }
+        }
+    }
+
+    pub fn with_input<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut dyn InputHandler),
+    {
+        match self {
+            ContextData::Context32(ctx) => {
+                let mut input = ctx.input.read();
+                f(&mut input);
+                ctx.input.write(input);
+            }
+            ContextData::Context64(ctx) => {
+                let mut input = ctx.input.read();
                 f(&mut input);
                 ctx.input.write(input);
             }

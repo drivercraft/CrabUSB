@@ -115,7 +115,7 @@ impl Device {
     }
 
     fn new_ep(&mut self, dci: Dci) -> Result<EndpointRaw> {
-        let ep = EndpointRaw::new(self.id, dci, self.dma_mask, self.bell.clone())?;
+        let ep = EndpointRaw::new(dci, self.dma_mask, self.bell.clone())?;
         self.transfer_result_handler
             .register_queue(self.id.as_u8(), dci.as_u8(), ep.ring());
 
@@ -364,6 +364,34 @@ impl DeviceOp for Device {
 
     async fn claim_interface(&mut self, interface: u8, alternate: u8) -> Result {
         todo!()
+    }
+
+    fn descriptor(&self) -> &DeviceDescriptor {
+        &self.desc
+    }
+
+    async fn set_configuration(&mut self, configuration_value: u8) -> Result {
+        self.control_out(
+            ControlSetup {
+                request_type: RequestType::Standard,
+                recipient: Recipient::Device,
+                request: Request::SetConfiguration,
+                value: configuration_value as u16,
+                index: 0,
+            },
+            &[],
+        )
+        .await?;
+
+        self.current_config_value = Some(configuration_value);
+
+        self.ctx.with_input(|input| {
+            let c = input.control_mut();
+            c.set_configuration_value(configuration_value);
+        });
+
+        debug!("Device configuration set to {configuration_value}");
+        Ok(())
     }
 
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, usb_if::host::USBError> {
