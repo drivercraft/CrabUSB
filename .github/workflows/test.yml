@@ -23,30 +23,25 @@ jobs:
         with:
           version: ${{ env.qemu-version }}
           arch_list: aarch64
-      - uses: awalsh128/cache-apt-pkgs-action@latest
+      - name: Set up libudev
+        uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: libudev-dev
           version: 1.0
-      - uses: awalsh128/cache-apt-pkgs-action@latest
+
+      - name: Set up ffmpeg
+        uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev libavcodec-dev
       - name: Build Workspace
         run: cargo build --workspace
-      - run: cargo install ostool
-      - name: Test no-std
-        run: cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat -- -c qemu.toml --show-output
+      - name: Build Workspace (no-std)
+        run: cargo build --target aarch64-unknown-none-softfloat --workspace --exclude uvc-frame-parser --exclude test_libusb_uvc
 
-      - name: Build usb-keyboard
-        working-directory: usb-device/hid/keyboard
-        run: cargo build
-      - name: Build usb-keyboard (no-std)
-        working-directory: usb-device/hid/keyboard
-        run: cargo build --target aarch64-unknown-none-softfloat
       - name: Build usb-keyboard example
         working-directory: usb-device/hid/keyboard
         run: cargo build --example keyboard --features=crab-usb/libusb
 
-      - name: Build Workspace (no-std)
-        run: cargo build --target aarch64-unknown-none-softfloat --workspace --exclude uvc-frame-parser --exclude test_libusb_uvc
-
-
+      - run: cargo install ostool
+      - name: Test no-std
+        run: cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat -- -c qemu.toml --show-output
