@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use crab_uvc::{UncompressedFormat, VideoFormat, VideoFormatType};
+use ffmpeg_next::{Stream, codec::Context};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
@@ -209,7 +210,7 @@ impl Parser {
                 let output_path = output_dir.join("output.mp4");
                 let mut output_ctx = output(output_path.to_str().unwrap())?;
                 let mut output_stream = output_ctx.add_stream(encoder::find(codec::Id::H264))?;
-                let mut encoder = output_stream.codec().encoder().video()?;
+                let mut encoder = codec(&output_stream)?.encoder().video()?;
 
                 // 设置编码器参数
                 encoder.set_width(width as u32);
@@ -218,7 +219,7 @@ impl Parser {
                 encoder.set_time_base(Rational(1, (fps as i32).max(1)));
                 encoder.set_frame_rate(Some(Rational((fps as i32).max(1), 1)));
 
-                let mut encoder = encoder.open_as(encoder::find(codec::Id::H264))?;
+                let encoder = encoder.open_as(encoder::find(codec::Id::H264))?;
                 output_stream.set_parameters(&encoder);
 
                 output_ctx.write_header()?;
@@ -297,7 +298,7 @@ impl Parser {
                 let output_path = output_dir.join("output_mjpeg.mp4");
                 let mut output_ctx = output(output_path.to_str().unwrap())?;
                 let mut output_stream = output_ctx.add_stream(encoder::find(codec::Id::H264))?;
-                let mut encoder = output_stream.codec().encoder().video()?;
+                let mut encoder = codec(&output_stream)?.encoder().video()?;
 
                 // 设置编码器参数
                 encoder.set_width(width as u32);
@@ -340,7 +341,7 @@ impl Parser {
                                 let mut decoder = {
                                     let input_stream =
                                         input_ctx.stream(input_stream_index).unwrap();
-                                    input_stream.codec().decoder().video()?
+                                    codec(&input_stream)?.decoder().video()?
                                 };
 
                                 for (stream, packet) in input_ctx.packets() {
@@ -701,14 +702,14 @@ impl Parser {
                 };
                 let mut decoder = {
                     let input_stream = input_ctx.stream(input_stream_index).unwrap();
-                    input_stream.codec().decoder().video()?
+                    codec(&input_stream)?.decoder().video()?
                 };
 
                 // 创建输出上下文
                 let mut output_ctx = output(&png_path)?;
                 let mut output_stream = output_ctx
                     .add_stream(ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::PNG))?;
-                let mut encoder = output_stream.codec().encoder().video()?;
+                let mut encoder = codec(&output_stream)?.encoder().video()?;
 
                 // 设置编码器参数
                 encoder.set_width(decoder.width());
@@ -788,14 +789,14 @@ impl Parser {
 
                 let mut decoder = {
                     let input_stream = input_ctx.stream(input_stream_index).unwrap();
-                    input_stream.codec().decoder().video()?
+                    codec(&input_stream)?.decoder().video()?
                 };
 
                 // 创建输出上下文
                 let output_path = output_dir.join("output_from_images.mp4");
                 let mut output_ctx = output(output_path.to_str().unwrap())?;
                 let mut output_stream = output_ctx.add_stream(encoder::find(codec::Id::H264))?;
-                let mut encoder = output_stream.codec().encoder().video()?;
+                let mut encoder = codec(&output_stream)?.encoder().video()?;
 
                 // 设置编码器参数
                 encoder.set_width(decoder.width());
@@ -1083,6 +1084,10 @@ fn convert_yuy2_to_png(
 
     rgb_buffer.save(output_path)?;
     Ok(())
+}
+
+fn codec(stream: &Stream) -> Result<Context, ffmpeg_next::Error> {
+    Context::from_parameters(stream.parameters())
 }
 
 #[cfg(test)]
