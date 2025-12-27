@@ -1,10 +1,13 @@
 #![cfg_attr(target_os = "none", no_std)]
 
+extern crate alloc;
+use alloc::{string::ToString, vec::Vec};
+
 use crab_usb::{
     Class, Device, DeviceInfo, Direction, EndpointInterruptIn, EndpointType, Interface,
     TransferError, err::USBError,
 };
-use keyboard_types::{Key, Modifiers};
+use keyboard_types::{Key, Modifiers, NamedKey};
 use log::debug;
 
 /// 键盘事件类型
@@ -59,10 +62,10 @@ fn scancode_to_key(scancode: u8) -> Option<Key> {
         0x27 => Some(Key::Character("0".to_string())),
 
         // 特殊键
-        0x28 => Some(Key::Enter),
-        0x29 => Some(Key::Escape),
-        0x2A => Some(Key::Backspace),
-        0x2B => Some(Key::Tab),
+        0x28 => Some(Key::Named(NamedKey::Enter)),
+        0x29 => Some(Key::Named(NamedKey::Escape)),
+        0x2A => Some(Key::Named(NamedKey::Backspace)),
+        0x2B => Some(Key::Named(NamedKey::Tab)),
         0x2C => Some(Key::Character(" ".to_string())), // Space
         0x2D => Some(Key::Character("-".to_string())),
         0x2E => Some(Key::Character("=".to_string())),
@@ -77,36 +80,36 @@ fn scancode_to_key(scancode: u8) -> Option<Key> {
         0x38 => Some(Key::Character("/".to_string())),
 
         // 功能键
-        0x3A => Some(Key::F1),
-        0x3B => Some(Key::F2),
-        0x3C => Some(Key::F3),
-        0x3D => Some(Key::F4),
-        0x3E => Some(Key::F5),
-        0x3F => Some(Key::F6),
-        0x40 => Some(Key::F7),
-        0x41 => Some(Key::F8),
-        0x42 => Some(Key::F9),
-        0x43 => Some(Key::F10),
-        0x44 => Some(Key::F11),
-        0x45 => Some(Key::F12),
+        0x3A => Some(Key::Named(NamedKey::F1)),
+        0x3B => Some(Key::Named(NamedKey::F2)),
+        0x3C => Some(Key::Named(NamedKey::F3)),
+        0x3D => Some(Key::Named(NamedKey::F4)),
+        0x3E => Some(Key::Named(NamedKey::F5)),
+        0x3F => Some(Key::Named(NamedKey::F6)),
+        0x40 => Some(Key::Named(NamedKey::F7)),
+        0x41 => Some(Key::Named(NamedKey::F8)),
+        0x42 => Some(Key::Named(NamedKey::F9)),
+        0x43 => Some(Key::Named(NamedKey::F10)),
+        0x44 => Some(Key::Named(NamedKey::F11)),
+        0x45 => Some(Key::Named(NamedKey::F12)),
 
         // 方向键
-        0x4F => Some(Key::ArrowRight),
-        0x50 => Some(Key::ArrowLeft),
-        0x51 => Some(Key::ArrowDown),
-        0x52 => Some(Key::ArrowUp),
+        0x4F => Some(Key::Named(NamedKey::ArrowRight)),
+        0x50 => Some(Key::Named(NamedKey::ArrowLeft)),
+        0x51 => Some(Key::Named(NamedKey::ArrowDown)),
+        0x52 => Some(Key::Named(NamedKey::ArrowUp)),
 
         // 其他常用键
-        0x39 => Some(Key::CapsLock),
-        0x46 => Some(Key::PrintScreen),
-        0x47 => Some(Key::ScrollLock),
-        0x48 => Some(Key::Pause),
-        0x49 => Some(Key::Insert),
-        0x4A => Some(Key::Home),
-        0x4B => Some(Key::PageUp),
-        0x4C => Some(Key::Delete),
-        0x4D => Some(Key::End),
-        0x4E => Some(Key::PageDown),
+        0x39 => Some(Key::Named(NamedKey::CapsLock)),
+        0x46 => Some(Key::Named(NamedKey::PrintScreen)),
+        0x47 => Some(Key::Named(NamedKey::ScrollLock)),
+        0x48 => Some(Key::Named(NamedKey::Pause)),
+        0x49 => Some(Key::Named(NamedKey::Insert)),
+        0x4A => Some(Key::Named(NamedKey::Home)),
+        0x4B => Some(Key::Named(NamedKey::PageUp)),
+        0x4C => Some(Key::Named(NamedKey::Delete)),
+        0x4D => Some(Key::Named(NamedKey::End)),
+        0x4E => Some(Key::Named(NamedKey::PageDown)),
 
         _ => None,
     }

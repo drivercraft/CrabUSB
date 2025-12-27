@@ -8,7 +8,7 @@ version = "0.1.0"
 
 [dependencies]
 crab-usb = {workspace = true}
-keyboard-types = "0.7"
+keyboard-types = { version = "0.8.3", default-features = false }
 log = "0.4"
 
 [dev-dependencies]
