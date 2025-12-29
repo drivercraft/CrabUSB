@@ -308,10 +308,7 @@ mod tests {
                 continue;
             }
 
-            if node
-                .compatibles()
-                .any(|c| c.contains("xhci") | c.contains("snps,dwc3"))
-            {
+            if node.compatibles().any(|c| c.contains("snps,dwc3")) {
                 // 只选择明确为 host 模式的控制器，避免误用 OTG 端口
                 if let Some(prop) = node.find_property("dr_mode") {
                     let mode = prop.str();
@@ -326,6 +323,8 @@ mod tests {
                 println!("usb regs: {:?}", regs);
 
                 ensure_rk3588_usb_power(&fdt, &node);
+
+                preper_3588_clk(&fdt, &usb_node);
 
                 let addr = iomap(
                     (regs[0].address as usize).into(),
@@ -486,6 +485,11 @@ mod tests {
         if let Err(e) = deassert_rk3588_usb_resets(fdt) {
             warn!("deassert usb resets failed: {:?}", e);
         }
+    }
+
+    fn preper_3588_clk(fdt: &Fdt<'static>, usb_node: &Node<'static>) {
+
+        // info!("RK3588 USB clocks prepared");
     }
 
     #[derive(Debug)]
