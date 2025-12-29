@@ -12,8 +12,10 @@ pub use crate::backend::xhci::*;
 use device::DeviceInfo;
 use host::EventHandler;
 
+pub mod phy;
 mod reg;
 
+pub use phy::{UsbDpMode, UsbDpPhy, UsbDpPhyConfig};
 use reg::Dwc3Regs;
 
 /// DWC3 控制器
@@ -23,6 +25,7 @@ use reg::Dwc3Regs;
 /// 全局寄存器区域 (0xc100 - 0xcfff) 包含 DWC3 特定配置。
 pub struct Dwc {
     xhci: Xhci,
+    phy: UsbDpPhy,
     dwc_regs: Dwc3Regs,
 }
 
@@ -39,13 +42,25 @@ impl Dwc {
     /// 1. 验证 SNPSID 寄存器
     /// 2. 设置为 HOST 模式
     /// 3. 初始化 xHCI 主机控制器
-    pub fn new(mmio: Mmio, dma_mask: usize) -> Result<Self> {
-        let mmio_base = mmio.as_ptr() as usize;
-        let xhci = Xhci::new(mmio, dma_mask)?;
+    pub fn new(ctrl: Mmio, phy: Mmio, dma_mask: usize) -> Result<Self> {
+        let mmio_base = ctrl.as_ptr() as usize;
+        let phy = UsbDpPhy::new(
+            UsbDpPhyConfig {
+                mode: UsbDpMode::Usb,
+                ..Default::default()
+            },
+            phy,
+        );
+
+        let xhci = Xhci::new(ctrl, dma_mask)?;
 
         let dwc_regs = unsafe { Dwc3Regs::new(mmio_base) };
 
-        Ok(Self { xhci, dwc_regs })
+        Ok(Self {
+            xhci,
+            dwc_regs,
+            phy,
+        })
     }
 }
 
@@ -56,6 +71,14 @@ impl HostOp for Dwc {
     /// 初始化 DWC3 控制器
     async fn init(&mut self) -> Result {
         log::info!("DWC3: Starting controller initialization");
+
+        // 2. 配置 PHY
+        let phy_config = UsbDpPhyConfig {
+            mode: UsbDpMode::Usb,
+            ..Default::default()
+        };
+        self.phy.config = phy_config;
+        self.phy.init();
 
         // 步骤 1: 验证 SNPSID
         self.dwc_regs.verify_snpsid();
