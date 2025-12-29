@@ -2,9 +2,13 @@
 //! 基于 Linux drivers/usb/dwc3/core.h
 
 use core::sync::atomic::Ordering;
+use std::hint::spin_loop;
 
-use tock_registers::{register_bitfields, registers::{ReadOnly, ReadWrite}};
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
+use tock_registers::{
+    register_bitfields,
+    registers::{ReadOnly, ReadWrite},
+};
 
 /// DWC3 全局寄存器基址偏移 (相对于 xHCI 寄存器区域)
 const DWC3_GLOBALS_REGS_START: usize = 0xc100;
@@ -525,9 +529,9 @@ impl Dwc3Regs {
     pub fn configure_usb3_phy(&mut self) {
         // 使用 modify 方法直接修改寄存器位字段
         // 设置 U2SSINP3OK=1 (bit 15)
-        self.globals_mut().gusb3pipectl0.modify(
-            GUSB3PIPECTL::U2SSINP3OK.val(1)
-        );
+        self.globals_mut()
+            .gusb3pipectl0
+            .modify(GUSB3PIPECTL::U2SSINP3OK.val(1));
     }
 
     /// 配置 USB2 PHY
@@ -535,7 +539,7 @@ impl Dwc3Regs {
         // 使用 modify 方法配置多个字段
         self.globals_mut().gusb2phycfg0.modify(
             GUSB2PHYCFG::PHYIF.val(1) +          // 16-bit UTMI
-            GUSB2PHYCFG::USBTRDTIM.val(9)        // 16-bit UTMI turnaround time
+            GUSB2PHYCFG::USBTRDTIM.val(9), // 16-bit UTMI turnaround time
         );
     }
 
@@ -561,7 +565,10 @@ impl Dwc3Regs {
 
         log::info!(
             "DWC3 SNPSID: full={:#010x}, ip_id={:#06x}, product_id={:#06x}, revision={:#06x}",
-            snpsid_full, ip_id, product_id, revision
+            snpsid_full,
+            ip_id,
+            product_id,
+            revision
         );
 
         match ip_id {
@@ -630,7 +637,10 @@ impl Dwc3Regs {
 
         log::info!(
             "DWC3: GCTL config - PRTCAPDIR={}, SCALEDOWN={}, DISSCRAMBLE={}, DSBLCLKGTNG={}",
-            prtcapdir, scaledown, disscramble, dsblclkgtng
+            prtcapdir,
+            scaledown,
+            disscramble,
+            dsblclkgtng
         );
 
         log::info!("DWC3: GCTL configuration complete");
@@ -647,7 +657,10 @@ impl Dwc3Regs {
         log::debug!("DWC3: Current GCTL: {:#010x}", current);
 
         let current_prtcap = (current >> 12) & 0x3;
-        log::debug!("DWC3: Current PRTCAPDIR: {} (0=Device, 1=Host, 2=Device, 3=OTG)", current_prtcap);
+        log::debug!(
+            "DWC3: Current PRTCAPDIR: {} (0=Device, 1=Host, 2=Device, 3=OTG)",
+            current_prtcap
+        );
 
         // 设置为 HOST 模式
         self.set_prtcap_dir(1); // 1 = Host mode
@@ -657,16 +670,25 @@ impl Dwc3Regs {
         log::debug!("DWC3: Updated GCTL: {:#010x}", updated);
         log::debug!("DWC3: Updated PRTCAPDIR: {}", updated_prtcap);
 
-        log::info!("DWC3: Configured in HOST mode (PRTCAPDIR={})", updated_prtcap);
+        log::info!(
+            "DWC3: Configured in HOST mode (PRTCAPDIR={})",
+            updated_prtcap
+        );
 
         // 验证模式切换完成
         let current_mode = self.read_current_mode();
-        log::info!("DWC3: Current GSTS.CURMOD: {} (0=Device, 1=Host)", current_mode);
+        log::info!(
+            "DWC3: Current GSTS.CURMOD: {} (0=Device, 1=Host)",
+            current_mode
+        );
 
         if current_mode == 1 {
             log::info!("✓ DWC3 successfully switched to HOST mode");
         } else {
-            log::warn!("⚠ DWC3 mode mismatch: expected 1 (Host), got {}", current_mode);
+            log::warn!(
+                "⚠ DWC3 mode mismatch: expected 1 (Host), got {}",
+                current_mode
+            );
         }
     }
 
@@ -744,7 +766,11 @@ impl Dwc3Regs {
 
         log::info!(
             "DWC3: USB2 PHY config - PHYIF={}, USBTRDTIM={}, SUSPHY={}, ENBLSLPM={}, PHYSOFTRST={}",
-            phyif, usbtrdtim, susphy, enblslpm, physoftrst
+            phyif,
+            usbtrdtim,
+            susphy,
+            enblslpm,
+            physoftrst
         );
 
         // === 步骤 4: 等待 PHY 稳定 ===
@@ -776,7 +802,7 @@ impl Dwc3Regs {
         const LOOPS_PER_MS: u32 = 50000;
         let total_loops = ms * LOOPS_PER_MS;
         for _ in 0..total_loops {
-            core::sync::atomic::spin_loop_hint();
+            spin_loop();
         }
         core::sync::atomic::fence(Ordering::SeqCst);
     }
