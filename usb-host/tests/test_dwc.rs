@@ -320,14 +320,14 @@ mod tests {
             }
 
             if node.compatibles().any(|c| c.contains("snps,dwc3")) {
-                // 只选择明确为 host 模式的控制器，避免误用 OTG 端口
-                if let Some(prop) = node.find_property("dr_mode") {
-                    let mode = prop.str();
-                    if mode != "host" {
-                        debug!("skip {} because dr_mode={}", node.name(), mode);
-                        continue;
-                    }
-                }
+                // // 只选择明确为 host 模式的控制器，避免误用 OTG 端口
+                // if let Some(prop) = node.find_property("dr_mode") {
+                //     let mode = prop.str();
+                //     if mode != "host" {
+                //         debug!("skip {} because dr_mode={}", node.name(), mode);
+                //         continue;
+                //     }
+                // }
 
                 println!("usb node: {}", node.name);
                 let regs = node.reg().unwrap().collect::<Vec<_>>();
@@ -388,8 +388,33 @@ mod tests {
         let mmio = get_syscon_addr();
         let mut pm = RockchipPM::new(mmio, rockchip_pm::RkBoard::Rk3588);
 
-        
+        info!("RockchipPM initialized at {:p}", mmio.as_ptr());
+
+        // 开启 USB 电源域 (domain 31)
+        // 这是 usbdrd3_0 和 usbdrd3_1 控制器所需的电源域
+        match pm.power_domain_on(rockchip_pm::PowerDomain(31)) {
+            Ok(_) => info!("USB power domain (31) enabled successfully"),
+            Err(e) => {
+                error!("Failed to enable USB power domain: {:?}", e);
+                panic!("USB power domain enable failed");
+            }
+        }
+
+        // 可选：开启 PHP 总线结构域 (domain 32)
+        // PHP 是处理高性能总线的电源域，某些 USB 配置可能需要
+        match pm.power_domain_on(rockchip_pm::PowerDomain(32)) {
+            Ok(_) => info!("PHP power domain (32) enabled successfully"),
+            Err(e) => {
+                warn!(
+                    "Failed to enable PHP power domain: {:?} (may be optional)",
+                    e
+                );
+            }
+        }
+
+        info!("All required power domains enabled");
     }
+
     fn get_syscon_addr() -> NonNull<u8> {
         let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
         let fdt = fdt.get();
@@ -409,187 +434,6 @@ mod tests {
         let end = (end + page_size() - 1) & !(page_size() - 1);
         info!("Aligned Syscon address range: 0x{:x} - 0x{:x}", start, end);
         iomap(start.into(), end - start)
-    }
-
-    /// 打开 RK3588 USB 电源域（如果设备树有 power-domains 描述）
-    fn ensure_rk3588_usb_power(fdt: &Fdt<'static>, usb_node: &Node<'static>) {
-        // let power_prop = match usb_node.find_property("power-domains") {
-        //     Some(p) => p,
-        //     None => {
-        //         debug!(
-        //             "{} has no power-domains, skip PMU power on",
-        //             usb_node.name()
-        //         );
-        //         return;
-        //     }
-        // };
-
-        // let clks = usb_node.clocks().collect::<Vec<_>>();
-
-        // for clk in clks {
-        //     debug!("usb clock: {:?}", clk);
-        // }
-
-        // let mut ls = power_prop.u32_list();
-        // let ctrl_phandle = match ls.next() {
-        //     Some(v) => v,
-        //     None => return,
-        // };
-        // let mut domains: Vec<u32> = ls.collect();
-        // if domains.is_empty() {
-        //     debug!(
-        //         "{} power-domains has no domain IDs, skip PMU power on",
-        //         usb_node.name()
-        //     );
-        //     return;
-        // }
-
-        // debug!(
-        //     "power-domains for {}: ctrl=0x{:x}, domains={:?}",
-        //     usb_node.name(),
-        //     ctrl_phandle,
-        //     domains
-        // );
-
-        // // 精确查找 PMU syscon 基址：compatible 必须等于 "rockchip,rk3588-pmu"
-        // let pmu_node = fdt
-        //     .all_nodes()
-        //     .find(|n| n.compatibles().any(|c| c == "rockchip,rk3588-pmu"))
-        //     .or_else(|| {
-        //         // 兜底：按照 power-domains ctrl phandle 找 power-controller 本身
-        //         fdt.get_node_by_phandle(ctrl_phandle.into())
-        //     });
-
-        // let Some(pmu_node) = pmu_node else {
-        //     warn!("rk3588 pmu node not found, skip powering usb domain");
-        //     return;
-        // };
-
-        // let mut regs = match pmu_node.reg() {
-        //     Some(r) => r,
-        //     None => {
-        //         warn!("pmu node without reg, skip powering usb domain");
-        //         return;
-        //     }
-        // };
-
-        // let Some(reg) = regs.next() else {
-        //     warn!("pmu node reg empty, skip powering usb domain");
-        //     return;
-        // };
-
-        // let start = (reg.address as usize) & !(page_size() - 1);
-        // let end = (reg.address as usize + reg.size.unwrap_or(0x1000) + page_size() - 1)
-        //     & !(page_size() - 1);
-        // let base = iomap(start.into(), end - start);
-
-        // let compatible = pmu_node
-        //     .compatibles()
-        //     .find(|c| {
-        //         matches!(
-        //             *c,
-        //             "rockchip,rk3588-power-controller" | "rockchip,rk3568-power-controller"
-        //         )
-        //     })
-        //     .unwrap_or("rockchip,rk3588-power-controller");
-
-        // let mut pm = RockchipPM::new_with_compatible(base, compatible);
-
-        // // Power on domains described by DT, then ensure PHP (bus fabric) is on.
-        // let mut pd_list: Vec<PowerDomain> =
-        //     domains.iter().map(|id| PowerDomain::from(*id)).collect();
-
-        // if let Some(php_pd) = pm.get_power_dowain_by_name("php") {
-        //     // Avoid duplicates if DT already lists PHP.
-        //     if !pd_list.contains(&php_pd) {
-        //         pd_list.push(php_pd);
-        //     }
-        // }
-
-        // for pd in pd_list {
-        //     if let Err(e) = pm.power_domain_on(pd) {
-        //         warn!("enable {:?} power domain failed: {e:?}", pd);
-        //     } else {
-        //         info!("enabled rk3588 power domain {:?}", pd);
-        //     }
-        // }
-
-        // // 使能 VBUS 5V (vcc5v0_host) GPIO，如果存在的话
-        // if let Err(e) = enable_vcc5v0_host(fdt) {
-        //     warn!("enable vcc5v0_host gpio failed: {:?}", e);
-        // }
-
-        // // 解除 USB2 PHY suspend，确保 UTMI 时钟与上拉打开
-        // if let Err(e) = force_usb2phy_active(fdt) {
-        //     warn!("force usb2phy active failed: {:?}", e);
-        // }
-
-        // // 解除 USB3 DP Combo PHY 电源/电气休眠，防止 PIPE 侧被关断
-        // if let Err(e) = force_usbdp_phy_active(fdt) {
-        //     warn!("force usbdp phy active failed: {:?}", e);
-        // }
-
-        // // 释放 XHCI/PHY 相关复位，避免控制器或 PHY 仍处于 reset 状态
-        // if let Err(e) = deassert_rk3588_usb_resets(fdt) {
-        //     warn!("deassert usb resets failed: {:?}", e);
-        // }
-    }
-
-    #[derive(Debug)]
-    enum GpioError {
-        NotFound,
-        RegMissing,
-    }
-
-    fn enable_vcc5v0_host(fdt: &Fdt<'static>) -> Result<(), GpioError> {
-        // 在设备树中查找 regulator-name = "vcc5v0_host"
-        let Some(reg_node) = fdt
-            .all_nodes()
-            .find(|n| n.find_property("regulator-name").map(|p| p.str()) == Some("vcc5v0_host"))
-        else {
-            return Err(GpioError::NotFound);
-        };
-
-        let gpio_prop = reg_node
-            .find_property("gpio")
-            .or_else(|| reg_node.find_property("gpios"))
-            .ok_or(GpioError::NotFound)?;
-
-        let mut vals = gpio_prop.u32_list();
-        let ctrl = vals.next().ok_or(GpioError::NotFound)?;
-        let pin = vals.next().ok_or(GpioError::NotFound)?;
-        // flags ignored
-
-        let ctrl_node = fdt
-            .get_node_by_phandle(ctrl.into())
-            .ok_or(GpioError::NotFound)?;
-
-        let mut regs = ctrl_node.reg().ok_or(GpioError::RegMissing)?;
-        let reg = regs.next().ok_or(GpioError::RegMissing)?;
-        let base = iomap(
-            (reg.address as usize).into(),
-            reg.size.unwrap_or(0x1000).max(0x1000),
-        );
-
-        unsafe {
-            // Rockchip GPIO: 0x00 DR, 0x04 DDR
-            let dr = base.as_ptr() as *mut u32;
-            let ddr = dr.add(1);
-
-            let mut val = dr.read_volatile();
-            val |= 1 << pin;
-            dr.write_volatile(val);
-
-            let mut dir = ddr.read_volatile();
-            dir |= 1 << pin;
-            ddr.write_volatile(dir);
-        }
-
-        info!(
-            "vcc5v0_host enabled via gpio ctrl phandle 0x{:x}, pin {}",
-            ctrl, pin
-        );
-        Ok(())
     }
 }
 
