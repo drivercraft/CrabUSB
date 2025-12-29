@@ -61,14 +61,14 @@ mod tests {
             }
 
             let mut ls = Vec::new();
-            for _ in 0..50 {
+            for _ in 0..3 {
                 let ls2 = host.probe_devices().await.unwrap();
                 if ls2.len() > 0 {
                     info!("found {} devices", ls2.len());
                     ls = ls2;
                     break;
                 }
-                sleep(Duration::from_millis(100)).await;
+                sleep(Duration::from_millis(1000)).await;
             }
 
             for mut info in ls {
