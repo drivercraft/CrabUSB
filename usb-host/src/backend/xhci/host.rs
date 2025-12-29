@@ -15,10 +15,7 @@ use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
 use crate::{
     Mmio,
-    backend::{
-        ty::HostOp,
-        xhci::{endpoint::Endpoint, transfer::TransferResultHandler},
-    },
+    backend::{ty::HostOp, xhci::transfer::TransferResultHandler},
     err::Result,
 };
 use crate::{backend::PortId, osal::SpinWhile};
@@ -472,7 +469,7 @@ impl Xhci {
     fn need_init_port_idxs(&self) -> impl Iterator<Item = usize> {
         (0..self.reg.read().port_register_set.len()).filter(move |&i| {
             let portsc = self.reg.read().port_register_set.read_volatile_at(i).portsc;
-            debug!("Port {i} status: {portsc:#x?}");
+            // debug!("Port {i} status: {portsc:#x?}");
 
             portsc.port_enabled_disabled()
                 && portsc.current_connect_status()

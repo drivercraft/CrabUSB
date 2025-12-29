@@ -49,3 +49,7 @@ bare-test-macros = "0.2"
 [[test]]
 harness = false
 name = "test"
+
+[[test]]
+harness = false
+name = "test_dwc"
