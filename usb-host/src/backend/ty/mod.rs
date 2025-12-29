@@ -2,11 +2,17 @@ use alloc::vec::Vec;
 use core::fmt::Debug;
 use core::future::Future;
 
-use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
+use usb_if::{
+    descriptor::{ConfigurationDescriptor, DeviceDescriptor},
+    err::TransferError,
+    host::ControlSetup,
+    transfer::Direction,
+};
 
 use crate::err::USBError;
 
 // pub mod hub;
+pub mod ep;
 
 pub trait HostOp {
     type DeviceInfo: DeviceInfoOp;
@@ -46,9 +52,7 @@ pub trait DeviceInfoOp: Send + Debug + 'static {
 
 /// USB 设备特征（高层抽象）
 pub trait DeviceOp: Send + 'static {
-    type Req: TransferReq;
-    type Res: TransferRes;
-    // type Ep: Endpint<Req = Self::Req, Res = Self::Res>;
+    type Ep: EndpintOp;
 
     fn descriptor(&self) -> &DeviceDescriptor;
 
@@ -66,13 +70,12 @@ pub trait DeviceOp: Send + 'static {
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, USBError>;
 }
 
-pub trait TransferReq {}
-pub trait TransferRes {}
+pub trait EndpintOp: Send + 'static {
+    type Transfer: TransferOp;
+    
+}
 
-// pub trait Endpint: Send + 'static {
-//     type Req: TransferReq;
-//     type Res: TransferRes;
-
-//     /// 提交传输
-//     fn submit(&mut self, req: Self::Req) -> Result<Self::Res, USBError>;
-// }
+pub trait TransferOp: Send + 'static {
+    fn data_ptr(&self) -> usize;
+    fn data_len(&self) -> usize;
+}

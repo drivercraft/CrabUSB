@@ -15,7 +15,10 @@ use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
 use crate::{
     Mmio,
-    backend::{ty::HostOp, xhci::transfer::TransferResultHandler},
+    backend::{
+        ty::HostOp,
+        xhci::{endpoint::Endpoint, transfer::TransferResultHandler},
+    },
     err::Result,
 };
 use crate::{backend::PortId, osal::SpinWhile};

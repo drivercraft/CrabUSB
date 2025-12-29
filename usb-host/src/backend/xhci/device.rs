@@ -10,7 +10,7 @@ use usb_if::transfer::{Recipient, Request, RequestType};
 use xhci::ring::trb::command;
 
 use crate::backend::Dci;
-use crate::backend::xhci::endpoint::{EndpintControl, EndpointRaw};
+use crate::backend::xhci::endpoint::{EndpintControl, Endpoint};
 use crate::backend::xhci::reg::SlotBell;
 use crate::backend::xhci::transfer::TransferResultHandler;
 use crate::backend::xhci::{
@@ -114,8 +114,8 @@ impl Device {
         self.id
     }
 
-    fn new_ep(&mut self, dci: Dci) -> Result<EndpointRaw> {
-        let ep = EndpointRaw::new(dci, self.dma_mask, self.bell.clone())?;
+    fn new_ep(&mut self, dci: Dci) -> Result<Endpoint> {
+        let ep = Endpoint::new(dci, self.dma_mask, self.bell.clone())?;
         self.transfer_result_handler
             .register_queue(self.id.as_u8(), dci.as_u8(), ep.ring());
 
@@ -356,9 +356,7 @@ impl Device {
 }
 
 impl DeviceOp for Device {
-    type Req = super::TransferRequest;
-
-    type Res = super::TransferResult;
+    type Ep = Endpoint;
 
     // type Ep;
 

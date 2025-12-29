@@ -82,7 +82,7 @@ impl Ring {
             trb.clear_cycle_bit();
         }
         let addr = self.enque_trb(trb.into());
-        trace!("[CMD] >> {trb:?} @{addr:X?}");
+        trace!("[CMD] >> {trb:X?} @{addr:X?}");
         addr
     }
 
@@ -93,7 +93,7 @@ impl Ring {
             trb.clear_cycle_bit();
         }
         let addr = self.enque_trb(trb.into());
-        trace!("[Transfer] >> {trb:?} @{addr:X?}");
+        trace!("[Transfer] >> {trb:X?} @{addr:X?}");
         addr
     }
 
@@ -191,6 +191,10 @@ impl<R> SendRing<R> {
 
     pub fn finished_handle(&self) -> Finished<R> {
         self.finished.clone()
+    }
+
+    pub fn get_finished(&self, addr: BusAddr) -> Option<R> {
+        self.finished.get_finished(addr)
     }
 
     pub fn bus_addr(&self) -> BusAddr {

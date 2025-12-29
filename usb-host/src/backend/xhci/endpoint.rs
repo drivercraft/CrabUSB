@@ -1,7 +1,9 @@
+use core::pin::Pin;
+
+use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use dma_api::{DSlice, DSliceMut};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
@@ -18,25 +20,37 @@ use crate::{
     BusAddr,
     backend::{
         Dci,
-        xhci::{DirectionExt, reg::SlotBell, ring::SendRing},
+        ty::EndpintOp,
+        xhci::{
+            DirectionExt,
+            reg::SlotBell,
+            ring::SendRing,
+            transfer::{Transfer, TransferHandle, TransferKind},
+        },
     },
     err::ConvertXhciError,
 };
 
-pub(crate) struct EndpointRaw {
+pub struct Endpoint {
     dci: Dci,
     pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
+    transfers: BTreeMap<TransferHandle, Transfer>,
 }
 
-unsafe impl Send for EndpointRaw {}
-unsafe impl Sync for EndpointRaw {}
+unsafe impl Send for Endpoint {}
+unsafe impl Sync for Endpoint {}
 
-impl EndpointRaw {
+impl Endpoint {
     pub fn new(dci: Dci, dma_mask: usize, bell: Arc<Mutex<SlotBell>>) -> crate::err::Result<Self> {
         let ring = SendRing::new(dma_api::Direction::Bidirectional, dma_mask)?;
 
-        Ok(Self { dci, ring, bell })
+        Ok(Self {
+            dci,
+            ring,
+            bell,
+            transfers: BTreeMap::new(),
+        })
     }
 
     pub fn bus_addr(&self) -> BusAddr {
@@ -53,118 +67,122 @@ impl EndpointRaw {
         &self.ring
     }
 
-    pub async fn request(
-        &mut self,
-        trbs: impl Iterator<Item = transfer::Allowed>,
-        direction: usb_if::transfer::Direction,
-        buff_addr: usize,
-        buff_len: usize,
-    ) -> Result<usize, TransferError> {
-        let mut trb_ptr = BusAddr(0);
-
-        for trb in trbs {
-            trb_ptr = self.ring.enque_transfer(trb);
+    pub fn submit(&mut self, transfer: Transfer) -> TransferHandle {
+        let mut data_bus_addr = 0;
+        if transfer.buffer_len > 0 {
+            let data_slice = transfer.dma_slice();
+            if matches!(transfer.direction, Direction::Out) {
+                data_slice.confirm_write_all();
+            }
+            data_bus_addr = data_slice.bus_addr();
         }
 
-        trace!("trb : {trb_ptr:#x?}, addr: {buff_addr:#x}, len: {buff_len}, {direction:?}");
+        let data_len = transfer.buffer_len;
+        let dir = transfer.direction;
 
+        let mut handle = TransferHandle(BusAddr(0));
+
+        match &transfer.kind {
+            TransferKind::Control(t) => {
+                let bm_request_type = BmRequestType {
+                    direction: transfer.direction,
+                    request_type: t.request_type,
+                    recipient: t.recipient,
+                };
+
+                let mut setup = transfer::SetupStage::default();
+                setup
+                    .set_request_type(bm_request_type.into())
+                    .set_request(t.request.into())
+                    .set_value(t.value)
+                    .set_index(t.index)
+                    .set_length(0)
+                    .set_transfer_type(transfer::TransferType::No);
+
+                let mut data = None;
+
+                if transfer.buffer_len > 0 {
+                    setup
+                        .set_transfer_type(dir.to_xhci_transfer_type())
+                        .set_length(data_len as _);
+
+                    let mut _data = transfer::DataStage::default();
+                    _data
+                        .set_data_buffer_pointer(data_bus_addr)
+                        .set_trb_transfer_length(data_len as _)
+                        .set_direction(transfer.direction.to_xhci_direction());
+                    data = Some(_data);
+                }
+
+                let mut status = transfer::StatusStage::default();
+                status.set_interrupt_on_completion();
+
+                if matches!(transfer.direction, Direction::In) && transfer.buffer_len > 0 {
+                    status.clear_direction();
+                } else {
+                    status.set_direction();
+                }
+
+                self.ring.enque_transfer(setup.into());
+                if let Some(data) = data {
+                    self.ring.enque_transfer(data.into());
+                }
+                handle.0 = self.ring.enque_transfer(status.into());
+            }
+        }
+        self.transfers.insert(handle, transfer);
         mb();
-
         self.doorbell();
-        trace!("ring doorbell done");
 
-        let c = self.ring.wait_command_finished(trb_ptr).await;
+        handle
+    }
+
+    pub fn query(&mut self, handle: &TransferHandle) -> Option<Result<Transfer, TransferError>> {
+        let c = self.ring.get_finished(handle.0)?;
+        Some(self.handle_transfer_completion(&c, handle))
+    }
+
+    async fn async_query(&mut self, handle: TransferHandle) -> Result<Transfer, TransferError> {
+        let c = self.ring.wait_command_finished(handle.0).await;
+        self.handle_transfer_completion(&c, &handle)
+    }
+
+    fn handle_transfer_completion(
+        &mut self,
+        c: &TransferEvent,
+        handle: &TransferHandle,
+    ) -> Result<Transfer, TransferError> {
+        let mut t = self.transfers.remove(handle).unwrap();
         match c.completion_code() {
             Ok(code) => match code.to_result() {
-                Ok(_) => {}
-                Err(e) => Err(e)?,
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
             },
-            Err(_e) => Err(TransferError::Other("Transfer failed".into()))?,
-        };
+            Err(_e) => Err(TransferError::Other("Transfer failed".into())),
+        }?;
+        if matches!(t.direction, Direction::In) && t.buffer_len > 0 {
+            t.dma_slice().prepare_read_all();
+        }
+        t.transfer_len = c.trb_transfer_length() as usize;
+        Ok(t)
+    }
 
-        Ok(c.trb_transfer_length() as usize)
+    fn request(
+        &mut self,
+        transfer: Transfer,
+    ) -> impl Future<Output = Result<Transfer, TransferError>> {
+        let handle = self.submit(transfer);
+        self.async_query(handle)
     }
 }
 
 pub struct EndpintControl {
-    raw: EndpointRaw,
+    raw: Endpoint,
 }
 
 impl EndpintControl {
-    pub fn new(raw: EndpointRaw) -> Self {
+    pub fn new(raw: Endpoint) -> Self {
         Self { raw }
-    }
-
-    async fn transfer(
-        &mut self,
-        urb: ControlSetup,
-        dir: Direction,
-        buff: Option<(usize, u16)>,
-    ) -> Result<usize, TransferError> {
-        let mut trbs: Vec<transfer::Allowed> = Vec::new();
-        let bm_request_type = BmRequestType {
-            direction: dir,
-            request_type: urb.request_type,
-            recipient: urb.recipient,
-        };
-
-        let mut setup = transfer::SetupStage::default();
-        let mut buff_data = 0;
-        let mut buff_len = 0;
-
-        setup
-            .set_request_type(bm_request_type.into())
-            .set_request(urb.request.into())
-            .set_value(urb.value)
-            .set_index(urb.index)
-            .set_length(0)
-            .set_transfer_type(transfer::TransferType::No);
-
-        let mut data = None;
-
-        if let Some((addr, len)) = buff {
-            buff_data = addr;
-            buff_len = len as usize;
-            let data_slice =
-                unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };
-
-            let dm = DSliceMut::from(data_slice, dma_api::Direction::Bidirectional);
-
-            if matches!(dir, Direction::Out) {
-                dm.confirm_write_all();
-            }
-
-            setup
-                .set_transfer_type(dir.to_xhci_transfer_type())
-                .set_length(len);
-
-            let mut raw_data = transfer::DataStage::default();
-            raw_data
-                .set_data_buffer_pointer(dm.bus_addr() as _)
-                .set_trb_transfer_length(len as _)
-                .set_direction(dir.to_xhci_direction());
-
-            data = Some(raw_data)
-        }
-
-        let mut status = transfer::StatusStage::default();
-        status.set_interrupt_on_completion();
-
-        if matches!(dir, Direction::In) && buff.is_some() {
-            status.clear_direction();
-        } else {
-            status.set_direction();
-        }
-
-        trbs.push(setup.into());
-        if let Some(data) = data {
-            trbs.push(data.into());
-        }
-        trbs.push(status.into());
-
-        self.raw
-            .request(trbs.into_iter(), dir, buff_data, buff_len)
-            .await
     }
 
     pub async fn control_in(
@@ -172,19 +190,10 @@ impl EndpintControl {
         param: ControlSetup,
         buff: &mut [u8],
     ) -> Result<usize, TransferError> {
-        let n = self
-            .transfer(
-                param,
-                Direction::In,
-                if buff.is_empty() {
-                    None
-                } else {
-                    Some((buff.as_ptr() as usize, buff.len() as _))
-                },
-            )
-            .await?;
-        let dm = DSlice::from(&buff[..n], dma_api::Direction::Bidirectional);
-        dm.prepare_read_all();
+        let transfer = Transfer::new_in(TransferKind::Control(param), Pin::new(buff));
+        let t = self.raw.request(transfer).await?;
+        let n = t.transfer_len;
+
         Ok(n)
     }
 
@@ -193,19 +202,17 @@ impl EndpintControl {
         param: ControlSetup,
         buff: &[u8],
     ) -> Result<usize, TransferError> {
-        self.transfer(
-            param,
-            Direction::Out,
-            if buff.is_empty() {
-                None
-            } else {
-                Some((buff.as_ptr() as usize, buff.len() as _))
-            },
-        )
-        .await
+        let transfer = Transfer::new_out(TransferKind::Control(param), Pin::new(buff));
+        let t = self.raw.request(transfer).await?;
+        let n = t.transfer_len;
+        Ok(n)
     }
 
     pub fn bus_addr(&self) -> BusAddr {
         self.raw.bus_addr()
     }
+}
+
+impl EndpintOp for Endpoint {
+    type Transfer = Transfer;
 }
