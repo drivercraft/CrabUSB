@@ -747,11 +747,14 @@ impl DeviceState {
     }
 
     pub fn doorbell(&self, bell: doorbell::Register) {
-        self.inner
-            .lock()
-            .regs
+        let mut guard = self.inner.lock();
+        guard.regs
             .doorbell
             .write_volatile_at(self.id.as_usize(), bell);
+        // Ensure doorbell write is completed by performing a read-back
+        let _ = guard.regs.doorbell.read_volatile_at(self.id.as_usize());
+        drop(guard);
+        mbarrier::mb();
     }
 
     /// 获取当前微帧索引，用于ISO传输调度

@@ -339,6 +339,16 @@ impl Root {
             .doorbell
             .write_volatile_at(0, doorbell::Register::default());
 
+        // Ensure doorbell write is completed by performing a read-back
+        // This is critical on some platforms (like RK3588) where posted writes
+        // to MMIO may not reach the device immediately
+        let _ = self.reg.doorbell.read_volatile_at(0);
+        mb();
+
+        // Immediately check for events - on some platforms the command may complete
+        // before the interrupt is delivered, or interrupts may not work correctly
+        self.handle_event();
+
         Ok(self.wait_cmd.wait_for_result(trb_addr.raw(), None))
     }
 
@@ -496,7 +506,39 @@ impl RootHub {
         trb: command::Allowed,
     ) -> Result<CommandCompletion, TransferError> {
         let fur = self.lock().cmd_request(trb)?;
-        let res = fur.await;
+
+        // Poll events while waiting for command completion
+        // This is necessary on platforms where interrupts may not work reliably
+        let res = {
+            use alloc::boxed::Box;
+            use core::future::Future;
+            use core::pin::Pin;
+            use core::task::{Context, Poll};
+
+            struct PollWithEvents<'a, F> {
+                future: Pin<Box<F>>,
+                root: &'a RootHub,
+            }
+
+            impl<'a, F: Future> Future for PollWithEvents<'a, F> {
+                type Output = F::Output;
+
+                fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                    // Check for events before polling the future
+                    if let Some(mut root) = self.root.try_lock() {
+                        root.handle_event();
+                    }
+
+                    self.future.as_mut().poll(cx)
+                }
+            }
+
+            PollWithEvents {
+                future: Box::pin(fur),
+                root: self,
+            }.await
+        };
+
         match res.completion_code() {
             Ok(code) => {
                 code.to_result()?;
