@@ -76,7 +76,7 @@ pub enum Recipient {
     Other = 3,
 }
 
-#[derive(Debug, Clone, FromPrimitive, IntoPrimitive)]
+#[derive(Debug, Clone, FromPrimitive, IntoPrimitive, Copy)]
 #[repr(u8)]
 pub enum Request {
     GetStatus = 0,

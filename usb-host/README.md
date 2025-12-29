@@ -97,13 +97,13 @@ for mut device in devices {
 
 ```bash
 cargo install ostool
-cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat -- --show-output
+cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat 
 ```
 
 ### Real Hardware (U-Boot)
 
 ```bash
-cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat -- --show-output uboot
+cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat --  uboot
 ```
 
 ### Qemu using host USB devices on a Linux host

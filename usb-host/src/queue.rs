@@ -66,7 +66,7 @@ impl<C> Finished<C> {
         }
     }
 
-    fn get_finished(&self, addr: BusAddr) -> Option<C> {
+    pub(crate) fn get_finished(&self, addr: BusAddr) -> Option<C> {
         if !self.inner.finished.get(&addr)?.load(Ordering::Acquire) {
             return None;
         }
@@ -82,7 +82,7 @@ impl<C> Finished<C> {
     }
 }
 
-struct Water<'a, C> {
+pub(crate) struct Water<'a, C> {
     addr: BusAddr,
     finished: &'a Finished<C>,
 }

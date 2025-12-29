@@ -13,7 +13,6 @@ pub(crate) use def::*;
 
 pub use device::Device;
 pub use host::Xhci;
-pub use transfer::{TransferRequest, TransferResult};
 
 fn parse_default_max_packet_size_from_port_speed(speed: u8) -> u16 {
     match speed {
