@@ -2,37 +2,43 @@
 #![no_main]
 #![feature(used_with_arg)]
 
+use bare_test::driver::register;
+use rdrive::{PlatformDevice, probe::OnProbeError, register::FdtInfo};
+
 extern crate alloc;
+
+use alloc::{boxed::Box, vec::Vec};
+use bare_test::{
+    GetIrqConfig,
+    async_std::time::{self, sleep},
+    fdt_parser::{Fdt, Node, PciSpace, Status},
+    globals::{PlatformInfoKind, global_val},
+    irq::{IrqHandleResult, IrqInfo, IrqParam},
+    mem::{iomap, page_size},
+    platform::fdt::GetPciIrqConfig,
+    println,
+};
+use core::{
+    hint::spin_loop,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
+use crab_usb::{impl_trait, *};
+use futures::{FutureExt, future::BoxFuture};
+use log::info;
+use log::*;
+use pcie::*;
+use rk3588_clk::Rk3588Cru;
+use rockchip_pm::{PowerDomain, RockchipPM};
+use usb_if::{
+    descriptor::{ConfigurationDescriptor, EndpointType},
+    transfer::Direction,
+};
 
 #[bare_test::tests]
 mod tests {
-    use alloc::{boxed::Box, vec::Vec};
-    use bare_test::{
-        GetIrqConfig,
-        async_std::time::{self, sleep},
-        fdt_parser::{Fdt, Node, PciSpace, Status},
-        globals::{PlatformInfoKind, global_val},
-        irq::{IrqHandleResult, IrqInfo, IrqParam},
-        mem::{iomap, page_size},
-        platform::fdt::GetPciIrqConfig,
-        println,
-    };
-    use rk3588_clk::Rk3588Cru;
-    use core::{
-        hint::spin_loop,
-        sync::atomic::{AtomicBool, Ordering},
-        time::Duration,
-    };
-    use crab_usb::{impl_trait, *};
-    use futures::{FutureExt, future::BoxFuture};
-    use log::info;
-    use log::*;
-    use pcie::*;
-    use rockchip_pm::{PowerDomain, RockchipPM};
-    use usb_if::{
-        descriptor::{ConfigurationDescriptor, EndpointType},
-        transfer::Direction,
-    };
+
+    use core::ptr::NonNull;
 
     use super::*;
 
@@ -40,6 +46,9 @@ mod tests {
 
     #[test]
     fn test_all() {
+        // enable_clk();
+        enable_power();
+
         spin_on::spin_on(async {
             let info = get_usb_host();
             let irq_info = info.irq.clone().unwrap();
@@ -303,6 +312,7 @@ mod tests {
         let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
 
         let fdt = fdt.get();
+
         let mut count = 0;
         for node in fdt.all_nodes() {
             if matches!(node.status(), Some(Status::Disabled)) {
@@ -323,9 +333,13 @@ mod tests {
                 let regs = node.reg().unwrap().collect::<Vec<_>>();
                 println!("usb regs: {:?}", regs);
 
-                ensure_rk3588_usb_power(&fdt, &node);
+                for clk in node.clocks() {
+                    println!("usb clock: {:?}", clk);
+                }
 
-                preper_3588_clk(&fdt, &node);
+                // ensure_rk3588_usb_power(&fdt, &node);
+
+                // preper_3588_clk(&fdt, &node);
 
                 let addr = iomap(
                     (regs[0].address as usize).into(),
@@ -370,150 +384,157 @@ mod tests {
         }
     }
 
-    /// 打开 RK3588 USB 电源域（如果设备树有 power-domains 描述）
-    fn ensure_rk3588_usb_power(fdt: &Fdt<'static>, usb_node: &Node<'static>) {
-        let power_prop = match usb_node.find_property("power-domains") {
-            Some(p) => p,
-            None => {
-                debug!(
-                    "{} has no power-domains, skip PMU power on",
-                    usb_node.name()
-                );
-                return;
-            }
-        };
+    fn enable_power() {
+        let mmio = get_syscon_addr();
+        let mut pm = RockchipPM::new(mmio, rockchip_pm::RkBoard::Rk3588);
 
-        let mut ls = power_prop.u32_list();
-        let ctrl_phandle = match ls.next() {
-            Some(v) => v,
-            None => return,
-        };
-        let mut domains: Vec<u32> = ls.collect();
-        if domains.is_empty() {
-            debug!(
-                "{} power-domains has no domain IDs, skip PMU power on",
-                usb_node.name()
-            );
-            return;
-        }
+        
+    }
+    fn get_syscon_addr() -> NonNull<u8> {
+        let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
+        let fdt = fdt.get();
 
-        debug!(
-            "power-domains for {}: ctrl=0x{:x}, domains={:?}",
-            usb_node.name(),
-            ctrl_phandle,
-            domains
-        );
+        let node = fdt
+            .find_compatible(&["syscon"])
+            .find(|n| n.name().contains("power-manage"))
+            .expect("Failed to find syscon node");
 
-        // 精确查找 PMU syscon 基址：compatible 必须等于 "rockchip,rk3588-pmu"
-        let pmu_node = fdt
-            .all_nodes()
-            .find(|n| n.compatibles().any(|c| c == "rockchip,rk3588-pmu"))
-            .or_else(|| {
-                // 兜底：按照 power-domains ctrl phandle 找 power-controller 本身
-                fdt.get_node_by_phandle(ctrl_phandle.into())
-            });
+        info!("Found node: {}", node.name());
 
-        let Some(pmu_node) = pmu_node else {
-            warn!("rk3588 pmu node not found, skip powering usb domain");
-            return;
-        };
-
-        let mut regs = match pmu_node.reg() {
-            Some(r) => r,
-            None => {
-                warn!("pmu node without reg, skip powering usb domain");
-                return;
-            }
-        };
-
-        let Some(reg) = regs.next() else {
-            warn!("pmu node reg empty, skip powering usb domain");
-            return;
-        };
-
-        let start = (reg.address as usize) & !(page_size() - 1);
-        let end = (reg.address as usize + reg.size.unwrap_or(0x1000) + page_size() - 1)
-            & !(page_size() - 1);
-        let base = iomap(start.into(), end - start);
-
-        let compatible = pmu_node
-            .compatibles()
-            .find(|c| {
-                matches!(
-                    *c,
-                    "rockchip,rk3588-power-controller" | "rockchip,rk3568-power-controller"
-                )
-            })
-            .unwrap_or("rockchip,rk3588-power-controller");
-
-        let mut pm = RockchipPM::new_with_compatible(base, compatible);
-
-        // Power on domains described by DT, then ensure PHP (bus fabric) is on.
-        let mut pd_list: Vec<PowerDomain> =
-            domains.iter().map(|id| PowerDomain::from(*id)).collect();
-
-        if let Some(php_pd) = pm.get_power_dowain_by_name("php") {
-            // Avoid duplicates if DT already lists PHP.
-            if !pd_list.contains(&php_pd) {
-                pd_list.push(php_pd);
-            }
-        }
-
-        for pd in pd_list {
-            if let Err(e) = pm.power_domain_on(pd) {
-                warn!("enable {:?} power domain failed: {e:?}", pd);
-            } else {
-                info!("enabled rk3588 power domain {:?}", pd);
-            }
-        }
-
-        // 使能 VBUS 5V (vcc5v0_host) GPIO，如果存在的话
-        if let Err(e) = enable_vcc5v0_host(fdt) {
-            warn!("enable vcc5v0_host gpio failed: {:?}", e);
-        }
-
-        // 解除 USB2 PHY suspend，确保 UTMI 时钟与上拉打开
-        if let Err(e) = force_usb2phy_active(fdt) {
-            warn!("force usb2phy active failed: {:?}", e);
-        }
-
-        // 解除 USB3 DP Combo PHY 电源/电气休眠，防止 PIPE 侧被关断
-        if let Err(e) = force_usbdp_phy_active(fdt) {
-            warn!("force usbdp phy active failed: {:?}", e);
-        }
-
-        // 释放 XHCI/PHY 相关复位，避免控制器或 PHY 仍处于 reset 状态
-        if let Err(e) = deassert_rk3588_usb_resets(fdt) {
-            warn!("deassert usb resets failed: {:?}", e);
-        }
+        let regs = node.reg().unwrap().collect::<Vec<_>>();
+        let start = regs[0].address as usize;
+        let end = start + regs[0].size.unwrap_or(0);
+        info!("Syscon address range: 0x{:x} - 0x{:x}", start, end);
+        let start = start & !(page_size() - 1);
+        let end = (end + page_size() - 1) & !(page_size() - 1);
+        info!("Aligned Syscon address range: 0x{:x} - 0x{:x}", start, end);
+        iomap(start.into(), end - start)
     }
 
-    /// 准备 RK3588 USB 控制器时钟
-    ///
-    /// 根据设备树中的 clocks 属性启用 USB 相关时钟门控。
-    /// 如果设备树中没有 clocks 信息，则对 RK3588 常见的 USB 时钟进行通用启用。
-    fn preper_3588_clk(fdt: &Fdt<'static>, usb_node: &Node<'static>) {
-        // 尝试从设备树获取时钟信息
-        // let clocks_prop = match usb_node.find_property("clocks") {
+    /// 打开 RK3588 USB 电源域（如果设备树有 power-domains 描述）
+    fn ensure_rk3588_usb_power(fdt: &Fdt<'static>, usb_node: &Node<'static>) {
+        // let power_prop = match usb_node.find_property("power-domains") {
         //     Some(p) => p,
         //     None => {
-        //         debug!("{} has no clocks property, use common USB clock enables", usb_node.name());
-        //         enable_common_usb3otg1_clocks(fdt);
+        //         debug!(
+        //             "{} has no power-domains, skip PMU power on",
+        //             usb_node.name()
+        //         );
         //         return;
         //     }
         // };
-        let node = fdt.find_compatible(&["rockchip,rk3588-cru"]).next().unwrap();
-        let reg = node.reg().unwrap().next().unwrap();
 
-        let base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000));
+        // let clks = usb_node.clocks().collect::<Vec<_>>();
 
-        let mut clk = Rk3588Cru::new(base);
+        // for clk in clks {
+        //     debug!("usb clock: {:?}", clk);
+        // }
 
-        clk.usb_gate_enable(gate_id);
+        // let mut ls = power_prop.u32_list();
+        // let ctrl_phandle = match ls.next() {
+        //     Some(v) => v,
+        //     None => return,
+        // };
+        // let mut domains: Vec<u32> = ls.collect();
+        // if domains.is_empty() {
+        //     debug!(
+        //         "{} power-domains has no domain IDs, skip PMU power on",
+        //         usb_node.name()
+        //     );
+        //     return;
+        // }
 
-        info!("RK3588 USB clocks enabled via CRU");
+        // debug!(
+        //     "power-domains for {}: ctrl=0x{:x}, domains={:?}",
+        //     usb_node.name(),
+        //     ctrl_phandle,
+        //     domains
+        // );
+
+        // // 精确查找 PMU syscon 基址：compatible 必须等于 "rockchip,rk3588-pmu"
+        // let pmu_node = fdt
+        //     .all_nodes()
+        //     .find(|n| n.compatibles().any(|c| c == "rockchip,rk3588-pmu"))
+        //     .or_else(|| {
+        //         // 兜底：按照 power-domains ctrl phandle 找 power-controller 本身
+        //         fdt.get_node_by_phandle(ctrl_phandle.into())
+        //     });
+
+        // let Some(pmu_node) = pmu_node else {
+        //     warn!("rk3588 pmu node not found, skip powering usb domain");
+        //     return;
+        // };
+
+        // let mut regs = match pmu_node.reg() {
+        //     Some(r) => r,
+        //     None => {
+        //         warn!("pmu node without reg, skip powering usb domain");
+        //         return;
+        //     }
+        // };
+
+        // let Some(reg) = regs.next() else {
+        //     warn!("pmu node reg empty, skip powering usb domain");
+        //     return;
+        // };
+
+        // let start = (reg.address as usize) & !(page_size() - 1);
+        // let end = (reg.address as usize + reg.size.unwrap_or(0x1000) + page_size() - 1)
+        //     & !(page_size() - 1);
+        // let base = iomap(start.into(), end - start);
+
+        // let compatible = pmu_node
+        //     .compatibles()
+        //     .find(|c| {
+        //         matches!(
+        //             *c,
+        //             "rockchip,rk3588-power-controller" | "rockchip,rk3568-power-controller"
+        //         )
+        //     })
+        //     .unwrap_or("rockchip,rk3588-power-controller");
+
+        // let mut pm = RockchipPM::new_with_compatible(base, compatible);
+
+        // // Power on domains described by DT, then ensure PHP (bus fabric) is on.
+        // let mut pd_list: Vec<PowerDomain> =
+        //     domains.iter().map(|id| PowerDomain::from(*id)).collect();
+
+        // if let Some(php_pd) = pm.get_power_dowain_by_name("php") {
+        //     // Avoid duplicates if DT already lists PHP.
+        //     if !pd_list.contains(&php_pd) {
+        //         pd_list.push(php_pd);
+        //     }
+        // }
+
+        // for pd in pd_list {
+        //     if let Err(e) = pm.power_domain_on(pd) {
+        //         warn!("enable {:?} power domain failed: {e:?}", pd);
+        //     } else {
+        //         info!("enabled rk3588 power domain {:?}", pd);
+        //     }
+        // }
+
+        // // 使能 VBUS 5V (vcc5v0_host) GPIO，如果存在的话
+        // if let Err(e) = enable_vcc5v0_host(fdt) {
+        //     warn!("enable vcc5v0_host gpio failed: {:?}", e);
+        // }
+
+        // // 解除 USB2 PHY suspend，确保 UTMI 时钟与上拉打开
+        // if let Err(e) = force_usb2phy_active(fdt) {
+        //     warn!("force usb2phy active failed: {:?}", e);
+        // }
+
+        // // 解除 USB3 DP Combo PHY 电源/电气休眠，防止 PIPE 侧被关断
+        // if let Err(e) = force_usbdp_phy_active(fdt) {
+        //     warn!("force usbdp phy active failed: {:?}", e);
+        // }
+
+        // // 释放 XHCI/PHY 相关复位，避免控制器或 PHY 仍处于 reset 状态
+        // if let Err(e) = deassert_rk3588_usb_resets(fdt) {
+        //     warn!("deassert usb resets failed: {:?}", e);
+        // }
     }
- 
+
     #[derive(Debug)]
     enum GpioError {
         NotFound,
@@ -570,165 +591,50 @@ mod tests {
         );
         Ok(())
     }
+}
 
-    #[derive(Debug)]
-    enum PhyError {
-        NotFound,
-        RegMissing,
-    }
+rdrive::module_driver! {
+    name: "CRU",
+    level: ProbeLevel::PostKernel,
+    priority: ProbePriority::DEFAULT,
+    probe_kinds: &[ProbeKind::Fdt {
+        compatibles: &["rockchip,rk3588-cru"],
+        // Use `probe_clk` above; this usage is because doctests cannot find the parent module.
+        on_probe: on_probe_cru,
+    }],
+}
 
-    #[derive(Debug)]
-    enum CruError {
-        NotFound,
-        RegMissing,
-    }
+fn on_probe_cru(node: FdtInfo<'_>, dev: PlatformDevice) -> Result<(), OnProbeError> {
+    // Initialization code for CRU can be added here if needed.
+    // 获取 CRU 寄存器基址
+    let Some(reg) = node.node.reg().and_then(|mut r| r.next()) else {
+        warn!("CRU node has no valid register, skip clock enable");
+        return Err(OnProbeError::KError(rdrive::KError::BadAddr(0)));
+    };
 
-    /// 在 RK3588 上通过 USB2PHY_GRF_CON3 强制退出 suspend
-    /// 针对 OPi5+，usb2phy-grf 基地址 fd5d4000。
-    fn force_usb2phy_active(fdt: &Fdt<'static>) -> Result<(), PhyError> {
-        // 找 usb2phy-grf syscon
-        let Some(grf_node) = fdt
-            .all_nodes()
-            .find(|n| n.compatibles().any(|c| c.contains("usb2phy-grf")))
-        else {
-            return Err(PhyError::NotFound);
-        };
+    let base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000));
 
-        let mut regs = grf_node.reg().ok_or(PhyError::RegMissing)?;
-        let reg = regs.next().ok_or(PhyError::RegMissing)?;
-        let base = iomap(
-            (reg.address as usize).into(),
-            reg.size.unwrap_or(0x1000).max(0x1000),
-        );
+    info!("RK3588 CRU base at {:p}", base.as_ptr());
 
-        unsafe {
-            // USB2PHY_GRF_CON3 offset 0x0C
-            // 写使能+数据：bit11(choose override)=1，bit12(suspendm)=1
-            let val: u32 = (((1 << 11) | (1 << 12)) << 16) | (1 << 11) | (1 << 12);
-            let ptr = base.as_ptr().add(0x0C) as *mut u32;
-            ptr.write_volatile(val);
-        }
+    let clk = Rk3588Cru::new(base);
 
-        info!(
-            "usb2phy-grf {} active (CON3 suspend override set)",
-            grf_node.name()
-        );
-        Ok(())
-    }
-    /// 通过 USBDPPHY_GRF_CON3 解除 powerdown / 打开 RX Termination
-    /// 针对 OPi5+，usbdpphy-grf 基地址 fd5cc000（USB3 PHY1，与 usb@fc400000 配套）。
-    fn force_usbdp_phy_active(fdt: &Fdt<'static>) -> Result<(), PhyError> {
-        let Some(grf_node) = fdt
-            .all_nodes()
-            .find(|n| n.compatibles().any(|c| c.contains("usbdpphy-grf")))
-        else {
-            return Err(PhyError::NotFound);
-        };
+    dev.register(Cru(clk));
 
-        let mut regs = grf_node.reg().ok_or(PhyError::RegMissing)?;
-        let reg = regs.next().ok_or(PhyError::RegMissing)?;
-        let base = iomap(
-            (reg.address as usize).into(),
-            reg.size.unwrap_or(0x1000).max(0x1000),
-        );
+    Ok(())
+}
 
-        unsafe {
-            // USBDPPHY_GRF_CON3 offset 0x0C
-            // bit0: override enable =1
-            // bit4:3 powerdown=0
-            // bit2 tx_elecidle=0 (keep driving)
-            // bit1 rx_termination=1 (enable)
-            // 写掩码在高 16 位
-            let data: u32 = (1 << 0) | (1 << 1); // override + rx_term on, others 0
-            let wen: u32 = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4);
-            let val = (wen << 16) | data;
-            let ptr = base.as_ptr().add(0x0C) as *mut u32;
-            ptr.write_volatile(val);
-        }
+struct Cru(Rk3588Cru);
 
-        info!(
-            "usbdpphy-grf {} active (CON3 override/powerdown cleared)",
-            grf_node.name()
-        );
+unsafe impl Send for Cru {}
+unsafe impl Sync for Cru {}
+
+impl rdrive::DriverGeneric for Cru {
+    fn open(&mut self) -> Result<(), rdrive::KError> {
         Ok(())
     }
 
-    /// 解除 USB 控制器、UTMI、PHY 等相关复位。参照 rk3588-cru.h 中的复位编号。
-    ///
-    /// 目前只做“写掩码 + 清零”操作，不额外断言/拉高。
-    fn deassert_rk3588_usb_resets(fdt: &Fdt<'static>) -> Result<(), CruError> {
-        // 定位 CRU 基址
-        let Some(cru_node) = fdt
-            .all_nodes()
-            .find(|n| n.compatibles().any(|c| c.contains("rk3588-cru")))
-        else {
-            return Err(CruError::NotFound);
-        };
-
-        let mut regs = cru_node.reg().ok_or(CruError::RegMissing)?;
-        let reg = regs.next().ok_or(CruError::RegMissing)?;
-        let cru_base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000));
-
-        // 需要释放的 reset ID，参考 include/dt-bindings/clock/rk3588-cru.h
-        // USB1 对应 xHCI @ 0xfc400000
-        const RESET_IDS: &[u32] = &[
-            674,    // SRST_A_USB_BIU
-            675,    // SRST_H_USB_BIU
-            676,    // SRST_A_USB3OTG0 (一并释放，不影响)
-            679,    // SRST_A_USB3OTG1 (目标控制器)
-            682,    // SRST_H_HOST0
-            683,    // SRST_H_HOST_ARB0
-            684,    // SRST_H_HOST1
-            685,    // SRST_H_HOST_ARB1
-            686,    // SRST_A_USB_GRF
-            688,    // SRST_C_USB2P0_HOST1
-            689,    // SRST_HOST_UTMI0
-            690,    // SRST_HOST_UTMI1
-            1153,   // SRST_P_USBDPGRF0
-            1154,   // SRST_P_USBDPPHY0
-            1155,   // SRST_P_USBDPGRF1
-            1156,   // SRST_P_USBDPPHY1
-            1161,   // SRST_P_USB2PHY_U3_1_GRF0
-            1163,   // SRST_P_USB2PHY_U2_1_GRF0
-            1175,   // SRST_USBDP_COMBO_PHY1
-            1176,   // SRST_USBDP_COMBO_PHY1_LCPLL
-            1177,   // SRST_USBDP_COMBO_PHY1_ROPLL
-            1178,   // SRST_USBDP_COMBO_PHY1_PCS_HS
-            786503, // SRST_OTGPHY_U3_0 (宽松释放)
-            786504, // SRST_OTGPHY_U3_1
-            786505, // SRST_OTGPHY_U2_0
-            786506, // SRST_OTGPHY_U2_1
-        ];
-
-        for &id in RESET_IDS {
-            deassert_one_reset(cru_base, id);
-        }
-
+    fn close(&mut self) -> Result<(), rdrive::KError> {
         Ok(())
-    }
-
-    /// 根据 reset ID 计算寄存器偏移并写入 deassert。
-    fn deassert_one_reset(cru_base: core::ptr::NonNull<u8>, id: u32) {
-        // RK3588：常规 reset（CRU）采用 id/16 对应 SOFTRST_CON(N)；
-        // PMU1 reset 的 id 以 0xC0_000 起始，对应 PMU1SOFTRST_CON。
-        let (offset, bit) = if id >= 0xC0_000 {
-            let rel = id - 0xC0_000;
-            let idx = rel / 16;
-            let bit = rel % 16;
-            // PMU1SOFTRST_CON00 offset = 0x30a00，后续按 4 字节递增
-            (0x30a00 + idx * 4, bit)
-        } else {
-            let idx = id / 16;
-            let bit = id % 16;
-            // SOFTRST_CON00 offset = 0xa00，后续按 4 字节递增
-            (0xa00 + idx * 4, bit)
-        };
-
-        unsafe {
-            let reg = cru_base.as_ptr().add(offset as usize) as *mut u32;
-            // hi16 作为写掩码，低 16 位写 0 解除 reset
-            reg.write_volatile(1u32 << (bit + 16));
-        }
     }
 }
 
