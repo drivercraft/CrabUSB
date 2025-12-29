@@ -17,6 +17,7 @@ mod tests {
         platform::fdt::GetPciIrqConfig,
         println,
     };
+    use rk3588_clk::Rk3588Cru;
     use core::{
         hint::spin_loop,
         sync::atomic::{AtomicBool, Ordering},
@@ -324,7 +325,7 @@ mod tests {
 
                 ensure_rk3588_usb_power(&fdt, &node);
 
-                preper_3588_clk(&fdt, &usb_node);
+                preper_3588_clk(&fdt, &node);
 
                 let addr = iomap(
                     (regs[0].address as usize).into(),
@@ -487,11 +488,32 @@ mod tests {
         }
     }
 
+    /// 准备 RK3588 USB 控制器时钟
+    ///
+    /// 根据设备树中的 clocks 属性启用 USB 相关时钟门控。
+    /// 如果设备树中没有 clocks 信息，则对 RK3588 常见的 USB 时钟进行通用启用。
     fn preper_3588_clk(fdt: &Fdt<'static>, usb_node: &Node<'static>) {
+        // 尝试从设备树获取时钟信息
+        // let clocks_prop = match usb_node.find_property("clocks") {
+        //     Some(p) => p,
+        //     None => {
+        //         debug!("{} has no clocks property, use common USB clock enables", usb_node.name());
+        //         enable_common_usb3otg1_clocks(fdt);
+        //         return;
+        //     }
+        // };
+        let node = fdt.find_compatible(&["rockchip,rk3588-cru"]).next().unwrap();
+        let reg = node.reg().unwrap().next().unwrap();
 
-        // info!("RK3588 USB clocks prepared");
+        let base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000));
+
+        let mut clk = Rk3588Cru::new(base);
+
+        clk.usb_gate_enable(gate_id);
+
+        info!("RK3588 USB clocks enabled via CRU");
     }
-
+ 
     #[derive(Debug)]
     enum GpioError {
         NotFound,
