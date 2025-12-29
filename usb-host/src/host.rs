@@ -5,7 +5,7 @@ use crate::backend::ty::*;
 use crate::device::*;
 use crate::err::Result;
 
-pub use crate::backend::xhci::Xhci;
+pub use crate::backend::{dwc::Dwc, xhci::Xhci};
 
 /// USB 主机控制器
 pub struct USBHost<B> {
@@ -15,6 +15,12 @@ pub struct USBHost<B> {
 impl USBHost<Xhci> {
     pub fn new_xhci(mmio: Mmio, dma_mask: usize) -> Result<USBHost<Xhci>> {
         Ok(USBHost::new(Xhci::new(mmio, dma_mask)?))
+    }
+}
+
+impl USBHost<Dwc> {
+    pub fn new_dwc(mmio: Mmio, dma_mask: usize) -> Result<USBHost<Dwc>> {
+        Ok(USBHost::new(Dwc::new(mmio, dma_mask)?))
     }
 }
 

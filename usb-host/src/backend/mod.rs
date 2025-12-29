@@ -1,6 +1,7 @@
 // #[cfg(feature = "libusb")]
 // pub mod libusb;
 pub mod xhci;
+pub mod dwc;
 
 pub(crate) mod ty;
 

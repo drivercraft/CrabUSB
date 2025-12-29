@@ -1,9 +1,9 @@
 mod context;
 mod def;
-mod device;
+pub(crate) mod device;
 mod endpoint;
 mod event;
-mod host;
+pub(crate) mod host;
 mod reg;
 mod ring;
 mod sync;
