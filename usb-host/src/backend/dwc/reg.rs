@@ -523,29 +523,20 @@ impl Dwc3Regs {
 
     /// 配置 USB3 PHY
     pub fn configure_usb3_phy(&mut self) {
-        let reg = self.read_gusb3pipe_ctl();
-        // 清除 UX_EXIT_PX，设置 U2SSINP3OK
-        let new_val = (reg & !(0x1 << 0)) | (0x1 << 15);
-        self.write_gusb3pipe_ctl(new_val);
+        // 使用 modify 方法直接修改寄存器位字段
+        // 设置 U2SSINP3OK=1 (bit 15)
+        self.globals_mut().gusb3pipectl0.modify(
+            GUSB3PIPECTL::U2SSINP3OK.val(1)
+        );
     }
 
     /// 配置 USB2 PHY
     pub fn configure_usb2_phy(&mut self) {
-        let reg = self.read_gusb2phy_cfg();
-        // PHYIF = 1 (16-bit UTMI)
-        // USBTRDTIM = 9 (16-bit UTMI turnaround time)
-        // SUSPHY = 0 (quirk)
-        // ULPI_UTMI = 0 (UTMI mode)
-        // ENBLSLPM = 0
-        // U2_FREECLK_EXISTS = 0
-        let new_val = (reg & !(0xF << 10))  // 清除 USBTRDTIM
-                     | (9 << 10)            // 设置 USBTRDTIM = 9
-                     | (1 << 3)             // 设置 PHYIF = 1
-                     & !(1 << 6)            // 清除 SUSPHY
-                     & !(1 << 4)            // 清除 ULPI_UTMI
-                     & !(1 << 29)           // 清除 ENBLSLPM
-                     & !(1 << 30);          // 清除 U2_FREECLK_EXISTS
-        self.write_gusb2phy_cfg(new_val);
+        // 使用 modify 方法配置多个字段
+        self.globals_mut().gusb2phycfg0.modify(
+            GUSB2PHYCFG::PHYIF.val(1) +          // 16-bit UTMI
+            GUSB2PHYCFG::USBTRDTIM.val(9)        // 16-bit UTMI turnaround time
+        );
     }
 
     /// 检查 PHY 是否仍在复位
