@@ -186,7 +186,7 @@ impl HostOp for Dwc {
         // ⚠️ 必须在 xHCI HCRST 之后执行！
         // 此时 PHY 接口已经初始化，可以安全访问 PHY 配置寄存器。
         log::info!("DWC3: Configuring DWC3 PHY registers (after xHCI HCRST)");
-        self.dwc_regs.setup_phy();
+        self.dwc_regs.setup_phy()?;
 
         log::info!("✓ DWC3 controller initialized successfully");
 
