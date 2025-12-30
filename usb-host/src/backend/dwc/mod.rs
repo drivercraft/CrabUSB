@@ -13,9 +13,11 @@ use device::DeviceInfo;
 use host::EventHandler;
 
 pub mod phy;
+pub mod grf;
 mod reg;
 
 pub use phy::{UsbDpMode, UsbDpPhy, UsbDpPhyConfig};
+pub use grf::{Grf, GrfType, UsbdpPhyGrfRegs, UsbGrfRegs};
 use reg::Dwc3Regs;
 
 /// DWC3 控制器
@@ -34,7 +36,10 @@ impl Dwc {
     ///
     /// # 参数
     ///
-    /// * `mmio` - MMIO 基址
+    /// * `ctrl` - DWC3 控制器 MMIO 基址
+    /// * `phy` - USBDP PHY MMIO 基址
+    /// * `usbdpphy_grf` - USBDP PHY GRF 基址
+    /// * `usb_grf` - USB GRF 基址
     /// * `dma_mask` - DMA 掩码
     ///
     /// # 初始化流程
@@ -42,7 +47,13 @@ impl Dwc {
     /// 1. 验证 SNPSID 寄存器
     /// 2. 设置为 HOST 模式
     /// 3. 初始化 xHCI 主机控制器
-    pub fn new(ctrl: Mmio, phy: Mmio, dma_mask: usize) -> Result<Self> {
+    pub fn new(
+        ctrl: Mmio,
+        phy: Mmio,
+        usbdpphy_grf: Mmio,
+        usb_grf: Mmio,
+        dma_mask: usize,
+    ) -> Result<Self> {
         let mmio_base = ctrl.as_ptr() as usize;
         let phy = UsbDpPhy::new(
             UsbDpPhyConfig {
@@ -50,6 +61,8 @@ impl Dwc {
                 ..Default::default()
             },
             phy,
+            usbdpphy_grf,
+            usb_grf,
         );
 
         let xhci = Xhci::new(ctrl, dma_mask)?;
@@ -78,7 +91,7 @@ impl HostOp for Dwc {
             ..Default::default()
         };
         self.phy.config = phy_config;
-        self.phy.init();
+        self.phy.init()?;
 
         // 步骤 1: 验证 SNPSID
         self.dwc_regs.verify_snpsid();
