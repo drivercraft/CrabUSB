@@ -1,8 +1,8 @@
 //! DWC3 寄存器定义
 //! 基于 Linux drivers/usb/dwc3/core.h
 
+use core::hint::spin_loop;
 use core::sync::atomic::Ordering;
-use std::hint::spin_loop;
 
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 use tock_registers::{

@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn test_all() {
         // enable_clk();
-        enable_power();
+        // enable_power();
 
         spin_on::spin_on(async {
             let info = get_usb_host();
@@ -203,14 +203,14 @@ mod tests {
             }
 
             if node.compatibles().any(|c| c.contains("snps,dwc3")) {
-                // // 只选择明确为 host 模式的控制器，避免误用 OTG 端口
-                // if let Some(prop) = node.find_property("dr_mode") {
-                //     let mode = prop.str();
-                //     if mode != "host" {
-                //         debug!("skip {} because dr_mode={}", node.name(), mode);
-                //         continue;
-                //     }
-                // }
+                // 只选择明确为 host 模式的控制器，避免误用 OTG 端口
+                if let Some(prop) = node.find_property("dr_mode") {
+                    let mode = prop.str();
+                    if mode != "host" {
+                        debug!("skip {} because dr_mode={}", node.name(), mode);
+                        continue;
+                    }
+                }
 
                 println!("usb node: {}", node.name);
                 let regs = node.reg().unwrap().collect::<Vec<_>>();
@@ -235,14 +235,15 @@ mod tests {
 
                 let u3grf = 0xfd5ac000usize;
                 let dpgrf = 0xfd5cc000usize;
+                let cru = 0xfd7c0000usize;
 
                 let phy = iomap(phy.into(), 0x10000);
-
                 let dpgrf = iomap(dpgrf.into(), 0x4000);
                 let u3grf = iomap(u3grf.into(), 0x4000);
+                let cru = iomap(cru.into(), 0x5c000);
 
                 return XhciInfo {
-                    usb: USBHost::new_dwc(addr, phy, u3grf, dpgrf, u32::MAX as usize).unwrap(),
+                    usb: USBHost::new_dwc(addr, phy, u3grf, dpgrf, cru, u32::MAX as usize).unwrap(),
                     irq,
                 };
             }
@@ -275,13 +276,6 @@ mod tests {
             .register();
             break;
         }
-    }
-
-    fn enable_phy() {
-        // init_rk3588_usb_phy(UsbDpPhyConfig {
-        //     mode: UsbDpMode::Host,
-        //     ..Default::default()
-        // });
     }
 
     fn enable_power() {

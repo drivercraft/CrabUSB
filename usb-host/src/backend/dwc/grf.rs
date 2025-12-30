@@ -25,8 +25,8 @@
 //! Offset 0x0034: USB3OTG1_CFG - USB3 OTG1 配置
 //! ```
 
-use tock_registers::{RegisterLongName, registers::*};
 use tock_registers::interfaces::*;
+use tock_registers::registers::*;
 use tock_registers::{register_bitfields, register_structs};
 
 use crate::Mmio;
@@ -85,26 +85,19 @@ register_bitfields![u32,
 // GRF 寄存器结构定义
 // =============================================================================
 
-/// USBDP PHY GRF 寄存器映射 (16KB)
 register_structs! {
     /// USBDP PHY GRF 寄存器
     #[allow(non_snake_case)]
     pub UsbdpPhyGrfRegs {
         /// 0x00 - 保留
         (0x0000 => _reserved0),
-
         /// 0x04 - 低功耗控制寄存器
         (0x0004 => pub LOW_PWRN: ReadWrite<u32, USBDPPHY_LOW_PWRN::Register>),
-
-        /// 0x08 - 0x3ffc: 保留区域
-        (0x0008 => _reserved1),
-
         /// 0x4000 - 结构体结束 (16KB)
-        (0x4000 => @END),
+        (0x8 => @END),
     }
 }
 
-/// USB GRF 寄存器映射 (16KB)
 register_structs! {
     /// USB GRF 寄存器
     #[allow(non_snake_case)]
@@ -121,11 +114,7 @@ register_structs! {
         /// 0x34 - USB3 OTG1 配置寄存器
         (0x0034 => pub USB3OTG1_CFG: ReadWrite<u32, USB3OTG_CFG::Register>),
 
-        /// 0x38 - 0x3ffc: 保留区域
-        (0x0038 => _reserved2),
-
-        /// 0x4000 - 结构体结束 (16KB)
-        (0x4000 => @END),
+        (0x0038 => @END),
     }
 }
 
@@ -194,9 +183,9 @@ impl Grf {
     /// 设置 LOW_PWRN = 1，使 PHY 退出低功耗模式
     pub fn exit_low_power(&self) {
         log::debug!("GRF@{:x}: Exiting low power mode", self.base());
-        self.usbdpphy_regs().LOW_PWRN.modify(
-            USBDPPHY_LOW_PWRN::LOW_PWRN::PowerUp
-        );
+        self.usbdpphy_regs()
+            .LOW_PWRN
+            .modify(USBDPPHY_LOW_PWRN::LOW_PWRN::PowerUp);
     }
 
     /// 进入低功耗模式
@@ -204,9 +193,9 @@ impl Grf {
     /// 设置 LOW_PWRN = 0，使 PHY 进入低功耗模式
     pub fn enter_low_power(&self) {
         log::debug!("GRF@{:x}: Entering low power mode", self.base());
-        self.usbdpphy_regs().LOW_PWRN.modify(
-            USBDPPHY_LOW_PWRN::LOW_PWRN::PowerDown
-        );
+        self.usbdpphy_regs()
+            .LOW_PWRN
+            .modify(USBDPPHY_LOW_PWRN::LOW_PWRN::PowerDown);
     }
 
     /// 启用 USB3 RX LFPS
@@ -214,9 +203,9 @@ impl Grf {
     /// 设置 RX_LFPS = 1，使能 USB3 Low Frequency Periodic Signaling 接收
     pub fn enable_rx_lfps(&self) {
         log::debug!("GRF@{:x}: Enabling RX LFPS", self.base());
-        self.usbdpphy_regs().LOW_PWRN.modify(
-            USBDPPHY_LOW_PWRN::RX_LFPS::Enable
-        );
+        self.usbdpphy_regs()
+            .LOW_PWRN
+            .modify(USBDPPHY_LOW_PWRN::RX_LFPS::Enable);
     }
 
     /// 禁用 USB3 RX LFPS
@@ -224,14 +213,17 @@ impl Grf {
     /// 设置 RX_LFPS = 0，禁用 USB3 Low Frequency Periodic Signaling 接收
     pub fn disable_rx_lfps(&self) {
         log::debug!("GRF@{:x}: Disabling RX LFPS", self.base());
-        self.usbdpphy_regs().LOW_PWRN.modify(
-            USBDPPHY_LOW_PWRN::RX_LFPS::Disable
-        );
+        self.usbdpphy_regs()
+            .LOW_PWRN
+            .modify(USBDPPHY_LOW_PWRN::RX_LFPS::Disable);
     }
 
     /// 检查是否在低功耗模式
     pub fn is_low_power(&self) -> bool {
-        self.usbdpphy_regs().LOW_PWRN.read(USBDPPHY_LOW_PWRN::LOW_PWRN) == 0
+        self.usbdpphy_regs()
+            .LOW_PWRN
+            .read(USBDPPHY_LOW_PWRN::LOW_PWRN)
+            == 0
     }
 
     // ========================================================================
@@ -262,15 +254,11 @@ impl Grf {
 
         let regs = self.usb_regs_mut();
         if port == 0 {
-            regs.USB3OTG0_CFG.modify(
-                USB3OTG_CFG::PIPE_ENABLE::Enable +
-                USB3OTG_CFG::U3_PORT_DISABLE::Disable
-            );
+            regs.USB3OTG0_CFG
+                .modify(USB3OTG_CFG::PIPE_ENABLE::Enable + USB3OTG_CFG::U3_PORT_DISABLE::Disable);
         } else {
-            regs.USB3OTG1_CFG.modify(
-                USB3OTG_CFG::PIPE_ENABLE::Enable +
-                USB3OTG_CFG::U3_PORT_DISABLE::Disable
-            );
+            regs.USB3OTG1_CFG
+                .modify(USB3OTG_CFG::PIPE_ENABLE::Enable + USB3OTG_CFG::U3_PORT_DISABLE::Disable);
         }
     }
 
@@ -288,15 +276,11 @@ impl Grf {
 
         let regs = self.usb_regs_mut();
         if port == 0 {
-            regs.USB3OTG0_CFG.modify(
-                USB3OTG_CFG::PIPE_ENABLE::Enable +
-                USB3OTG_CFG::PHY_DISABLE::Disable
-            );
+            regs.USB3OTG0_CFG
+                .modify(USB3OTG_CFG::PIPE_ENABLE::Enable + USB3OTG_CFG::PHY_DISABLE::Disable);
         } else {
-            regs.USB3OTG1_CFG.modify(
-                USB3OTG_CFG::PIPE_ENABLE::Enable +
-                USB3OTG_CFG::PHY_DISABLE::Disable
-            );
+            regs.USB3OTG1_CFG
+                .modify(USB3OTG_CFG::PIPE_ENABLE::Enable + USB3OTG_CFG::PHY_DISABLE::Disable);
         }
     }
 
@@ -330,13 +314,13 @@ mod tests {
     #[test]
     fn test_register_bitfields() {
         // 测试 USBDPPHY_LOW_PWRN 位字段
-        let value = USBDPPHY_LOW_PWRN::LOW_PWRN::PowerUp.value
-                  | USBDPPHY_LOW_PWRN::RX_LFPS::Enable.value;
+        let value =
+            USBDPPHY_LOW_PWRN::LOW_PWRN::PowerUp.value | USBDPPHY_LOW_PWRN::RX_LFPS::Enable.value;
         assert_eq!(value, (1 << 13) | (1 << 14));
 
         // 测试 USB3OTG_CFG 位字段
-        let value = USB3OTG_CFG::PIPE_ENABLE::Enable.value
-                  + USB3OTG_CFG::U3_PORT_DISABLE::Disable.value;
+        let value =
+            USB3OTG_CFG::PIPE_ENABLE::Enable.value + USB3OTG_CFG::U3_PORT_DISABLE::Disable.value;
         assert_eq!(value, (1 << 15) | (0 << 8));
     }
 
@@ -344,8 +328,8 @@ mod tests {
     fn test_enable_u3_port_value() {
         // 0x0188 = bit 15 = 1, bit 8 = 0
         let expected: u32 = 0x0188;
-        let value = USB3OTG_CFG::PIPE_ENABLE::Enable.value
-                  + USB3OTG_CFG::U3_PORT_DISABLE::Disable.value;
+        let value =
+            USB3OTG_CFG::PIPE_ENABLE::Enable.value + USB3OTG_CFG::U3_PORT_DISABLE::Disable.value;
         assert_eq!(value, expected);
     }
 
@@ -353,8 +337,8 @@ mod tests {
     fn test_disable_u3_port_value() {
         // 0x1100 = bit 15 = 1, bit 12 = 1
         let expected: u32 = 0x1100;
-        let value = USB3OTG_CFG::PIPE_ENABLE::Enable.value
-                  + USB3OTG_CFG::PHY_DISABLE::Disable.value;
+        let value =
+            USB3OTG_CFG::PIPE_ENABLE::Enable.value + USB3OTG_CFG::PHY_DISABLE::Disable.value;
         assert_eq!(value, expected);
     }
 }
