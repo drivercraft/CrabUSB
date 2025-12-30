@@ -92,7 +92,19 @@ impl HostOp for Dwc {
     async fn init(&mut self) -> Result {
         log::info!("DWC3: Starting controller initialization");
 
-        // 2. 配置 PHY
+        // 步骤 0: 使能 DWC3 控制器时钟（必须在访问寄存器之前）
+        log::info!("DWC3: Enabling DWC3 controller clocks");
+        self.cru.enable_dwc3_controller_clocks();
+
+        // 步骤 0.5: 解除 DWC3 控制器复位（必须在访问寄存器之前）
+        log::info!("DWC3: Deasserting DWC3 controller reset");
+        self.cru.deassert_dwc3_reset();
+
+        // 等待复位解除生效
+        log::debug!("DWC3: Waiting 10ms after reset deassert");
+        self.dwc_regs.delay_ms(10);
+
+        // 步骤 1: 配置 PHY
         let phy_config = UsbDpPhyConfig {
             mode: UsbDpMode::Usb,
             ..Default::default()
@@ -100,7 +112,7 @@ impl HostOp for Dwc {
         self.phy.config = phy_config;
         self.phy.init()?;
 
-        // 步骤 1: 验证 SNPSID
+        // 步骤 2: 验证 SNPSID
         self.dwc_regs.verify_snpsid();
 
         // 步骤 2: 配置 GCTL 寄存器（必须在设置模式之前）

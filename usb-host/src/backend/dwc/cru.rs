@@ -151,6 +151,43 @@ impl Cru {
         log::info!("✓ CRU@{:x}: USBDP PHY clocks enabled", self.base());
     }
 
+    /// 使能 DWC3 控制器时钟
+    ///
+    /// DWC3 需要 3 个时钟：
+    /// - REF_CLK_USB3OTG1 (422): 参考时钟
+    /// - SUSPEND_CLK_USB3OTG1 (421): 挂起时钟
+    /// - ACLK_USB3OTG1 (420): 总线时钟
+    pub fn enable_dwc3_controller_clocks(&mut self) {
+        log::info!("CRU@{:x}: Enabling DWC3 controller clocks", self.base());
+
+        // 使能参考时钟
+        log::debug!("Enabling REF_CLK_USB3OTG1 (422)");
+        self.enable_clock(422);
+
+        // 使能挂起时钟
+        log::debug!("Enabling SUSPEND_CLK_USB3OTG1 (421)");
+        self.enable_clock(421);
+
+        // 使能总线时钟
+        log::debug!("Enabling ACLK_USB3OTG1 (420)");
+        self.enable_clock(420);
+
+        log::info!("✓ CRU@{:x}: DWC3 controller clocks enabled", self.base());
+    }
+
+    /// 解除 DWC3 控制器复位
+    ///
+    /// DWC3 控制器有 AXI/AHB 复位，必须在访问寄存器之前解除
+    pub fn deassert_dwc3_reset(&mut self) {
+        log::info!("CRU@{:x}: Deasserting DWC3 controller reset", self.base());
+
+        // 解除 DWC3 AXI 复位 (SRST_A_USB3OTG1 = 679)
+        log::debug!("Deasserting SRST_A_USB3OTG1 (679)");
+        self.deassert_reset(679);
+
+        log::info!("✓ CRU@{:x}: DWC3 controller reset deasserted", self.base());
+    }
+
     // ========================================================================
     // 复位控制方法
     // ========================================================================
