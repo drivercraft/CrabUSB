@@ -815,6 +815,8 @@ pub struct UsbDpPhy {
     dp_grf: Grf,
     /// USB GRF
     usb_grf: Grf,
+    /// USB2PHY GRF
+    usb2phy_grf: Grf,
     /// CRU (时钟和复位单元)
     cru: Cru,
 }
@@ -828,6 +830,7 @@ impl UsbDpPhy {
     /// * `phy_base` - PHY 寄存器基址
     /// * `usb_grf` - USB GRF 基址
     /// * `dp_grf` - USBDP PHY GRF 基址
+    /// * `usb2phy_grf` - USB2PHY GRF 基址
     /// * `cru` - CRU (时钟和复位单元) 基址
     ///
     /// # Safety
@@ -838,17 +841,20 @@ impl UsbDpPhy {
         phy_base: Mmio,
         usb_grf: Mmio,
         dp_grf: Mmio,
+        usb2phy_grf: Mmio,
         cru: Cru,
     ) -> Self {
         // 创建 GRF 实例
         let dp_grf = unsafe { Grf::new(dp_grf, GrfType::UsbdpPhy) };
         let usb_grf = unsafe { Grf::new(usb_grf, GrfType::Usb) };
+        let usb2phy_grf = unsafe { Grf::new(usb2phy_grf, GrfType::Usb2Phy) };
 
         Self {
             config,
             phy_base: phy_base.as_ptr() as usize,
             dp_grf,
             usb_grf,
+            usb2phy_grf,
             cru,
         }
     }
@@ -874,6 +880,16 @@ impl UsbDpPhy {
     /// 如果 PLL 未能在超时时间内锁定，返回错误
     pub fn init(&mut self) -> Result<()> {
         log::info!("USBDP PHY: Starting initialization");
+
+        // Step 0: 初始化 USB2 PHY (启动 UTMI 480MHz 时钟)
+        //
+        // ⚠️ 关键步骤！USBDP PHY 的 UTMI 时钟输入来自 USB2 PHY。
+        // USB2 PHY 需要输出 480MHz UTMI 时钟给 USBDP PHY。
+        // 这个时钟是 USBDP PHY PIPE 接口工作的必要条件！
+        //
+        // 时钟链: CRU phyclk(693) → USB2 PHY → UTMI 480MHz → USBDP PHY utmi
+        log::info!("USBDP PHY: Initializing USB2 PHY (for UTMI clock)");
+        self.init_usb2_phy();
 
         // Step 1: 使能时钟 (必须最先执行)
         self.enable_clocks();
@@ -1084,6 +1100,62 @@ impl UsbDpPhy {
         }
 
         self.cmn_lane_mux_and_en().write(val);
+    }
+
+    /// 初始化 USB2 PHY (启动 UTMI 480MHz 时钟)
+    ///
+    /// ⚠️ 关键步骤！USBDP PHY 的 UTMI 时钟输入来自 USB2 PHY。
+    ///
+    /// 时钟链:
+    /// ```
+    /// CRU phyclk(693) → USB2 PHY → UTMI 480MHz → USBDP PHY utmi
+    /// ```
+    ///
+    /// 参考设备树 usb2-phy@4000 节点:
+    /// ```dts
+    /// clocks = <0x02 0x2b5>;           // phyclk
+    /// resets = <0x02 0xc0048 0x02 0x489>;  // phy, apb
+    /// clock-output-names = "usb480m_phy1";  // UTMI 480MHz 输出
+    /// ```
+    ///
+    /// 初始化顺序:
+    /// 1. 使能 USB2 PHY 时钟 (phyclk = 693)
+    /// 2. 解除 USB2 PHY 复位 (apb = 1161)
+    /// 3. 配置 USB2PHY GRF (使能端口)
+    /// 4. 等待 USB2 PLL 锁定并输出稳定的 UTMI 480MHz 时钟
+    fn init_usb2_phy(&mut self) {
+        log::info!("USBDP PHY{}: Initializing USB2 PHY for UTMI clock", self.config.id);
+
+        // Step 1: 使能 USB2 PHY 时钟
+        // CRU 寄存器: CLK_GATE_CON[693/16] = CLK_GATE_CON[43]
+        // bit[693%16] = bit[13] = 1 使能
+        self.cru.enable_usb2_phy_clocks();
+
+        // Step 2: 解除 USB2 PHY 复位
+        // CRU 寄存器: SOFTRST_CON[1161/16] = SOFTRST_CON[72]
+        // bit[16 + 1161%16] = bit[16+9] = bit[25] = 1 解除
+        self.cru.deassert_usb2_phy_resets();
+
+        // Step 3: 配置 USB2PHY GRF (使能端口)
+        // USB2PHY GRF: CON[1] = 1 (PORT_ENABLE), CON[0] = 0 (no suspend)
+        log::debug!("Configuring USB2PHY GRF to enable port");
+        self.usb2phy_grf.enable_usb2phy_port();
+
+        // Step 4: 等待 USB2 PHY PLL 锁定
+        // USB2 PHY 需要时间来锁定 PLL 并开始输出 480MHz 时钟
+        // 根据 USB2.0 规范，PLL 锁定时间通常 < 2ms
+        log::debug!("Waiting for USB2 PHY PLL to lock and UTMI clock to stabilize");
+        self.delay_ms(2);
+
+        log::info!(
+            "✓ USBDP PHY{}: USB2 PHY initialized (UTMI 480MHz should be running)",
+            self.config.id
+        );
+    }
+
+    /// 毫秒级延时
+    fn delay_ms(&self, ms: u32) {
+        crate::osal::kernel::delay(core::time::Duration::from_millis(ms as _));
     }
 
     /// 解除 PHY 复位

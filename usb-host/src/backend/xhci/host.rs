@@ -457,8 +457,22 @@ impl Xhci {
         let port_len = regs.port_register_set.len();
 
         for i in 0..port_len {
+            // 读取复位前的端口状态
+            let port_reg = regs.port_register_set.read_volatile_at(i);
+
+            info!("Port {} initial status:", i);
+            info!("  Current Connect Status: {}",
+                port_reg.portsc.current_connect_status());
+            info!("  Port Enabled: {}",
+                port_reg.portsc.port_enabled_disabled());
+            info!("  Port Speed: {}",
+                port_reg.portsc.port_speed());
+            info!("  Port Power: {}",
+                port_reg.portsc.port_power());
+
             self.port_status.push(ProtStaus::Uninit);
-            debug!("Port {i} start reset",);
+            debug!("Port {} start reset", i);
+
             regs.port_register_set.update_volatile_at(i, |port| {
                 port.portsc.set_0_port_enabled_disabled();
                 port.portsc.set_port_reset();

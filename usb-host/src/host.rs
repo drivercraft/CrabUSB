@@ -22,12 +22,14 @@ impl USBHost<Dwc> {
     pub fn new_dwc(
         ctrl: Mmio,
         phy: Mmio,
+        usb2_phy: Mmio,
         u3_grf: Mmio,
         dp_grf: Mmio,
+        usb2phy_grf: Mmio,
         cru: Mmio,
         dma_mask: usize,
     ) -> Result<USBHost<Dwc>> {
-        Ok(USBHost::new(Dwc::new(ctrl, phy, u3_grf, dp_grf, cru, dma_mask)?))
+        Ok(USBHost::new(Dwc::new(ctrl, phy, usb2_phy, u3_grf, dp_grf, usb2phy_grf, cru, dma_mask)?))
     }
 }
 

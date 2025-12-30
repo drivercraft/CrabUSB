@@ -47,12 +47,19 @@ pub const CLK_USBDP_PHY_REFCLK: u32 = 694; // 0x2b6
 pub const CLK_USBDP_PHY_IMMORTAL: u32 = 639; // 0x27f
 pub const CLK_USBDP_PHY_PCLK: u32 = 617; // 0x269
 
+/// USB2 PHY 时钟 ID (RK3588)
+pub const CLK_USB2PHY_PHYCLK: u32 = 693; // 0x2b5 - USB2 PHY 参考时钟
+
 /// USBDP PHY 复位 ID (RK3588)
 pub const RST_USBDP_INIT: u32 = 40; // 0x28
 pub const RST_USBDP_CMN: u32 = 41; // 0x29
 pub const RST_USBDP_LANE: u32 = 42; // 0x2a
 pub const RST_USBDP_PCS_APB: u32 = 43; // 0x2b
 pub const RST_USBDP_PMA_APB: u32 = 1154; // 0x482
+
+/// USB2 PHY 复位 ID (RK3588)
+pub const RST_USB2PHY_PHY: u32 = 0;  // 0xc0048 的低16位 - 需要特殊处理
+pub const RST_USB2PHY_APB: u32 = 1161; // 0x489 - USB2 PHY APB 复位
 
 // =============================================================================
 // CRU 驱动实例
@@ -186,6 +193,39 @@ impl Cru {
         self.deassert_reset(679);
 
         log::info!("✓ CRU@{:x}: DWC3 controller reset deasserted", self.base());
+    }
+
+    /// 使能 USB2 PHY 时钟
+    ///
+    /// USB2 PHY 需要参考时钟才能生成 UTMI 480MHz 时钟
+    /// 这是 USBDP PHY UTMI 时钟的源头！
+    pub fn enable_usb2_phy_clocks(&mut self) {
+        log::info!("CRU@{:x}: Enabling USB2 PHY clocks", self.base());
+
+        // 使能 USB2 PHY 参考时钟 (phyclk)
+        log::debug!("Enabling CLK_USB2PHY_PHYCLK (693)");
+        self.enable_clock(CLK_USB2PHY_PHYCLK);
+
+        log::info!("✓ CRU@{:x}: USB2 PHY clocks enabled", self.base());
+    }
+
+    /// 解除 USB2 PHY 复位
+    ///
+    /// USB2 PHY 有两个复位信号：
+    /// - PHY 复位 (0xc0048): 需要特殊处理
+    /// - APB 复位 (0x489): APB 总线复位
+    ///
+    /// 注意：0xc0048 是一个特殊值，可能是多个复位的组合
+    /// 根据 RK3588 复位定义，0xc0048 实际上是 PMU_SMNI_PERF_RSTNR
+    /// 这里我们先处理标准的 APB 复位
+    pub fn deassert_usb2_phy_resets(&mut self) {
+        log::info!("CRU@{:x}: Deasserting USB2 PHY resets", self.base());
+
+        // 解除 USB2 PHY APB 复位
+        log::debug!("Deasserting RST_USB2PHY_APB (1161)");
+        self.deassert_reset(RST_USB2PHY_APB);
+
+        log::info!("✓ CRU@{:x}: USB2 PHY resets deasserted", self.base());
     }
 
     // ========================================================================
