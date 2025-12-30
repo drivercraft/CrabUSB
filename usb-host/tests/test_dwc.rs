@@ -49,7 +49,7 @@ mod tests {
     #[test]
     fn test_all() {
         // enable_clk();
-        // enable_power();
+        enable_power();
 
         spin_on::spin_on(async {
             let info = get_usb_host();
