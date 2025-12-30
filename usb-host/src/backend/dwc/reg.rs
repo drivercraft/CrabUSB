@@ -527,11 +527,16 @@ impl Dwc3Regs {
 
     /// 配置 USB3 PHY
     pub fn configure_usb3_phy(&mut self) {
+        log::debug!("DWC3: configure_usb3_phy() called");
+
         // 使用 modify 方法直接修改寄存器位字段
         // 设置 U2SSINP3OK=1 (bit 15)
+        log::debug!("DWC3: Setting U2SSINP3OK=1 using modify()");
         self.globals_mut()
             .gusb3pipectl0
             .modify(GUSB3PIPECTL::U2SSINP3OK.val(1));
+
+        log::debug!("DWC3: modify() completed");
     }
 
     /// 配置 USB2 PHY
@@ -742,10 +747,23 @@ impl Dwc3Regs {
         let reg_before = self.read_gusb3pipe_ctl();
         log::debug!("DWC3: GUSB3PIPECTL before: {:#010x}", reg_before);
 
+        // 尝试直接写入测试
+        log::debug!("DWC3: Testing direct write...");
+        self.write_gusb3pipe_ctl(0x00008000); // Set U2SSINP3OK=1
+        let test_read = self.read_gusb3pipe_ctl();
+        log::debug!("DWC3: After direct write 0x00008000, read: {:#010x}", test_read);
+
+        if test_read == 0 {
+            log::error!("DWC3: GUSB3PIPECTL write FAILED - register still 0!");
+            log::error!("DWC3: PHY may not be ready or clocks not enabled");
+        } else {
+            log::info!("DWC3: Direct write succeeded, register value: {:#010x}", test_read);
+        }
+
         self.configure_usb3_phy();
 
         let updated = self.read_gusb3pipe_ctl();
-        log::debug!("DWC3: GUSB3PIPECTL after:  {:#010x}", updated);
+        log::debug!("DWC3: GUSB3PIPECTL after configure: {:#010x}", updated);
 
         // === 步骤 3: 配置 USB2 PHY ===
         log::info!("DWC3: Configuring USB2 PHY");
