@@ -16,7 +16,6 @@ pub mod grf;
 pub mod phy;
 mod reg;
 
-pub use grf::{Grf, GrfType, UsbGrfRegs, UsbdpPhyGrfRegs};
 pub use phy::{UsbDpMode, UsbDpPhy, UsbDpPhyConfig};
 use reg::Dwc3Regs;
 
