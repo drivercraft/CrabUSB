@@ -12,10 +12,12 @@ pub use crate::backend::xhci::*;
 use device::DeviceInfo;
 use host::EventHandler;
 
+pub mod cru;
 pub mod grf;
 pub mod phy;
 mod reg;
 
+pub use cru::Cru;
 pub use phy::{UsbDpMode, UsbDpPhy, UsbDpPhyConfig};
 use reg::Dwc3Regs;
 
@@ -27,6 +29,7 @@ use reg::Dwc3Regs;
 pub struct Dwc {
     xhci: Xhci,
     phy: UsbDpPhy,
+    cru: Cru,
     dwc_regs: Dwc3Regs,
 }
 
@@ -37,8 +40,9 @@ impl Dwc {
     ///
     /// * `ctrl` - DWC3 控制器 MMIO 基址
     /// * `phy` - USBDP PHY MMIO 基址
-    /// * `usbdpphy_grf` - USBDP PHY GRF 基址
     /// * `usb_grf` - USB GRF 基址
+    /// * `dp_grf` - USBDP PHY GRF 基址
+    /// * `cru` - CRU (时钟和复位单元) MMIO 基址
     /// * `dma_mask` - DMA 掩码
     ///
     /// # 初始化流程
@@ -51,9 +55,11 @@ impl Dwc {
         phy: Mmio,
         usb_grf: Mmio,
         dp_grf: Mmio,
+        cru: Mmio,
         dma_mask: usize,
     ) -> Result<Self> {
         let mmio_base = ctrl.as_ptr() as usize;
+        let cru = unsafe { Cru::new(cru) };
         let phy = UsbDpPhy::new(
             UsbDpPhyConfig {
                 mode: UsbDpMode::Usb,
@@ -62,6 +68,7 @@ impl Dwc {
             phy,
             usb_grf,
             dp_grf,
+            cru,
         );
 
         let xhci = Xhci::new(ctrl, dma_mask)?;
@@ -72,6 +79,7 @@ impl Dwc {
             xhci,
             dwc_regs,
             phy,
+            cru,
         })
     }
 }
