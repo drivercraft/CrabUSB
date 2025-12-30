@@ -816,7 +816,7 @@ impl Dwc3Regs {
     }
 
     /// 简单的毫秒级延时（使用忙等待）
-    fn delay_ms(&self, ms: u32) {
+    pub fn delay_ms(&self, ms: u32) {
         crate::osal::kernel::delay(core::time::Duration::from_millis(ms as _));
     }
 }

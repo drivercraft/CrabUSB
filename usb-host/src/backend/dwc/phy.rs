@@ -917,6 +917,19 @@ impl UsbDpPhy {
         // Step 9: 等待 PLL 锁定
         self.wait_pll_lock()?;
 
+        // Step 10: 启用 USB3 U3 端口
+        //
+        // ⚠️ 重要：必须启用 USB GRF 中的 U3 端口配置
+        //
+        // USB GRF 寄存器: USB3OTG1_CFG
+        //   - PIPE_ENABLE = 1 (启用 PIPE 接口)
+        //   - U3_PORT_DISABLE = 0 (启用 U3 端口)
+        //   - PHY_DISABLE = 0 (启用 PHY)
+        //
+        // 参考 U-Boot: udphy_u3_port_disable(udphy, false)
+        log::info!("USBDP PHY{}: Enabling USB3 U3 port in USB GRF", self.config.id);
+        self.enable_u3_port();
+
         log::info!("✓ USBDP PHY{} initialized successfully", self.config.id);
         Ok(())
     }
