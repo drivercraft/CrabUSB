@@ -703,7 +703,11 @@ impl Dwc3Regs {
     ///
     /// 参考 Linux 内核 drivers/usb/dwc3/core.c:dwc3_phy_setup()
     /// 和 u-boot drivers/usb/host/xhci-dwc3.c
-    pub fn setup_phy(&mut self) {
+    ///
+    /// # 错误
+    ///
+    /// 如果 PHY 寄存器无法写入（仍然为 0），返回错误
+    pub fn setup_phy(&mut self) -> core::result::Result<(), usb_if::host::USBError> {
         log::info!("DWC3: Starting PHY configuration");
 
         // === 步骤 0: 读取并记录初始状态 ===
@@ -820,10 +824,6 @@ impl Dwc3Regs {
         let gusb2_final = self.read_gusb2phy_cfg();
         let gusb3_final = self.read_gusb3pipe_ctl();
 
-        log::info!("DWC3: Final PHY register states:");
-        log::info!("  GUSB2PHYCFG:   {:#010x}", gusb2_final);
-        log::info!("  GUSB3PIPECTL:   {:#010x}", gusb3_final);
-
         // 验证 PHY 复位已解除
         let (usb2_reset, usb3_reset) = self.is_phy_in_reset();
         if usb2_reset {
@@ -833,7 +833,32 @@ impl Dwc3Regs {
             log::error!("DWC3: USB3 PHY still in reset!");
         }
 
-        log::info!("DWC3: PHY configuration complete");
+        // === 验证 PHY 寄存器是否可写 ===
+        log::info!("DWC3: Final PHY register states:");
+        log::info!("DWC3:   GUSB2PHYCFG:   {:#010x}", gusb2_final);
+        log::info!("DWC3:   GUSB3PIPECTL:   {:#010x}", gusb3_final);
+
+        // 检查 PHY 寄存器是否仍为 0（无法写入）
+        if gusb2_final == 0 && gusb3_final == 0 {
+            log::error!("❌ DWC3: PHY registers are still 0x00000000 after configuration!");
+            log::error!("❌ DWC3: This indicates PHY is not accessible or clocks are not enabled");
+            log::error!("❌ DWC3: Possible root causes:");
+            log::error!("   1. USB2 PHY UTMI 480MHz clock not running");
+            log::error!("   2. USBDP PHY PIPE interface not initialized");
+            log::error!("   3. DWC3 controller clock domain not active");
+            log::error!("   4. PHY hardware not properly powered on");
+
+            // 打印诊断信息
+            log::error!("❌ DWC3: Diagnostic information:");
+            log::error!("   GCTL:          {:#010x}", self.read_gctl());
+            log::error!("   GSTS:          {:#010x}", self.globals().gsts.get());
+            log::error!("   GGPIO:         {:#010x}", self.globals().ggpio.get());
+
+            return Err(usb_if::host::USBError::NotInitialized);
+        }
+
+        log::info!("✓ DWC3: PHY configuration complete (registers accessible)");
+        Ok(())
     }
 
     /// 简单的毫秒级延时（使用忙等待）
