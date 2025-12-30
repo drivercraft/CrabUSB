@@ -224,20 +224,28 @@ impl Cru {
 
     /// 解除 USBDP PHY 初始化复位
     ///
-    /// 按照 Linux 驱动的顺序解除复位
+    /// 按照 u-boot 驱动的顺序解除复位
+    /// 参考: drivers/phy/phy-rockchip-usbdp.c:rk3588_udphy_init()
+    ///
+    /// 复位解除顺序和时延：
+    /// 1. 解除 INIT 复位
+    /// 2. 等待 1ms (数据手册要求 200ns，实际使用 1ms 提供余量)
+    /// 3. 解除 CMN/LANE 复位
     pub fn deassert_usbdp_phy_init_resets(&mut self) {
         log::info!(
             "CRU@{:x}: Deasserting USBDP PHY init resets",
             self.base()
         );
 
-        // 解除 init 复位
+        // Step 1: 解除 init 复位
         self.deassert_reset(RST_USBDP_INIT);
 
-        // 等待 1 微秒
-        self.delay_us(1);
+        // Step 2: 等待 1ms (数据手册要求 200ns，u-boot 使用 1ms)
+        // ⚠️  关键时延！PLL 锁定失败通常是因为这个时延太短
+        log::debug!("CRU@{:x}: Waiting 1ms after INIT reset deassert", self.base());
+        self.delay_us(1000); // 1ms = 1000us
 
-        // 解除 cmn/lane 复位
+        // Step 3: 解除 cmn/lane 复位
         self.deassert_reset(RST_USBDP_CMN);
         self.deassert_reset(RST_USBDP_LANE);
 

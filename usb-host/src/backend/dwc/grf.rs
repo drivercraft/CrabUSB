@@ -35,16 +35,16 @@ use crate::Mmio;
 // 寄存器位字段定义
 // =============================================================================
 
-/// USBDP PHY GRF 低功耗控制寄存器
+// USBDP PHY GRF 低功耗控制寄存器
 register_bitfields![u32,
     USBDPPHY_LOW_PWRN [
-        /// RX LFPS enable (USB3)
+        // RX LFPS enable (USB3)
         RX_LFPS OFFSET(14) NUMBITS(1) [
             Disable = 0,
             Enable = 1
         ],
 
-        /// Low power mode control
+        // Low power mode control
         LOW_PWRN OFFSET(13) NUMBITS(1) [
             PowerDown = 0,
             PowerUp = 1
@@ -52,28 +52,28 @@ register_bitfields![u32,
     ]
 ];
 
-/// USB3 OTG 配置寄存器
+// USB3 OTG 配置寄存器
 register_bitfields![u32,
     USB3OTG_CFG [
-        /// USB3 pipe enable
+        // USB3 pipe enable
         PIPE_ENABLE OFFSET(15) NUMBITS(1) [
             Disable = 0,
             Enable = 1
         ],
 
-        /// USB3 PHY disable
+        // USB3 PHY disable
         PHY_DISABLE OFFSET(12) NUMBITS(1) [
             Enable = 0,
             Disable = 1
         ],
 
-        /// USB3 suspend enable
+        // USB3 suspend enable
         SUSPEND_ENABLE OFFSET(10) NUMBITS(1) [
             Disable = 0,
             Enable = 1
         ],
 
-        /// U3 port disable
+        // U3 port disable
         U3_PORT_DISABLE OFFSET(8) NUMBITS(1) [
             Enable = 0,
             Disable = 1
@@ -181,41 +181,85 @@ impl Grf {
     /// 退出低功耗模式
     ///
     /// 设置 LOW_PWRN = 1，使 PHY 退出低功耗模式
+    ///
+    /// 根据 RK3588 TRM 和 u-boot grfreg_write() 实现，Rockchip GRF 寄存器格式：
+    /// ```text
+    /// Bit[31:16] - 写使能位（每bit独立控制对应的数据位）
+    /// Bit[15:0]  - 数据位
+    /// ```
+    ///
+    /// 写入公式：`value = (data << bit) | (mask << 16)`
+    /// 对于 LOW_PWRN (bit 13):
+    ///   - data = 1 (PowerUp)
+    ///   - mask = 1 << 13
+    ///   - value = (1 << 13) | (1 << 29) = 0x20002000
     pub fn exit_low_power(&self) {
         log::debug!("GRF@{:x}: Exiting low power mode", self.base());
-        self.usbdpphy_regs()
-            .LOW_PWRN
-            .modify(USBDPPHY_LOW_PWRN::LOW_PWRN::PowerUp);
+
+        // 直接写入，正确设置写使能位
+        // Bit[13] = 1 (PowerUp), Bit[29] = 1 (Write Enable)
+        const VALUE: u32 = (1 << 13) | (1 << 29);
+
+        self.usbdpphy_regs().LOW_PWRN.set(VALUE);
+
+        // 读取并验证
+        let read_val: u32 = self.usbdpphy_regs().LOW_PWRN.extract().into();
+        log::debug!("GRF@{:x}: LOW_PWRN after write: 0x{:08x} (expected bit13=1)",
+                   self.base(), read_val);
     }
 
     /// 进入低功耗模式
     ///
     /// 设置 LOW_PWRN = 0，使 PHY 进入低功耗模式
+    ///
+    /// 写入值：`value = (0 << 13) | (1 << 29) = 0x20000000`
     pub fn enter_low_power(&self) {
         log::debug!("GRF@{:x}: Entering low power mode", self.base());
-        self.usbdpphy_regs()
-            .LOW_PWRN
-            .modify(USBDPPHY_LOW_PWRN::LOW_PWRN::PowerDown);
+
+        // 直接写入，正确设置写使能位
+        // Bit[13] = 0 (PowerDown), Bit[29] = 1 (Write Enable)
+        const VALUE: u32 = 1 << 29;
+
+        self.usbdpphy_regs().LOW_PWRN.set(VALUE);
+
+        log::debug!("GRF@{:x}: LOW_PWRN set to power down", self.base());
     }
 
     /// 启用 USB3 RX LFPS
     ///
     /// 设置 RX_LFPS = 1，使能 USB3 Low Frequency Periodic Signaling 接收
+    ///
+    /// 写入值：`value = (1 << 14) | (1 << 30) = 0x40004000`
     pub fn enable_rx_lfps(&self) {
         log::debug!("GRF@{:x}: Enabling RX LFPS", self.base());
-        self.usbdpphy_regs()
-            .LOW_PWRN
-            .modify(USBDPPHY_LOW_PWRN::RX_LFPS::Enable);
+
+        // 直接写入，正确设置写使能位
+        // Bit[14] = 1 (Enable), Bit[30] = 1 (Write Enable)
+        const VALUE: u32 = (1 << 14) | (1 << 30);
+
+        self.usbdpphy_regs().LOW_PWRN.set(VALUE);
+
+        // 读取并验证
+        let read_val: u32 = self.usbdpphy_regs().LOW_PWRN.extract().into();
+        log::debug!("GRF@{:x}: RX_LFPS after write: 0x{:08x} (expected bit14=1)",
+                   self.base(), read_val);
     }
 
     /// 禁用 USB3 RX LFPS
     ///
     /// 设置 RX_LFPS = 0，禁用 USB3 Low Frequency Periodic Signaling 接收
+    ///
+    /// 写入值：`value = (0 << 14) | (1 << 30) = 0x40000000`
     pub fn disable_rx_lfps(&self) {
         log::debug!("GRF@{:x}: Disabling RX LFPS", self.base());
-        self.usbdpphy_regs()
-            .LOW_PWRN
-            .modify(USBDPPHY_LOW_PWRN::RX_LFPS::Disable);
+
+        // 直接写入，正确设置写使能位
+        // Bit[14] = 0 (Disable), Bit[30] = 1 (Write Enable)
+        const VALUE: u32 = 1 << 30;
+
+        self.usbdpphy_regs().LOW_PWRN.set(VALUE);
+
+        log::debug!("GRF@{:x}: RX_LFPS disabled", self.base());
     }
 
     /// 检查是否在低功耗模式
