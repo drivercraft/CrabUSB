@@ -27,7 +27,7 @@ impl USBHost<Dwc> {
         cru: Mmio,
         dma_mask: usize,
     ) -> Result<USBHost<Dwc>> {
-        Ok(USBHost::new(Dwc::new(ctrl, phy, u3_grf, dp_grf, dma_mask)?))
+        Ok(USBHost::new(Dwc::new(ctrl, phy, u3_grf, dp_grf, cru, dma_mask)?))
     }
 }
 

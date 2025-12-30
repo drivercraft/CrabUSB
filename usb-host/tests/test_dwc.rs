@@ -28,7 +28,7 @@ use futures::{FutureExt, future::BoxFuture};
 use log::info;
 use log::*;
 use pcie::*;
-use rk3588_clk::Rk3588Cru;
+// use rk3588_clk::Rk3588Cru;
 use rockchip_pm::{PowerDomain, RockchipPM};
 use usb_if::{
     descriptor::{ConfigurationDescriptor, EndpointType},
@@ -39,6 +39,8 @@ use usb_if::{
 mod tests {
 
     use core::ptr::NonNull;
+
+    use bare_test::time::spin_delay;
 
     use super::*;
 
@@ -182,6 +184,10 @@ mod tests {
         impl Kernel for KernelImpl {
             fn page_size() -> usize {
                 page_size()
+            }
+
+            fn delay(duration: Duration) {
+                spin_delay(duration);
             }
         }
     }
@@ -331,50 +337,50 @@ mod tests {
     }
 }
 
-rdrive::module_driver! {
-    name: "CRU",
-    level: ProbeLevel::PostKernel,
-    priority: ProbePriority::DEFAULT,
-    probe_kinds: &[ProbeKind::Fdt {
-        compatibles: &["rockchip,rk3588-cru"],
-        // Use `probe_clk` above; this usage is because doctests cannot find the parent module.
-        on_probe: on_probe_cru,
-    }],
-}
+// rdrive::module_driver! {
+//     name: "CRU",
+//     level: ProbeLevel::PostKernel,
+//     priority: ProbePriority::DEFAULT,
+//     probe_kinds: &[ProbeKind::Fdt {
+//         compatibles: &["rockchip,rk3588-cru"],
+//         // Use `probe_clk` above; this usage is because doctests cannot find the parent module.
+//         on_probe: on_probe_cru,
+//     }],
+// }
 
-fn on_probe_cru(node: FdtInfo<'_>, dev: PlatformDevice) -> Result<(), OnProbeError> {
-    // Initialization code for CRU can be added here if needed.
-    // 获取 CRU 寄存器基址
-    let Some(reg) = node.node.reg().and_then(|mut r| r.next()) else {
-        warn!("CRU node has no valid register, skip clock enable");
-        return Err(OnProbeError::KError(rdrive::KError::BadAddr(0)));
-    };
+// fn on_probe_cru(node: FdtInfo<'_>, dev: PlatformDevice) -> Result<(), OnProbeError> {
+//     // Initialization code for CRU can be added here if needed.
+//     // 获取 CRU 寄存器基址
+//     let Some(reg) = node.node.reg().and_then(|mut r| r.next()) else {
+//         warn!("CRU node has no valid register, skip clock enable");
+//         return Err(OnProbeError::KError(rdrive::KError::BadAddr(0)));
+//     };
 
-    let base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000));
+//     let base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000));
 
-    info!("RK3588 CRU base at {:p}", base.as_ptr());
+//     info!("RK3588 CRU base at {:p}", base.as_ptr());
 
-    let clk = Rk3588Cru::new(base);
+//     let clk = Rk3588Cru::new(base);
 
-    dev.register(Cru(clk));
+//     dev.register(Cru(clk));
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-struct Cru(Rk3588Cru);
+// struct Cru(Rk3588Cru);
 
-unsafe impl Send for Cru {}
-unsafe impl Sync for Cru {}
+// unsafe impl Send for Cru {}
+// unsafe impl Sync for Cru {}
 
-impl rdrive::DriverGeneric for Cru {
-    fn open(&mut self) -> Result<(), rdrive::KError> {
-        Ok(())
-    }
+// impl rdrive::DriverGeneric for Cru {
+//     fn open(&mut self) -> Result<(), rdrive::KError> {
+//         Ok(())
+//     }
 
-    fn close(&mut self) -> Result<(), rdrive::KError> {
-        Ok(())
-    }
-}
+//     fn close(&mut self) -> Result<(), rdrive::KError> {
+//         Ok(())
+//     }
+// }
 
 trait Align {
     fn align_up(&self, align: usize) -> usize;

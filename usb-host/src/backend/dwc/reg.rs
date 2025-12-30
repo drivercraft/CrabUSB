@@ -799,11 +799,6 @@ impl Dwc3Regs {
 
     /// 简单的毫秒级延时（使用忙等待）
     fn delay_ms(&self, ms: u32) {
-        const LOOPS_PER_MS: u32 = 50000;
-        let total_loops = ms * LOOPS_PER_MS;
-        for _ in 0..total_loops {
-            spin_loop();
-        }
-        core::sync::atomic::fence(Ordering::SeqCst);
+        crate::osal::kernel::delay(core::time::Duration::from_millis(ms as _));
     }
 }

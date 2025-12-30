@@ -35,6 +35,7 @@ use tock_registers::interfaces::*;
 use tock_registers::register_bitfields;
 
 use super::grf::{Grf, GrfType};
+use super::cru::Cru;
 use crate::{Mmio, err::Result};
 
 // =============================================================================
@@ -225,6 +226,8 @@ pub struct UsbDpPhy {
     dp_grf: Grf,
     /// USB GRF
     usb_grf: Grf,
+    /// CRU (时钟和复位单元)
+    cru: Cru,
 }
 
 impl UsbDpPhy {
@@ -234,22 +237,24 @@ impl UsbDpPhy {
     ///
     /// * `config` - PHY 配置
     /// * `phy_base` - PHY 寄存器基址
-    /// * `usbdpphy_grf_base` - USBDP PHY GRF 基址
-    /// * `usb_grf_base` - USB GRF 基址
+    /// * `usb_grf` - USB GRF 基址
+    /// * `dp_grf` - USBDP PHY GRF 基址
+    /// * `cru` - CRU (时钟和复位单元) 基址
     ///
     /// # Safety
     ///
     /// 调用者必须确保相关寄存器地址有效
-    pub fn new(config: UsbDpPhyConfig, phy_base: Mmio, u3_grf: Mmio, dp_grf: Mmio) -> Self {
+    pub fn new(config: UsbDpPhyConfig, phy_base: Mmio, usb_grf: Mmio, dp_grf: Mmio, cru: Cru) -> Self {
         // 创建 GRF 实例
         let dp_grf = unsafe { Grf::new(dp_grf, GrfType::UsbdpPhy) };
-        let usb_grf = unsafe { Grf::new(u3_grf, GrfType::Usb) };
+        let usb_grf = unsafe { Grf::new(usb_grf, GrfType::Usb) };
 
         Self {
             config,
             phy_base: phy_base.as_ptr() as usize,
             dp_grf,
             usb_grf,
+            cru,
         }
     }
 
@@ -259,13 +264,14 @@ impl UsbDpPhy {
     ///
     /// ## 初始化流程
     ///
-    /// 1. 退出低功耗模式
+    /// 1. **使能时钟** (必须最先执行)
     /// 2. 解除 APB 复位
-    /// 3. 配置参考时钟
-    /// 4. 配置初始化序列
-    /// 5. 配置 lane multiplexing
-    /// 6. 解除 init/cmn/lane 复位
-    /// 7. 等待 PLL 锁定
+    /// 3. 退出低功耗模式
+    /// 4. 配置参考时钟
+    /// 5. 配置初始化序列
+    /// 6. 配置 lane multiplexing
+    /// 7. 解除 init/cmn/lane 复位
+    /// 8. 等待 PLL 锁定
     ///
     /// # 错误
     ///
@@ -273,25 +279,28 @@ impl UsbDpPhy {
     pub fn init(&mut self) -> Result<()> {
         log::info!("USBDP PHY: Starting initialization");
 
-        // Step 1: 退出低功耗模式
-        self.exit_low_power_mode();
+        // Step 1: 使能时钟 (必须最先执行)
+        self.enable_clocks();
 
         // Step 2: 解除 APB 复位
         self.deassert_apb_reset();
 
-        // Step 3: 配置参考时钟
+        // Step 3: 退出低功耗模式
+        self.exit_low_power_mode();
+
+        // Step 4: 配置参考时钟
         self.configure_refclk();
 
-        // Step 4: 配置初始化序列
+        // Step 5: 配置初始化序列
         self.configure_init_sequence();
 
-        // Step 5: 配置 lane multiplexing
+        // Step 6: 配置 lane multiplexing
         self.configure_lane_mux();
 
-        // Step 6: 解除 init/cmn/lane 复位
+        // Step 7: 解除 init/cmn/lane 复位
         self.deassert_phy_reset();
 
-        // Step 7: 等待 PLL 锁定
+        // Step 8: 等待 PLL 锁定
         // self.wait_pll_lock()?;
 
         log::info!("✓ USBDP PHY{} initialized successfully", self.config.id);
@@ -317,14 +326,19 @@ impl UsbDpPhy {
         }
     }
 
+    /// 使能时钟
+    ///
+    /// **必须最先执行**，因为 APB 总线访问需要时钟
+    fn enable_clocks(&mut self) {
+        log::info!("USBDP PHY{}: Enabling clocks", self.config.id);
+        self.cru.enable_usbdp_phy_clocks();
+        log::info!("✓ USBDP PHY{}: Clocks enabled", self.config.id);
+    }
+
     /// 解除 APB 复位
-    fn deassert_apb_reset(&self) {
+    fn deassert_apb_reset(&mut self) {
         log::debug!("USBDP PHY{}: Deasserting APB reset", self.config.id);
-
-        // TODO: 通过 CRU 接口解除复位
-        // reset_deassert(RST_USBDP_PMA_APB);
-        // reset_deassert(RST_USBDP_PCS_APB);
-
+        self.cru.deassert_usbdp_phy_apb_reset();
         log::debug!("USBDP PHY{}: APB reset deasserted", self.config.id);
     }
 
@@ -400,12 +414,12 @@ impl UsbDpPhy {
     }
 
     /// 解除 PHY 复位
-    fn deassert_phy_reset(&self) {
+    fn deassert_phy_reset(&mut self) {
         log::debug!("USBDP PHY{}: Deasserting PHY reset", self.config.id);
 
         // Step 1: 解除 init 复位
         if self.config.mode == UsbDpMode::Usb || self.config.mode == UsbDpMode::UsbDp {
-            self.deassert_reset(RST_USBDP_INIT);
+            self.cru.deassert_usbdp_phy_init_resets();
             log::debug!("USBDP PHY{}: Init reset deasserted", self.config.id);
         }
 
@@ -424,10 +438,8 @@ impl UsbDpPhy {
         // Step 3: 等待 1 微秒
         self.delay_us(1);
 
-        // Step 4: 解除 cmn/lane 复位 (仅 USB 模式)
+        // Step 4: 解除 cmn/lane 复位 (已在 deassert_usbdp_phy_init_resets 中处理)
         if self.config.mode == UsbDpMode::Usb || self.config.mode == UsbDpMode::UsbDp {
-            self.deassert_reset(RST_USBDP_CMN);
-            self.deassert_reset(RST_USBDP_LANE);
             log::debug!("USBDP PHY{}: CMN/LANE reset deasserted", self.config.id);
         }
     }
@@ -466,17 +478,6 @@ impl UsbDpPhy {
 
         log::info!("✓ USBDP PHY{}: PLL locked successfully", self.config.id);
         Ok(())
-    }
-
-    /// 解除单个复位
-    fn deassert_reset(&self, reset_id: u32) {
-        // TODO: 通过 CRU 接口解除复位
-        // reset_deassert(reset_id);
-        log::trace!(
-            "USBDP PHY{}: Deasserting reset {}",
-            self.config.id,
-            reset_id
-        );
     }
 
     /// 微秒级延时

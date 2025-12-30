@@ -1,9 +1,14 @@
+use core::time::Duration;
+
 use trait_ffi::def_extern_trait;
 
 #[def_extern_trait]
 pub trait Kernel {
     fn page_size() -> usize;
+    fn delay(duration: Duration);
 }
+
+
 
 pub struct SpinWhile<F>
 where
