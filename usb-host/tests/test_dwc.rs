@@ -241,15 +241,23 @@ mod tests {
 
                 let u3grf = 0xfd5ac000usize;
                 let dpgrf = 0xfd5cc000usize;
+                let usb2phy_grf = 0xfd5d4000usize;  // USB2PHY1 GRF 基址
                 let cru = 0xfd7c0000usize;
 
+                // USB2 PHY 地址 (RK3588 USB2PHY1)
+                // 从设备树: syscon@fd5d4000 + offset@4000 = 0xfd5d8000
+                // USB2 PHY 输出 480MHz 时钟给 DWC3 控制器，这是 PHY 寄存器可访问的必要条件
+                let usb2_phy = 0xfd5d8000usize;
+
                 let phy = iomap(phy.into(), 0x10000);
+                let usb2_phy = iomap(usb2_phy.into(), 0x4000);
                 let dpgrf = iomap(dpgrf.into(), 0x4000);
                 let u3grf = iomap(u3grf.into(), 0x4000);
+                let usb2phy_grf = iomap(usb2phy_grf.into(), 0x4000);
                 let cru = iomap(cru.into(), 0x5c000);
 
                 return XhciInfo {
-                    usb: USBHost::new_dwc(addr, phy, u3grf, dpgrf, cru, u32::MAX as usize).unwrap(),
+                    usb: USBHost::new_dwc(addr, phy, usb2_phy, u3grf, dpgrf, usb2phy_grf, cru, u32::MAX as usize).unwrap(),
                     irq,
                 };
             }

@@ -711,10 +711,31 @@ impl Dwc3Regs {
         let gusb2_init = self.read_gusb2phy_cfg();
         let gusb3_init = self.read_gusb3pipe_ctl();
 
+        // 读取更多调试信息
+        let gsts = self.globals().gsts.get();
+        let ggpio = self.globals().ggpio.get();
+        let guctl = self.globals().guctl.get();
+
         log::info!("DWC3: Initial register states:");
         log::info!("  GCTL:          {:#010x}", gctl_init);
+        log::info!("  GSTS:          {:#010x}", gsts);
+        log::info!("  GGPIO:         {:#010x}", ggpio);
+        log::info!("  GUCTL:         {:#010x}", guctl);
         log::info!("  GUSB2PHYCFG:   {:#010x}", gusb2_init);
         log::info!("  GUSB3PIPECTL:   {:#010x}", gusb3_init);
+
+        // 检查 GSTS 寄存器中的状态位
+        let curmod = (gsts >> 0) & 0x3; // bits[1:0]
+        let devlpmtx = (gsts >> 4) & 0x3; // bits[5:4]
+        let hibern = (gsts >> 10) & 0x1; // bit[10]
+        let phy_state = (gsts >> 12) & 0xf; // bits[15:12]
+
+        log::info!("DWC3: GSTS decoded:");
+        log::info!("  CURMOD (mode): {} ({})", curmod,
+            if curmod == 0 { "Device" } else { "Host" });
+        log::info!("  DEVLPMTX: {}", devlpmtx);
+        log::info!("  HIBERN: {}", hibern);
+        log::info!("  PHY_STATE: {:#x}", phy_state);
 
         // === 步骤 1: PHY 复位序列 ===
         log::info!("DWC3: PHY reset sequence");

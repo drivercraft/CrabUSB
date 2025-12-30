@@ -81,6 +81,23 @@ register_bitfields![u32,
     ]
 ];
 
+// USB2PHY GRF 寄存器位字段
+register_bitfields![u32,
+    USB2PHY0_CON [
+        // USB2 PHY port 0 suspend enable
+        PORT0_SUSPEND OFFSET(0) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        // USB2 PHY port 0 enable
+        PORT0_ENABLE OFFSET(1) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+    ]
+];
+
 // =============================================================================
 // GRF 寄存器结构定义
 // =============================================================================
@@ -118,6 +135,16 @@ register_structs! {
     }
 }
 
+register_structs! {
+    /// USB2PHY GRF 寄存器
+    #[allow(non_snake_case)]
+    pub Usb2PhyGrfRegs {
+        /// 0x00 - USB2 PHY common configuration
+        (0x0000 => pub CON: ReadWrite<u32, USB2PHY0_CON::Register>),
+        (0x4 => @END),
+    }
+}
+
 // =============================================================================
 // GRF 类型定义
 // =============================================================================
@@ -129,6 +156,8 @@ pub enum GrfType {
     UsbdpPhy,
     /// USB GRF (用于 USB 控制器配置)
     Usb,
+    /// USB2PHY GRF (用于 USB2 PHY 配置)
+    Usb2Phy,
 }
 
 /// GRF 驱动实例
@@ -204,8 +233,11 @@ impl Grf {
 
         // 读取并验证
         let read_val: u32 = self.usbdpphy_regs().LOW_PWRN.extract().into();
-        log::debug!("GRF@{:x}: LOW_PWRN after write: 0x{:08x} (expected bit13=1)",
-                   self.base(), read_val);
+        log::debug!(
+            "GRF@{:x}: LOW_PWRN after write: 0x{:08x} (expected bit13=1)",
+            self.base(),
+            read_val
+        );
     }
 
     /// 进入低功耗模式
@@ -241,8 +273,11 @@ impl Grf {
 
         // 读取并验证
         let read_val: u32 = self.usbdpphy_regs().LOW_PWRN.extract().into();
-        log::debug!("GRF@{:x}: RX_LFPS after write: 0x{:08x} (expected bit14=1)",
-                   self.base(), read_val);
+        log::debug!(
+            "GRF@{:x}: RX_LFPS after write: 0x{:08x} (expected bit14=1)",
+            self.base(),
+            read_val
+        );
     }
 
     /// 禁用 USB3 RX LFPS
@@ -337,6 +372,47 @@ impl Grf {
             regs.USB3OTG1_CFG.get()
         };
         (value & (1 << 8)) == 0
+    }
+
+    // ========================================================================
+    // USB2PHY GRF 专用方法
+    // ========================================================================
+
+    /// 获取 USB2PHY GRF 寄存器
+    fn usb2phy_regs(&self) -> &Usb2PhyGrfRegs {
+        unsafe { &*(self.base() as *const Usb2PhyGrfRegs) }
+    }
+
+    /// 获取可变的 USB2PHY GRF 寄存器
+    fn usb2phy_regs_mut(&mut self) -> &mut Usb2PhyGrfRegs {
+        unsafe { &mut *(self.base() as *mut Usb2PhyGrfRegs) }
+    }
+
+    /// 使能 USB2 PHY 端口
+    ///
+    /// 设置 PORT_ENABLE = 1, PORT_SUSPEND = 0
+    ///
+    /// 根据 Rockchip GRF 格式：
+    /// ```text
+    /// Bit[31:16] - 写使能位
+    /// Bit[15:0]  - 数据位
+    /// ```
+    pub fn enable_usb2phy_port(&mut self) {
+        log::debug!("GRF@{:x}: Enabling USB2 PHY port", self.base());
+
+        // Bit[1] = 1 (Enable), Bit[17] = 1 (Write Enable)
+        // Bit[0] = 0 (No Suspend), Bit[16] = 1 (Write Enable)
+        const VALUE: u32 = (1 << 1) | (1 << 17) | (0 << 0) | (1 << 16);
+
+        self.usb2phy_regs_mut().CON.set(VALUE);
+
+        // 读取并验证
+        let read_val: u32 = self.usb2phy_regs().CON.extract().into();
+        log::debug!(
+            "GRF@{:x}: USB2PHY CON after write: 0x{:08x} (expected bit1=1)",
+            self.base(),
+            read_val
+        );
     }
 }
 
