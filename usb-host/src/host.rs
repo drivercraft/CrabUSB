@@ -19,8 +19,14 @@ impl USBHost<Xhci> {
 }
 
 impl USBHost<Dwc> {
-    pub fn new_dwc(ctrl: Mmio, phy: Mmio, dma_mask: usize) -> Result<USBHost<Dwc>> {
-        Ok(USBHost::new(Dwc::new(ctrl, phy, dma_mask)?))
+    pub fn new_dwc(
+        ctrl: Mmio,
+        phy: Mmio,
+        u3_grf: Mmio,
+        dp_grf: Mmio,
+        dma_mask: usize,
+    ) -> Result<USBHost<Dwc>> {
+        Ok(USBHost::new(Dwc::new(ctrl, phy, u3_grf, dp_grf, dma_mask)?))
     }
 }
 

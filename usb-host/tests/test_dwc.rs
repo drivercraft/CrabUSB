@@ -233,10 +233,16 @@ mod tests {
 
                 let phy = 0xfed90000usize;
 
+                let u3grf = 0xfd5ac000usize;
+                let dpgrf = 0xfd5cc000usize;
+
                 let phy = iomap(phy.into(), 0x10000);
 
+                let dpgrf = iomap(dpgrf.into(), 0x4000);
+                let u3grf = iomap(u3grf.into(), 0x4000);
+
                 return XhciInfo {
-                    usb: USBHost::new_dwc(addr, phy, u32::MAX as usize).unwrap(),
+                    usb: USBHost::new_dwc(addr, phy, u3grf, dpgrf, u32::MAX as usize).unwrap(),
                     irq,
                 };
             }
