@@ -31,8 +31,8 @@ use tock_registers::{RegisterLongName, registers::*};
 use tock_registers::interfaces::*;
 use tock_registers::register_bitfields;
 
-use crate::{Mmio, err::Result};
 use super::grf::{Grf, GrfType};
+use crate::{Mmio, err::Result};
 
 // =============================================================================
 // 常量定义
@@ -53,32 +53,6 @@ pub const RST_USBDP_CMN: u32 = 41; // 0x29
 pub const RST_USBDP_LANE: u32 = 42; // 0x2a
 pub const RST_USBDP_PCS_APB: u32 = 43; // 0x2b
 pub const RST_USBDP_PMA_APB: u32 = 1154; // 0x482
-
-/// GRF 寄存器相对于 PHY 基址的偏移量
-/// 注意: 这些偏移量基于 RK3588 地址映射计算，每个 PHY 不同
-///
-## 地址映射参考
-/// - USBDP PHY0:  0xfed80000, USBDPPHY0 GRF: 0xfd5c8000
-/// - USBDP PHY1:  0xfed90000, USBDPPHY1 GRF: 0xfd5cc000
-/// - USB GRF (共享): 0xfd5ac000
-///
-/// PHY0 偏移:
-/// - USBDPPHY: 0xfd5c8000 - 0xfed80000 = -0x9580000
-/// - USB:      0xfd5ac000 - 0xfed80000 = -0x97d4000
-///
-/// PHY1 偏移:
-/// - USBDPPHY: 0xfd5cc000 - 0xfed90000 = -0x9584000
-/// - USB:      0xfd5ac000 - 0xfed90000 = -0x97d5000
-
-/// PHY0 USBDPPHY GRF 偏移
-pub const USBDPPHY0_GRF_OFFSET: isize = -0x9580000;
-/// PHY1 USBDPPHY GRF 偏移
-pub const USBDPPHY1_GRF_OFFSET: isize = -0x9584000;
-
-/// PHY0 USB GRF 偏移
-pub const USB0_GRF_OFFSET: isize = -0x97d4000;
-/// PHY1 USB GRF 偏移
-pub const USB1_GRF_OFFSET: isize = -0x97d5000;
 
 // =============================================================================
 // 寄存器位字段定义
@@ -217,8 +191,6 @@ pub enum UsbDpMode {
 /// USBDP PHY 初始化配置
 #[derive(Debug, Clone)]
 pub struct UsbDpPhyConfig {
-    /// PHY ID (0 或 1)
-    pub id: u8,
     /// 模式 (USB/DP/Combo)
     pub mode: UsbDpMode,
     /// 是否启用翻转
@@ -230,7 +202,6 @@ pub struct UsbDpPhyConfig {
 impl Default for UsbDpPhyConfig {
     fn default() -> Self {
         Self {
-            id: 0,
             mode: UsbDpMode::Usb,
             flip: false,
             dp_lane_map: [0, 1, 2, 3],
@@ -253,7 +224,7 @@ pub struct UsbDpPhy {
     /// PHY MMIO 基址
     phy_base: usize,
     /// USBDP PHY GRF
-    usbdpphy_grf: Grf,
+    dp_grf: Grf,
     /// USB GRF
     usb_grf: Grf,
 }
@@ -271,48 +242,15 @@ impl UsbDpPhy {
     /// # Safety
     ///
     /// 调用者必须确保相关寄存器地址有效
-    pub fn new(
-        config: UsbDpPhyConfig,
-        phy_base: Mmio,
-        usbdpphy_grf_base: Mmio,
-        usb_grf_base: Mmio,
-    ) -> Self {
-        // 计算 GRF 基址
-        let usbdpphy_grf_addr = (phy_base.as_ptr() as usize) as isize;
-        let usbdpphy_grf_offset = if config.id == 0 {
-            USBDPPHY0_GRF_OFFSET
-        } else {
-            USBDPPHY1_GRF_OFFSET
-        };
-        let usbdpphy_grf_addr = (usbdpphy_grf_addr + usbdpphy_grf_offset) as usize;
-
-        let usb_grf_addr = (phy_base.as_ptr() as usize) as isize;
-        let usb_grf_offset = if config.id == 0 {
-            USB0_GRF_OFFSET
-        } else {
-            USB1_GRF_OFFSET
-        };
-        let usb_grf_addr = (usb_grf_addr + usb_grf_offset) as usize;
-
+    pub fn new(config: UsbDpPhyConfig, phy_base: Mmio, u3_grf: Mmio, dp_grf: Mmio) -> Self {
         // 创建 GRF 实例
-        let usbdpphy_grf = unsafe {
-            Grf::new(
-                Mmio::from_ptr(usbdpphy_grf_addr as *const u8),
-                GrfType::UsbdpPhy
-            )
-        };
-
-        let usb_grf = unsafe {
-            Grf::new(
-                Mmio::from_ptr(usb_grf_addr as *const u8),
-                GrfType::Usb
-            )
-        };
+        let dp_grf = unsafe { Grf::new(dp_grf, GrfType::UsbdpPhy) };
+        let usb_grf = unsafe { Grf::new(u3_grf, GrfType::Usb) };
 
         Self {
             config,
             phy_base: phy_base.as_ptr() as usize,
-            usbdpphy_grf,
+            dp_grf,
             usb_grf,
         }
     }
@@ -335,7 +273,7 @@ impl UsbDpPhy {
     ///
     /// 如果 PLL 未能在超时时间内锁定，返回错误
     pub fn init(&mut self) -> Result<()> {
-        log::info!("USBDP PHY{}: Starting initialization", self.config.id);
+        log::info!("USBDP PHY: Starting initialization");
 
         // Step 1: 退出低功耗模式
         self.exit_low_power_mode();
@@ -371,11 +309,11 @@ impl UsbDpPhy {
         log::debug!("USBDP PHY{}: Exiting low power mode", self.config.id);
 
         // 设置 LOW_PWRN = 1
-        self.usbdpphy_grf.exit_low_power();
+        self.dp_grf.exit_low_power();
 
         // 如果是 USB 模式，启用 RX LFPS
         if self.config.mode == UsbDpMode::Usb || self.config.mode == UsbDpMode::UsbDp {
-            self.usbdpphy_grf.enable_rx_lfps();
+            self.dp_grf.enable_rx_lfps();
             log::debug!("USBDP PHY{}: RX LFPS enabled", self.config.id);
         }
     }
@@ -469,7 +407,10 @@ impl UsbDpPhy {
                 );
             }
             UsbDpMode::None => {
-                log::warn!("USBDP PHY{}: No lane mux configuration for mode None", self.config.id);
+                log::warn!(
+                    "USBDP PHY{}: No lane mux configuration for mode None",
+                    self.config.id
+                );
             }
         }
 

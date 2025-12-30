@@ -12,12 +12,12 @@ pub use crate::backend::xhci::*;
 use device::DeviceInfo;
 use host::EventHandler;
 
-pub mod phy;
 pub mod grf;
+pub mod phy;
 mod reg;
 
+pub use grf::{Grf, GrfType, UsbGrfRegs, UsbdpPhyGrfRegs};
 pub use phy::{UsbDpMode, UsbDpPhy, UsbDpPhyConfig};
-pub use grf::{Grf, GrfType, UsbdpPhyGrfRegs, UsbGrfRegs};
 use reg::Dwc3Regs;
 
 /// DWC3 控制器
@@ -50,8 +50,8 @@ impl Dwc {
     pub fn new(
         ctrl: Mmio,
         phy: Mmio,
-        usbdpphy_grf: Mmio,
         usb_grf: Mmio,
+        dp_grf: Mmio,
         dma_mask: usize,
     ) -> Result<Self> {
         let mmio_base = ctrl.as_ptr() as usize;
@@ -61,8 +61,8 @@ impl Dwc {
                 ..Default::default()
             },
             phy,
-            usbdpphy_grf,
             usb_grf,
+            dp_grf,
         );
 
         let xhci = Xhci::new(ctrl, dma_mask)?;
