@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.4.0...crab-usb-v0.4.1) - 2026-01-03
+
+### Other
+
+- 更新 QEMU 配置文件并移除旧的 runner 设置 ([#45](https://github.com/drivercraft/CrabUSB/pull/45))
+- orangepi5p 连通 USB 驱动 ([#40](https://github.com/drivercraft/CrabUSB/pull/40))
+
 ## [0.4.0](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.10...crab-usb-v0.4.0) - 2025-11-19
 
 ### Other
