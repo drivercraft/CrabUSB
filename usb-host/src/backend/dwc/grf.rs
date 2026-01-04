@@ -25,11 +25,14 @@
 //! Offset 0x0034: USB3OTG1_CFG - USB3 OTG1 配置
 //! ```
 
+use std::ptr::NonNull;
+
 use tock_registers::interfaces::*;
 use tock_registers::registers::*;
 use tock_registers::{register_bitfields, register_structs};
 
 use crate::Mmio;
+
 
 // =============================================================================
 // 寄存器位字段定义
@@ -323,21 +326,83 @@ impl Grf {
     ///
     /// 参考 U-Boot: udphy_u3_port_disable(udphy, false)
     ///
-    /// 写入 0x0188:
-    /// - bit 15: PIPE_ENABLE = 1
-    /// - bit 12: PHY_DISABLE = 0
-    /// - bit 10: SUSPEND_ENABLE = 0
-    /// - bit 8: U3_PORT_DISABLE = 0
+    /// 写入值（按 Rockchip GRF 格式）：
+    /// - Bit[31:16]: 0xFFFF (写使能掩码，全1表示所有低16位都可写)
+    /// - Bit[15:0]: 0x8800 (数据值)
+    ///   - bit 15: PIPE_ENABLE = 1
+    ///   - bit 12: PHY_DISABLE = 0
+    ///   - bit 10: SUSPEND_ENABLE = 0
+    ///   - bit 8: U3_PORT_DISABLE = 0
     pub fn enable_u3_port(&mut self, port: u8) {
         log::debug!("GRF@{:x}: Enabling USB3 U3 port {}", self.base(), port);
 
-        let regs = self.usb_regs_mut();
-        if port == 0 {
-            regs.USB3OTG0_CFG
-                .modify(USB3OTG_CFG::PIPE_ENABLE::Enable + USB3OTG_CFG::U3_PORT_DISABLE::Disable);
+        // ⚠️ Rockchip GRF 格式: Bit[31:16] 是写使能掩码
+        // 我们要写入 0x8800 到 Bit[15:0]，所以完整值是 0xFFFF8800
+        //
+        // 数据值 0x8800:
+        // - bit 15: PIPE_ENABLE = 1 (0x8000)
+        // - bit 12: PHY_DISABLE = 0 (需要清除)
+        // - bit 10: SUSPEND_ENABLE = 0 (需要清除)
+        // - bit 8: U3_PORT_DISABLE = 0 (需要清除)
+        const GRF_VALUE: u32 = 0xFFFF8800; // 写使能掩码 + 数据值
+
+        let base = self.base();
+        let offset = if port == 0 {
+            0x001c // USB3OTG0_CFG offset
         } else {
-            regs.USB3OTG1_CFG
-                .modify(USB3OTG_CFG::PIPE_ENABLE::Enable + USB3OTG_CFG::U3_PORT_DISABLE::Disable);
+            0x0034 // USB3OTG1_CFG offset
+        };
+        let reg_name = if port == 0 {
+            "USB3OTG0_CFG"
+        } else {
+            "USB3OTG1_CFG"
+        };
+
+        // 直接使用指针写入（绕过 tock-registers，使用 GRF 格式）
+        let addr = (base as usize + offset) as *mut u32;
+        unsafe {
+            addr.write_volatile(GRF_VALUE);
+        }
+
+        log::debug!(
+            "GRF@{:x}: Wrote {} with GRF format: 0x{:08x} (data=0x8800)",
+            base,
+            reg_name,
+            GRF_VALUE
+        );
+
+        // 读取并验证（注意：读取时只返回 Bit[15:0] 的数据值）
+        let regs = self.usb_regs();
+        let value = if port == 0 {
+            regs.USB3OTG0_CFG.get()
+        } else {
+            regs.USB3OTG1_CFG.get()
+        };
+
+        // 检查关键位
+        let pipe_enable = (value >> 15) & 0x1;
+        let phy_disable = (value >> 12) & 0x1;
+        let suspend_enable = (value >> 10) & 0x1;
+        let u3_port_disable = (value >> 8) & 0x1;
+
+        log::info!("GRF@{:x}: {} after enable: 0x{:08x}", base, reg_name, value);
+        log::info!("  PIPE_ENABLE (bit15): {} (expected 1)", pipe_enable);
+        log::info!("  PHY_DISABLE (bit12): {} (expected 0)", phy_disable);
+        log::info!("  SUSPEND_ENABLE (bit10): {} (expected 0)", suspend_enable);
+        log::info!("  U3_PORT_DISABLE (bit8): {} (expected 0)", u3_port_disable);
+
+        if pipe_enable == 1 && phy_disable == 0 && suspend_enable == 0 && u3_port_disable == 0 {
+            log::info!(
+                "✓ GRF@{:x}: USB3 U3 port {} enabled successfully",
+                base,
+                port
+            );
+        } else {
+            log::warn!(
+                "⚠ GRF@{:x}: USB3 U3 port {} may not be configured correctly!",
+                base,
+                port
+            );
         }
     }
 
