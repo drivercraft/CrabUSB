@@ -7,7 +7,10 @@ use alloc::vec::Vec;
 
 use crate::{
     Mmio, Xhci,
-    backend::{dwc::udphy::Udphy, ty::HostOp},
+    backend::{
+        dwc::udphy::{Udphy, UdphyParam},
+        ty::HostOp,
+    },
     err::Result,
 };
 
@@ -63,10 +66,7 @@ impl Dwc {
     pub fn new(
         ctrl: Mmio,
         phy: Mmio,
-        usb2_phy: Mmio,
-        usb_grf: Mmio,
-        dp_grf: Mmio,
-        usb2phy_grf: Mmio,
+        param: UdphyParam<'_>,
         cru: Mmio,
         dma_mask: usize,
     ) -> Result<Self> {
@@ -88,7 +88,7 @@ impl Dwc {
             0 // USB3OTG0
         };
 
-        let phy = Udphy::new(phy, usb_grf, dp_grf, usb2phy_grf);
+        let phy = Udphy::new(phy, param);
 
         // let phy = UsbDpPhy::new(
         //     UsbDpPhyConfig {
