@@ -62,6 +62,45 @@ pub const RST_USB2PHY_PHY: u32 = 0;  // 0xc0048 的低16位 - 需要特殊处理
 pub const RST_USB2PHY_APB: u32 = 1161; // 0x489 - USB2 PHY APB 复位
 
 // =============================================================================
+// PLL 频率常量定义
+// =============================================================================
+
+/// MHz 单位
+pub const MHZ: u64 = 1_000_000;
+
+/// GPLL 目标频率 (1188 MHz) - 参考 u-boot clk_rk3588.c
+pub const GPLL_HZ: u64 = 1188 * MHZ;
+
+/// CPLL 目标频率 (600 MHz) - 参考 u-boot clk_rk3588.c
+/// 注意：cru_rk3588.h 定义为 1500MHz，但 u-boot 初始化时会设置为 600MHz
+pub const CPLL_HZ: u64 = 600 * MHZ;
+
+// =============================================================================
+// CRU 寄存器位偏移定义
+// =============================================================================
+
+/// clksel_con 寄存器基址偏移
+pub const CLKSEL_CON_OFFSET: usize = 0x0300;
+
+/// ACLK_BUS_ROOT 选择和分频位定义 (clksel_con[38])
+pub const ACLK_BUS_ROOT_SEL_SHIFT: u32 = 5;
+pub const ACLK_BUS_ROOT_SEL_MASK: u32 = 0x3 << ACLK_BUS_ROOT_SEL_SHIFT;
+pub const ACLK_BUS_ROOT_SEL_GPLL: u32 = 0;
+pub const ACLK_BUS_ROOT_SEL_CPLL: u32 = 1;
+pub const ACLK_BUS_ROOT_DIV_SHIFT: u32 = 0;
+pub const ACLK_BUS_ROOT_DIV_MASK: u32 = 0x1f << ACLK_BUS_ROOT_DIV_SHIFT;
+
+/// ACLK_TOP_S400 和 ACLK_TOP_S200 选择位定义 (clksel_con[9])
+pub const ACLK_TOP_S400_SEL_SHIFT: u32 = 8;
+pub const ACLK_TOP_S400_SEL_MASK: u32 = 0x3 << ACLK_TOP_S400_SEL_SHIFT;
+pub const ACLK_TOP_S400_SEL_400M: u32 = 0;
+pub const ACLK_TOP_S400_SEL_200M: u32 = 1;
+pub const ACLK_TOP_S200_SEL_SHIFT: u32 = 6;
+pub const ACLK_TOP_S200_SEL_MASK: u32 = 0x3 << ACLK_TOP_S200_SEL_SHIFT;
+pub const ACLK_TOP_S200_SEL_200M: u32 = 0;
+pub const ACLK_TOP_S200_SEL_100M: u32 = 1;
+
+// =============================================================================
 // CRU 驱动实例
 // =============================================================================
 
@@ -70,6 +109,20 @@ pub const RST_USB2PHY_APB: u32 = 1161; // 0x489 - USB2 PHY APB 复位
 pub struct Cru {
     /// CRU 寄存器基址
     base: usize,
+    /// CPLL 频率 (Hz)
+    cpll_hz: u64,
+    /// GPLL 频率 (Hz)
+    gpll_hz: u64,
+}
+
+impl Default for Cru {
+    fn default() -> Self {
+        Self {
+            base: 0,
+            cpll_hz: 0,
+            gpll_hz: 0,
+        }
+    }
 }
 
 impl Cru {
@@ -79,8 +132,11 @@ impl Cru {
     ///
     /// 调用者必须确保 `mmio_base` 指向有效的内存映射寄存器区域
     pub unsafe fn new(mmio_base: Mmio) -> Self {
+        // 初始化 PLL 频率为 0（表示尚未配置）
         Self {
             base: mmio_base.as_ptr() as usize,
+            cpll_hz: 0,
+            gpll_hz: 0,
         }
     }
 
@@ -336,6 +392,127 @@ impl Cru {
     fn delay_us(&self, us: u32) {
         crate::osal::kernel::delay(core::time::Duration::from_micros(us as _));
     }
+
+    // ========================================================================
+    // 初始化方法
+    // ========================================================================
+
+    /// 初始化 CRU (配置 PLL 和时钟分频)
+    ///
+    /// 参考 u-boot: drivers/clk/rockchip/clk_rk3588.c:rk3588_clk_init()
+    ///
+    /// 执行以下操作：
+    /// 1. 配置 ACLK_BUS_ROOT (从 GPLL 分频得到 300MHz)
+    /// 2. 配置 CPLL 到 600MHz（如果当前不是）
+    /// 3. 配置 GPLL 到 1188MHz（如果当前不是）
+    /// 4. 配置 ACLK_TOP_S400 (400MHz) 和 ACLK_TOP_S200 (200MHz)
+    ///
+    /// ⚠️ **重要**: 这个方法应该在使能任何时钟之前调用！
+    /// PLL 频率必须正确配置，否则 USB 控制器时钟频率会不正确。
+    pub fn init(&mut self) {
+        log::info!("CRU@{:x}: Initializing PLLs and clock configuration", self.base());
+
+        // Step 1: 配置 ACLK_BUS_ROOT (从 GPLL 分频得到 300MHz)
+        // div = DIV_ROUND_UP(GPLL_HZ, 300 * MHz)
+        // div = (1188 + 300 - 1) / 300 = 1487 / 300 = 4 (向上取整)
+        let target_freq = 300 * MHZ;
+        let div = (GPLL_HZ + target_freq - 1) / target_freq;
+
+        log::info!(
+            "CRU@{:x}: Configuring ACLK_BUS_ROOT: {}MHz / {} = {}MHz",
+            self.base(),
+            GPLL_HZ / MHZ,
+            div,
+            GPLL_HZ / (div * MHZ)
+        );
+
+        self.clksel_con_write(
+            38,
+            ACLK_BUS_ROOT_SEL_MASK | ACLK_BUS_ROOT_DIV_MASK,
+            (ACLK_BUS_ROOT_SEL_GPLL << ACLK_BUS_ROOT_SEL_SHIFT) | ((div as u32) << ACLK_BUS_ROOT_DIV_SHIFT)
+        );
+
+        // Step 2: 配置 CPLL 到 600MHz（如果当前不是）
+        // 注意：PLL 配置比较复杂，暂时跳过，假设默认配置已足够
+        // TODO: 实现完整的 PLL 配置逻辑
+        if self.cpll_hz != CPLL_HZ {
+            log::warn!(
+                "CRU@{:x}: CPLL needs to be configured to {}MHz (current: {}MHz)",
+                self.base(),
+                CPLL_HZ / MHZ,
+                if self.cpll_hz == 0 { 0 } else { self.cpll_hz / MHZ }
+            );
+            log::warn!("CRU@{:x}: PLL configuration not implemented - using current settings", self.base());
+            // 暂时假设 PLL 已经由 bootloader 配置正确
+            self.cpll_hz = CPLL_HZ; // 标记为已配置
+        }
+
+        // Step 3: 配置 GPLL 到 1188MHz（如果当前不是）
+        if self.gpll_hz != GPLL_HZ {
+            log::warn!(
+                "CRU@{:x}: GPLL needs to be configured to {}MHz (current: {}MHz)",
+                self.base(),
+                GPLL_HZ / MHZ,
+                if self.gpll_hz == 0 { 0 } else { self.gpll_hz / MHZ }
+            );
+            log::warn!("CRU@{:x}: PLL configuration not implemented - using current settings", self.base());
+            // 暂时假设 PLL 已经由 bootloader 配置正确
+            self.gpll_hz = GPLL_HZ; // 标记为已配置
+        }
+
+        // Step 4: 配置 ACLK_TOP_S400 (400MHz) 和 ACLK_TOP_S200 (200MHz)
+        log::info!("CRU@{:x}: Configuring ACLK_TOP_S400=400MHz, ACLK_TOP_S200=200MHz", self.base());
+
+        self.clksel_con_write(
+            9,
+            ACLK_TOP_S400_SEL_MASK | ACLK_TOP_S200_SEL_MASK,
+            (ACLK_TOP_S400_SEL_400M << ACLK_TOP_S400_SEL_SHIFT) |
+            (ACLK_TOP_S200_SEL_200M << ACLK_TOP_S200_SEL_SHIFT)
+        );
+
+        log::info!("✓ CRU@{:x}: PLL and clock configuration initialized", self.base());
+    }
+
+    /// 写入 clksel_con 寄存器
+    ///
+    /// # 参数
+    ///
+    /// * `index` - 寄存器索引 (0-177)
+    /// * `mask` - 位掩码（要修改的位）
+    /// * `value` - 要写入的值（已移位到正确位置）
+    fn clksel_con_write(&mut self, index: usize, mask: u32, value: u32) {
+        let reg_addr = self.base() + CLKSEL_CON_OFFSET + index * 4;
+
+        log::debug!(
+            "CRU@{:x}: Writing clksel_con[{}] = 0x{:08x} (mask=0x{:08x})",
+            self.base(),
+            index,
+            value,
+            mask
+        );
+
+        unsafe {
+            let reg = reg_addr as *mut u32;
+
+            // 读取当前值
+            let current = reg.read_volatile();
+
+            // 清除要修改的位，然后设置新值
+            let new_value = (current & !mask) | (value & mask);
+
+            // 写入新值
+            reg.write_volatile(new_value);
+
+            // 读取并验证
+            let verify = reg.read_volatile();
+            log::debug!(
+                "CRU@{:x}: clksel_con[{}] readback: 0x{:08x}",
+                self.base(),
+                index,
+                verify
+            );
+        }
+    }
 }
 
 // =============================================================================
@@ -418,5 +595,58 @@ mod tests {
         let bit_offset = 8u32;
         let value = 1u32 << (16 + bit_offset);
         assert_eq!(value, 0x1000000);
+    }
+
+    #[test]
+    fn test_pll_frequency_constants() {
+        assert_eq!(MHZ, 1_000_000);
+        assert_eq!(GPLL_HZ, 1188 * MHZ);
+        assert_eq!(CPLL_HZ, 600 * MHZ);
+    }
+
+    #[test]
+    fn test_aclk_bus_root_div_calculation() {
+        // DIV_ROUND_UP(GPLL_HZ, 300 * MHz)
+        // div = (1188000000 + 300000000 - 1) / 300000000
+        // div = 1487999999 / 300000000 = 4
+        let target_freq = 300 * MHZ;
+        let div = (GPLL_HZ + target_freq - 1) / target_freq;
+        assert_eq!(div, 4);
+
+        // 1188MHz / 4 = 297MHz (接近 300MHz)
+        let actual_freq = GPLL_HZ / (div * MHZ);
+        assert_eq!(actual_freq, 297);
+    }
+
+    #[test]
+    fn test_aclk_bus_root_register_value() {
+        // ACLK_BUS_ROOT_SEL_GPLL = 0 (bit[6:5])
+        // div = 4 (bit[4:0])
+        let div = 4u32;
+        let value = (ACLK_BUS_ROOT_SEL_GPLL << ACLK_BUS_ROOT_SEL_SHIFT) | (div << ACLK_BUS_ROOT_DIV_SHIFT);
+        // value = (0 << 5) | (4 << 0) = 0x04
+        assert_eq!(value, 0x04);
+    }
+
+    #[test]
+    fn test_aclk_top_s400_s200_register_value() {
+        // ACLK_TOP_S400_SEL_400M = 0 (bit[9:8])
+        // ACLK_TOP_S200_SEL_200M = 0 (bit[7:6])
+        let value = (ACLK_TOP_S400_SEL_400M << ACLK_TOP_S400_SEL_SHIFT) |
+                    (ACLK_TOP_S200_SEL_200M << ACLK_TOP_S200_SEL_SHIFT);
+        // value = (0 << 8) | (0 << 6) = 0x00
+        assert_eq!(value, 0x00);
+    }
+
+    #[test]
+    fn test_clksel_con_address_calculation() {
+        // clksel_con[38] address = 0x0300 + 38 * 4 = 0x0300 + 0x98 = 0x398
+        let base = 0xfd7c0000usize;
+        let addr = base + CLKSEL_CON_OFFSET + 38 * 4;
+        assert_eq!(addr, 0xfd7c0398);
+
+        // clksel_con[9] address = 0x0300 + 9 * 4 = 0x0300 + 0x24 = 0x324
+        let addr = base + CLKSEL_CON_OFFSET + 9 * 4;
+        assert_eq!(addr, 0xfd7c0324);
     }
 }

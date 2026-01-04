@@ -29,6 +29,9 @@
 //!
 //! 参考 GRF_DTS_ANALYSIS.md 了解地址获取过程。
 
+use std::ptr::NonNull;
+
+use mbarrier::mb;
 use tock_registers::{RegisterLongName, registers::*};
 
 use tock_registers::interfaces::*;
@@ -36,6 +39,7 @@ use tock_registers::register_bitfields;
 
 use super::cru::Cru;
 use super::grf::{Grf, GrfType};
+use crate::backend::dwc::grf::{RK3588_UDPHY_CFGS, Regmap, UdphyCfg, UdphyGrfReg};
 use crate::{Mmio, err::Result};
 
 // =============================================================================
@@ -45,595 +49,6 @@ use crate::{Mmio, err::Result};
 /// USBDP PHY 寄存器偏移
 pub const UDPHY_PMA: usize = 0x8000;
 pub const UDPHY_PCS: usize = 0x4000;
-
-/// 寄存器配置项
-#[derive(Debug, Clone, Copy)]
-struct RegConfig {
-    offset: u16,
-    value: u32,
-}
-
-// =============================================================================
-// 寄存器初始化序列 (基于 u-boot drivers/phy/phy-rockchip-usbdp.c)
-// =============================================================================
-
-/// RK3588 USBDP PHY 24MHz 参考时钟配置序列
-///
-/// 参考 u-boot: rk3588_udphy_24m_refclk_cfg
-/// 位置: drivers/phy/phy-rockchip-usbdp.c:226-263
-const REFCLK_24M_CFG: &[RegConfig] = &[
-    // PMA 寄存器配置块 0
-    RegConfig {
-        offset: 0x0090,
-        value: 0x68,
-    },
-    RegConfig {
-        offset: 0x0094,
-        value: 0x68,
-    },
-    RegConfig {
-        offset: 0x0128,
-        value: 0x24,
-    },
-    RegConfig {
-        offset: 0x012c,
-        value: 0x44,
-    },
-    RegConfig {
-        offset: 0x0130,
-        value: 0x3f,
-    },
-    RegConfig {
-        offset: 0x0134,
-        value: 0x44,
-    },
-    RegConfig {
-        offset: 0x015c,
-        value: 0xa9,
-    },
-    RegConfig {
-        offset: 0x0160,
-        value: 0x71,
-    },
-    RegConfig {
-        offset: 0x0164,
-        value: 0x71,
-    },
-    RegConfig {
-        offset: 0x0168,
-        value: 0xa9,
-    },
-    RegConfig {
-        offset: 0x0174,
-        value: 0xa9,
-    },
-    RegConfig {
-        offset: 0x0178,
-        value: 0x71,
-    },
-    RegConfig {
-        offset: 0x017c,
-        value: 0x71,
-    },
-    RegConfig {
-        offset: 0x0180,
-        value: 0xa9,
-    },
-    RegConfig {
-        offset: 0x018c,
-        value: 0x41,
-    },
-    RegConfig {
-        offset: 0x0190,
-        value: 0x00,
-    },
-    RegConfig {
-        offset: 0x0194,
-        value: 0x05,
-    },
-    RegConfig {
-        offset: 0x01ac,
-        value: 0x2a,
-    },
-    RegConfig {
-        offset: 0x01b0,
-        value: 0x17,
-    },
-    RegConfig {
-        offset: 0x01b4,
-        value: 0x17,
-    },
-    RegConfig {
-        offset: 0x01b8,
-        value: 0x2a,
-    },
-    RegConfig {
-        offset: 0x01c8,
-        value: 0x04,
-    },
-    RegConfig {
-        offset: 0x01cc,
-        value: 0x08,
-    },
-    RegConfig {
-        offset: 0x01d0,
-        value: 0x08,
-    },
-    RegConfig {
-        offset: 0x01d4,
-        value: 0x04,
-    },
-    RegConfig {
-        offset: 0x01d8,
-        value: 0x20,
-    },
-    RegConfig {
-        offset: 0x01dc,
-        value: 0x01,
-    },
-    RegConfig {
-        offset: 0x01e0,
-        value: 0x09,
-    },
-    RegConfig {
-        offset: 0x01e4,
-        value: 0x03,
-    },
-    RegConfig {
-        offset: 0x01f0,
-        value: 0x29,
-    },
-    RegConfig {
-        offset: 0x01f4,
-        value: 0x02,
-    },
-    RegConfig {
-        offset: 0x01f8,
-        value: 0x02,
-    },
-    RegConfig {
-        offset: 0x01fc,
-        value: 0x29,
-    },
-    RegConfig {
-        offset: 0x0208,
-        value: 0x2a,
-    },
-    RegConfig {
-        offset: 0x020c,
-        value: 0x17,
-    },
-    RegConfig {
-        offset: 0x0210,
-        value: 0x17,
-    },
-    RegConfig {
-        offset: 0x0214,
-        value: 0x2a,
-    },
-    RegConfig {
-        offset: 0x0224,
-        value: 0x20,
-    },
-    RegConfig {
-        offset: 0x03f0,
-        value: 0x0a,
-    },
-    RegConfig {
-        offset: 0x03f4,
-        value: 0x07,
-    },
-    RegConfig {
-        offset: 0x03f8,
-        value: 0x07,
-    },
-    RegConfig {
-        offset: 0x03fc,
-        value: 0x0c,
-    },
-    RegConfig {
-        offset: 0x0404,
-        value: 0x12,
-    },
-    RegConfig {
-        offset: 0x0408,
-        value: 0x1a,
-    },
-    RegConfig {
-        offset: 0x040c,
-        value: 0x1a,
-    },
-    RegConfig {
-        offset: 0x0410,
-        value: 0x3f,
-    },
-    // Lane 0 和 Lane 1 配置
-    RegConfig {
-        offset: 0x0ce0,
-        value: 0x68,
-    },
-    RegConfig {
-        offset: 0x0ce8,
-        value: 0xd0,
-    },
-    RegConfig {
-        offset: 0x0cf0,
-        value: 0x87,
-    },
-    RegConfig {
-        offset: 0x0cf8,
-        value: 0x70,
-    },
-    RegConfig {
-        offset: 0x0d00,
-        value: 0x70,
-    },
-    RegConfig {
-        offset: 0x0d08,
-        value: 0xa9,
-    },
-    // Lane 2 和 Lane 3 配置
-    RegConfig {
-        offset: 0x1ce0,
-        value: 0x68,
-    },
-    RegConfig {
-        offset: 0x1ce8,
-        value: 0xd0,
-    },
-    RegConfig {
-        offset: 0x1cf0,
-        value: 0x87,
-    },
-    RegConfig {
-        offset: 0x1cf8,
-        value: 0x70,
-    },
-    RegConfig {
-        offset: 0x1d00,
-        value: 0x70,
-    },
-    RegConfig {
-        offset: 0x1d08,
-        value: 0xa9,
-    },
-    // Lane 0 Tx 驱动配置
-    RegConfig {
-        offset: 0x0a3c,
-        value: 0xd0,
-    },
-    RegConfig {
-        offset: 0x0a44,
-        value: 0xd0,
-    },
-    RegConfig {
-        offset: 0x0a48,
-        value: 0x01,
-    },
-    RegConfig {
-        offset: 0x0a4c,
-        value: 0x0d,
-    },
-    RegConfig {
-        offset: 0x0a54,
-        value: 0xe0,
-    },
-    RegConfig {
-        offset: 0x0a5c,
-        value: 0xe0,
-    },
-    RegConfig {
-        offset: 0x0a64,
-        value: 0xa8,
-    },
-    // Lane 2 Tx 驱动配置
-    RegConfig {
-        offset: 0x1a3c,
-        value: 0xd0,
-    },
-    RegConfig {
-        offset: 0x1a44,
-        value: 0xd0,
-    },
-    RegConfig {
-        offset: 0x1a48,
-        value: 0x01,
-    },
-    RegConfig {
-        offset: 0x1a4c,
-        value: 0x0d,
-    },
-    RegConfig {
-        offset: 0x1a54,
-        value: 0xe0,
-    },
-    RegConfig {
-        offset: 0x1a5c,
-        value: 0xe0,
-    },
-    RegConfig {
-        offset: 0x1a64,
-        value: 0xa8,
-    },
-];
-
-/// RK3588 USBDP PHY 初始化序列
-///
-/// 参考 u-boot: rk3588_udphy_init_sequence
-/// 位置: drivers/phy/phy-rockchip-usbdp.c:265-299
-const INIT_SEQUENCE: &[RegConfig] = &[
-    // CMN 和 Lane 0 初始化
-    RegConfig {
-        offset: 0x0104,
-        value: 0x44,
-    },
-    RegConfig {
-        offset: 0x0234,
-        value: 0xE8,
-    },
-    RegConfig {
-        offset: 0x0248,
-        value: 0x44,
-    },
-    RegConfig {
-        offset: 0x028C,
-        value: 0x18,
-    },
-    RegConfig {
-        offset: 0x081C,
-        value: 0xE5,
-    },
-    RegConfig {
-        offset: 0x0878,
-        value: 0x00,
-    },
-    RegConfig {
-        offset: 0x0994,
-        value: 0x1C,
-    },
-    RegConfig {
-        offset: 0x0AF0,
-        value: 0x00,
-    },
-    // Lane 2 初始化
-    RegConfig {
-        offset: 0x181C,
-        value: 0xE5,
-    },
-    RegConfig {
-        offset: 0x1878,
-        value: 0x00,
-    },
-    RegConfig {
-        offset: 0x1994,
-        value: 0x1C,
-    },
-    RegConfig {
-        offset: 0x1AF0,
-        value: 0x00,
-    },
-    // CMN 配置
-    RegConfig {
-        offset: 0x0428,
-        value: 0x60,
-    },
-    RegConfig {
-        offset: 0x0D58,
-        value: 0x33,
-    },
-    RegConfig {
-        offset: 0x1D58,
-        value: 0x33,
-    },
-    // Lane 0 配置
-    RegConfig {
-        offset: 0x0990,
-        value: 0x74,
-    },
-    RegConfig {
-        offset: 0x0D64,
-        value: 0x17,
-    },
-    RegConfig {
-        offset: 0x08C8,
-        value: 0x13,
-    },
-    // Lane 2 配置
-    RegConfig {
-        offset: 0x1990,
-        value: 0x74,
-    },
-    RegConfig {
-        offset: 0x1D64,
-        value: 0x17,
-    },
-    RegConfig {
-        offset: 0x18C8,
-        value: 0x13,
-    },
-    // Lane 0 RX/TX 配置
-    RegConfig {
-        offset: 0x0D90,
-        value: 0x40,
-    },
-    RegConfig {
-        offset: 0x0DA8,
-        value: 0x40,
-    },
-    RegConfig {
-        offset: 0x0DC0,
-        value: 0x40,
-    },
-    RegConfig {
-        offset: 0x0DD8,
-        value: 0x40,
-    },
-    // Lane 2 RX/TX 配置
-    RegConfig {
-        offset: 0x1D90,
-        value: 0x40,
-    },
-    RegConfig {
-        offset: 0x1DA8,
-        value: 0x40,
-    },
-    RegConfig {
-        offset: 0x1DC0,
-        value: 0x40,
-    },
-    RegConfig {
-        offset: 0x1DD8,
-        value: 0x40,
-    },
-    // CMN PLL 配置
-    RegConfig {
-        offset: 0x03C0,
-        value: 0x30,
-    },
-    RegConfig {
-        offset: 0x03C4,
-        value: 0x06,
-    },
-    RegConfig {
-        offset: 0x0E10,
-        value: 0x00,
-    },
-    RegConfig {
-        offset: 0x1E10,
-        value: 0x00,
-    },
-    RegConfig {
-        offset: 0x043C,
-        value: 0x0F,
-    },
-    RegConfig {
-        offset: 0x0D2C,
-        value: 0xFF,
-    },
-    RegConfig {
-        offset: 0x1D2C,
-        value: 0xFF,
-    },
-    RegConfig {
-        offset: 0x0D34,
-        value: 0x0F,
-    },
-    RegConfig {
-        offset: 0x1D34,
-        value: 0x0F,
-    },
-    // Lane 0 精细配置
-    RegConfig {
-        offset: 0x08FC,
-        value: 0x2A,
-    },
-    RegConfig {
-        offset: 0x0914,
-        value: 0x28,
-    },
-    RegConfig {
-        offset: 0x0A30,
-        value: 0x03,
-    },
-    RegConfig {
-        offset: 0x0E38,
-        value: 0x05,
-    },
-    RegConfig {
-        offset: 0x0ECC,
-        value: 0x27,
-    },
-    RegConfig {
-        offset: 0x0ED0,
-        value: 0x22,
-    },
-    RegConfig {
-        offset: 0x0ED4,
-        value: 0x26,
-    },
-    // Lane 2 精细配置
-    RegConfig {
-        offset: 0x18FC,
-        value: 0x2A,
-    },
-    RegConfig {
-        offset: 0x1914,
-        value: 0x28,
-    },
-    RegConfig {
-        offset: 0x1A30,
-        value: 0x03,
-    },
-    RegConfig {
-        offset: 0x1E38,
-        value: 0x05,
-    },
-    RegConfig {
-        offset: 0x1ECC,
-        value: 0x27,
-    },
-    RegConfig {
-        offset: 0x1ED0,
-        value: 0x22,
-    },
-    RegConfig {
-        offset: 0x1ED4,
-        value: 0x26,
-    },
-    // CMN 最终配置
-    RegConfig {
-        offset: 0x0048,
-        value: 0x0F,
-    },
-    RegConfig {
-        offset: 0x0060,
-        value: 0x3C,
-    },
-    RegConfig {
-        offset: 0x0064,
-        value: 0xF7,
-    },
-    RegConfig {
-        offset: 0x006C,
-        value: 0x20,
-    },
-    RegConfig {
-        offset: 0x0070,
-        value: 0x7D,
-    },
-    RegConfig {
-        offset: 0x0074,
-        value: 0x68,
-    },
-    RegConfig {
-        offset: 0x0AF4,
-        value: 0x1A,
-    },
-    RegConfig {
-        offset: 0x1AF4,
-        value: 0x1A,
-    },
-    RegConfig {
-        offset: 0x0440,
-        value: 0x3F,
-    },
-    RegConfig {
-        offset: 0x10D4,
-        value: 0x08,
-    },
-    RegConfig {
-        offset: 0x20D4,
-        value: 0x08,
-    },
-    RegConfig {
-        offset: 0x00D4,
-        value: 0x30,
-    },
-    RegConfig {
-        offset: 0x0024,
-        value: 0x6e,
-    },
-];
 
 /// 时钟 ID (RK3588 CRU)
 pub const CLK_USBDP_PHY_REFCLK: u32 = 694; // 0x2b6
@@ -767,6 +182,31 @@ register_bitfields![u32,
     ]
 ];
 
+// TRSV_LN0_MON_RX_CDR 寄存器位字段 (Lane 0 RX CDR 监控)
+// 参考 u-boot: drivers/phy/phy-rockchip-usbdp.c:1010-1026
+register_bitfields![u32,
+    TRSV_LN0_MON_RX_CDR [
+        // RX CDR lock done (bit 0)
+        // 从接收数据流中恢复时钟的锁定状态
+        LOCK_DONE OFFSET(0) NUMBITS(1) [
+            NotLocked = 0,
+            Locked = 1
+        ],
+    ]
+];
+
+// TRSV_LN2_MON_RX_CDR 寄存器位字段 (Lane 2 RX CDR 监控)
+// 用于 USB3 模式下的 Lane 2 检查
+register_bitfields![u32,
+    TRSV_LN2_MON_RX_CDR [
+        // RX CDR lock done (bit 0)
+        LOCK_DONE OFFSET(0) NUMBITS(1) [
+            NotLocked = 0,
+            Locked = 1
+        ],
+    ]
+];
+
 // =============================================================================
 // 数据结构
 // =============================================================================
@@ -809,10 +249,14 @@ impl Default for UsbDpPhyConfig {
 pub struct UsbDpPhy {
     /// PHY 配置
     pub config: UsbDpPhyConfig,
+    cfg: UdphyCfg,
+
     /// PHY MMIO 基址
     phy_base: usize,
+
+    pma_remap: Regmap,
     /// USBDP PHY GRF
-    dp_grf: Grf,
+    udphygrf: Regmap,
     /// USB GRF
     usb_grf: Grf,
     /// USB2PHY GRF
@@ -820,6 +264,9 @@ pub struct UsbDpPhy {
     /// CRU (时钟和复位单元)
     cru: Cru,
 }
+
+unsafe impl Send for UsbDpPhy {}
+unsafe impl Sync for UsbDpPhy {}
 
 impl UsbDpPhy {
     /// 创建新的 USBDP PHY 驱动实例
@@ -845,14 +292,15 @@ impl UsbDpPhy {
         cru: Cru,
     ) -> Self {
         // 创建 GRF 实例
-        let dp_grf = unsafe { Grf::new(dp_grf, GrfType::UsbdpPhy) };
         let usb_grf = unsafe { Grf::new(usb_grf, GrfType::Usb) };
         let usb2phy_grf = unsafe { Grf::new(usb2phy_grf, GrfType::Usb2Phy) };
 
         Self {
             config,
+            cfg: RK3588_UDPHY_CFGS.clone(),
             phy_base: phy_base.as_ptr() as usize,
-            dp_grf,
+            udphygrf: Regmap::new(dp_grf),
+            pma_remap: Regmap::new(unsafe { phy_base.add(UDPHY_PMA) }),
             usb_grf,
             usb2phy_grf,
             cru,
@@ -879,75 +327,96 @@ impl UsbDpPhy {
     ///
     /// 如果 PLL 未能在超时时间内锁定，返回错误
     pub fn init(&mut self) -> Result<()> {
-        log::info!("USBDP PHY: Starting initialization");
+        info!("USBDP PHY: Starting initialization");
 
-        // Step 0: 初始化 USB2 PHY (启动 UTMI 480MHz 时钟)
-        //
-        // ⚠️ 关键步骤！USBDP PHY 的 UTMI 时钟输入来自 USB2 PHY。
-        // USB2 PHY 需要输出 480MHz UTMI 时钟给 USBDP PHY。
-        // 这个时钟是 USBDP PHY PIPE 接口工作的必要条件！
-        //
-        // 时钟链: CRU phyclk(693) → USB2 PHY → UTMI 480MHz → USBDP PHY utmi
-        log::info!("USBDP PHY: Initializing USB2 PHY (for UTMI clock)");
-        self.init_usb2_phy();
+        // enable rx lfps for usb
+        if matches!(self.config.mode, UsbDpMode::Usb | UsbDpMode::UsbDp) {
+            debug!("USBDP PHY{}: Enabling RX LFPS for USB mode", self.config.id);
+            self.udphygrf.grfreg_write(&self.cfg.grf.rx_lfps, true);
+        }
 
-        // Step 1: 使能时钟 (必须最先执行)
-        self.enable_clocks();
+        // Step 1: power on pma and deassert apb rstn
+        self.udphygrf.grfreg_write(&self.cfg.grf.low_pwrn, true);
 
-        // Step 2: 退出低功耗模式 (设置 i_usbdp_low_pwrn=1)
-        //
-        // ⚠️ 重要：根据 TRM Fig. 14-4，必须在解除 APB 复位之前设置此位！
-        //
-        // TRM 要求：
-        //   "i_usbdp_low_pwrn must be set before i_apb_presetn is released"
-        //
-        // GRF 寄存器: USBDPPHY_GRF_CON1[13] = 1 (PMA block power on)
-        self.exit_low_power_mode();
-
-        // Step 3: 解除 APB 复位 (i_apb_presetn=1)
-        //
-        // ⚠️ 重要：必须在退出低功耗模式之后！
-        //
-        // 解除 pma_apb 和 pcs_apb 复位，使能 APB 总线访问
-        self.deassert_apb_reset();
-
-        // Step 4: 等待 1 个 APB 时钟周期
-        //
-        // TRM 要求：在 APB 编程前等待 1 个 APB_CLK
-        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
-
-        // Step 5: 配置初始化序列 (先 init sequence!)
-        // 参考 u-boot: 先调用 __regmap_multi_reg_write(init_sequence)
+        // Step 2: set init sequence and phy refclk
         self.configure_init_sequence();
 
-        // Step 6: 配置参考时钟 (后 refclk!)
-        // 参考 u-boot: 后调用 rk3588_udphy_refclk_set()
-        self.configure_refclk();
+        // // Step 0: 初始化 USB2 PHY (启动 UTMI 480MHz 时钟)
+        // //
+        // // ⚠️ 关键步骤！USBDP PHY 的 UTMI 时钟输入来自 USB2 PHY。
+        // // USB2 PHY 需要输出 480MHz UTMI 时钟给 USBDP PHY。
+        // // 这个时钟是 USBDP PHY PIPE 接口工作的必要条件！
+        // //
+        // // 时钟链: CRU phyclk(693) → USB2 PHY → UTMI 480MHz → USBDP PHY utmi
+        // log::info!("USBDP PHY: Initializing USB2 PHY (for UTMI clock)");
+        // self.init_usb2_phy();
 
-        // Step 7: 配置 lane multiplexing
-        self.configure_lane_mux();
+        // // Step 1: 使能时钟 (必须最先执行)
+        // self.enable_clocks();
 
-        // Step 8: 解除 init/cmn/lane 复位
-        self.deassert_phy_reset();
+        // // Step 2: 退出低功耗模式 (设置 i_usbdp_low_pwrn=1)
+        // //
+        // // ⚠️ 重要：根据 TRM Fig. 14-4，必须在解除 APB 复位之前设置此位！
+        // //
+        // // TRM 要求：
+        // //   "i_usbdp_low_pwrn must be set before i_apb_presetn is released"
+        // //
+        // // GRF 寄存器: USBDPPHY_GRF_CON1[13] = 1 (PMA block power on)
+        // self.exit_low_power_mode();
 
-        // Step 9: 等待 PLL 锁定
-        self.wait_pll_lock()?;
+        // // Step 3: 解除 APB 复位 (i_apb_presetn=1)
+        // //
+        // // ⚠️ 重要：必须在退出低功耗模式之后！
+        // //
+        // // 解除 pma_apb 和 pcs_apb 复位，使能 APB 总线访问
+        // self.deassert_apb_reset();
 
-        // Step 10: 启用 USB3 U3 端口
-        //
-        // ⚠️ 重要：必须启用 USB GRF 中的 U3 端口配置
-        //
-        // USB GRF 寄存器: USB3OTG1_CFG
-        //   - PIPE_ENABLE = 1 (启用 PIPE 接口)
-        //   - U3_PORT_DISABLE = 0 (启用 U3 端口)
-        //   - PHY_DISABLE = 0 (启用 PHY)
-        //
-        // 参考 U-Boot: udphy_u3_port_disable(udphy, false)
-        log::info!("USBDP PHY{}: Enabling USB3 U3 port in USB GRF", self.config.id);
-        self.enable_u3_port();
+        // // Step 4: 等待 1 个 APB 时钟周期
+        // //
+        // // TRM 要求：在 APB 编程前等待 1 个 APB_CLK
+        // core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+
+        // // Step 5: 配置初始化序列 (先 init sequence!)
+        // // 参考 u-boot: 先调用 __regmap_multi_reg_write(init_sequence)
+        // self.configure_init_sequence();
+
+        // // Step 6: 配置参考时钟 (后 refclk!)
+        // // 参考 u-boot: 后调用 rk3588_udphy_refclk_set()
+        // self.configure_refclk();
+
+        // // Step 7: 配置 lane multiplexing
+        // self.configure_lane_mux();
+
+        // // Step 8: 解除 init/cmn/lane 复位
+        // self.deassert_phy_reset();
+
+        // // Step 9: 等待 PLL 锁定
+        // self.wait_pll_lock()?;
+
+        // // Step 10: 启用 USB3 U3 端口
+        // //
+        // // ⚠️ 重要：必须启用 USB GRF 中的 U3 端口配置
+        // //
+        // // USB GRF 寄存器: USB3OTG1_CFG
+        // //   - PIPE_ENABLE = 1 (启用 PIPE 接口)
+        // //   - U3_PORT_DISABLE = 0 (启用 U3 端口)
+        // //   - PHY_DISABLE = 0 (启用 PHY)
+        // //
+        // // 参考 U-Boot: udphy_u3_port_disable(udphy, false)
+        // log::info!(
+        //     "USBDP PHY{}: Enabling USB3 U3 port in USB GRF",
+        //     self.config.id
+        // );
+        // self.enable_u3_port();
 
         log::info!("✓ USBDP PHY{} initialized successfully", self.config.id);
         Ok(())
+    }
+
+    fn grfreg_write(&self, reg: &UdphyGrfReg, en: bool) {
+        unsafe {
+            self.udphygrf.as_ref().reg_write(reg, val);
+        }
     }
 
     fn offset_reg<R: RegisterLongName>(&self, offset: usize) -> &ReadWrite<u32, R> {
@@ -974,7 +443,7 @@ impl UsbDpPhy {
         //
         // u-boot 参考：drivers/phy/phy-rockchip-usbdp.c:1041
         //   grfreg_write(udphy->udphygrf, &cfg->grfcfg.low_pwrn, true);
-        self.dp_grf.exit_low_power();
+        self.udphygrf.exit_low_power();
 
         // 如果是 USB 模式，启用 RX LFPS
         //
@@ -984,7 +453,7 @@ impl UsbDpPhy {
         //   if (udphy->mode & UDPHY_MODE_USB)
         //       grfreg_write(udphy->udphygrf, &cfg->grfcfg.rx_lfps, true);
         if self.config.mode == UsbDpMode::Usb || self.config.mode == UsbDpMode::UsbDp {
-            self.dp_grf.enable_rx_lfps();
+            self.udphygrf.enable_rx_lfps();
             log::debug!("USBDP PHY{}: RX LFPS enabled", self.config.id);
         }
     }
@@ -1019,7 +488,7 @@ impl UsbDpPhy {
         }
 
         // 确保写入完成
-        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+        mb();
     }
 
     /// 配置参考时钟
@@ -1046,12 +515,12 @@ impl UsbDpPhy {
     /// 参考 u-boot rk3588_udphy_init()
     /// 位置: drivers/phy/phy-rockchip-usbdp.c:1031-1103
     fn configure_init_sequence(&self) {
-        log::info!("USBDP PHY{}: Applying init sequence", self.config.id);
+        info!("USBDP PHY{}: Applying init sequence", self.config.id);
 
         // 写入初始化序列 (共 67 个寄存器)
         self.write_reg_sequence(INIT_SEQUENCE);
 
-        log::info!(
+        info!(
             "✓ USBDP PHY{}: Init sequence applied (67 registers written)",
             self.config.id
         );
@@ -1124,7 +593,10 @@ impl UsbDpPhy {
     /// 3. 配置 USB2PHY GRF (使能端口)
     /// 4. 等待 USB2 PLL 锁定并输出稳定的 UTMI 480MHz 时钟
     fn init_usb2_phy(&mut self) {
-        log::info!("USBDP PHY{}: Initializing USB2 PHY for UTMI clock", self.config.id);
+        log::info!(
+            "USBDP PHY{}: Initializing USB2 PHY for UTMI clock",
+            self.config.id
+        );
 
         // Step 1: 使能 USB2 PHY 时钟
         // CRU 寄存器: CLK_GATE_CON[693/16] = CLK_GATE_CON[43]
@@ -1184,8 +656,7 @@ impl UsbDpPhy {
         // Step 2: 如果是 DP 模式，解除 DP init 复位 (CMN_DP_RSTN 寄存器)
         if self.config.mode == UsbDpMode::Dp || self.config.mode == UsbDpMode::UsbDp {
             let pma_base = self.phy_base + UDPHY_PMA;
-            let dp_rstn_reg =
-                unsafe { (pma_base + pma_offset::CMN_DP_RSTN) as *mut u32 };
+            let dp_rstn_reg = unsafe { (pma_base + pma_offset::CMN_DP_RSTN) as *mut u32 };
 
             unsafe {
                 let value = dp_rstn_reg.read_volatile();
@@ -1198,7 +669,11 @@ impl UsbDpPhy {
     /// 等待 PLL 锁定
     ///
     /// 参考 u-boot rk3588_udphy_status_check()
-    /// 位置: drivers/phy/phy-rockchip-usbdp.c:1008-1018
+    /// 位置: drivers/phy/phy-rockchip-usbdp.c:994-1029
+    ///
+    /// 检查项目：
+    /// 1. LCPLL 锁定 (USB 模式必需)
+    /// 2. RX CDR 锁定 (USB3 RX 路径必需)
     fn wait_pll_lock(&self) -> Result<()> {
         log::info!("USBDP PHY{}: Waiting for PLL lock", self.config.id);
 
@@ -1206,11 +681,13 @@ impl UsbDpPhy {
 
         // 等待 LCPLL 锁定 (USB 模式需要)
         if self.config.mode == UsbDpMode::Usb || self.config.mode == UsbDpMode::UsbDp {
-            let lcpll_reg =
-                unsafe { (pma_base + pma_offset::CMN_ANA_LCPLL_DONE) as *const u32 };
+            let lcpll_reg = unsafe { (pma_base + pma_offset::CMN_ANA_LCPLL_DONE) as *const u32 };
 
-            log::debug!("USBDP PHY{}: LCPLL register @ 0x{:x}",
-                       self.config.id, lcpll_reg as usize);
+            log::debug!(
+                "USBDP PHY{}: LCPLL register @ 0x{:x}",
+                self.config.id,
+                lcpll_reg as usize
+            );
 
             // 使用循环计数器实现超时 (不依赖系统时间)
             // 100ms / 200us = 500 次循环
@@ -1223,8 +700,13 @@ impl UsbDpPhy {
 
                 // 打印初始状态
                 if retry == 0 {
-                    log::debug!("USBDP PHY{}: LCPLL initial status - AFC={}, LOCK={}, val=0x{:08x}",
-                               self.config.id, afc_done, lock_done, value);
+                    log::debug!(
+                        "USBDP PHY{}: LCPLL initial status - AFC={}, LOCK={}, val=0x{:08x}",
+                        self.config.id,
+                        afc_done,
+                        lock_done,
+                        value
+                    );
                 }
 
                 if afc_done && lock_done {
@@ -1234,7 +716,7 @@ impl UsbDpPhy {
                         retry,
                         value
                     );
-                    return Ok(());
+                    break;
                 }
 
                 // 打印调试信息 (每 100 次循环)
@@ -1249,26 +731,100 @@ impl UsbDpPhy {
                 }
 
                 self.delay_us(200); // 200 微秒轮询间隔
+
+                // 超时检查
+                if retry == MAX_RETRIES - 1 {
+                    let value = unsafe { lcpll_reg.read_volatile() };
+                    let afc_done = (value >> 6) & 0x1 == 1;
+                    let lock_done = (value >> 7) & 0x1 == 1;
+
+                    log::error!(
+                        "✗ USBDP PHY{}: LCPLL lock timeout after {} retries! AFC={}, LOCK={}, val=0x{:08x}",
+                        self.config.id,
+                        MAX_RETRIES,
+                        afc_done,
+                        lock_done,
+                        value
+                    );
+                    return Err(crate::err::USBError::Timeout);
+                }
             }
 
-            // 超时：读取最终状态并返回错误
-            let value = unsafe { lcpll_reg.read_volatile() };
-            let afc_done = (value >> 6) & 0x1 == 1;
-            let lock_done = (value >> 7) & 0x1 == 1;
+            // ⚠️ 新增：检查 RX CDR (Clock Data Recovery) 锁定状态
+            // RX CDR 从接收数据流中恢复时钟，对 USB3 高速传输至关重要
+            // 参考 u-boot: drivers/phy/phy-rockchip-usbdp.c:1010-1026
+            log::info!("USBDP PHY{}: Checking RX CDR lock status", self.config.id);
 
-            log::error!(
-                "✗ USBDP PHY{}: LCPLL lock timeout after {} retries! AFC={}, LOCK={}, val=0x{:08x}",
+            let cdr_reg = unsafe { (pma_base + pma_offset::TRSV_LN0_MON_RX_CDR) as *const u32 };
+            log::debug!(
+                "USBDP PHY{}: RX CDR register @ 0x{:x}",
                 self.config.id,
-                MAX_RETRIES,
-                afc_done,
-                lock_done,
-                value
+                cdr_reg as usize
             );
-            return Err(crate::err::USBError::Timeout);
+
+            // RX CDR 锁定可能需要更长时间，使用相同的超时机制
+            for retry in 0..MAX_RETRIES {
+                let value = unsafe { cdr_reg.read_volatile() };
+                let cdr_locked = (value & 0x1) == 1;
+
+                // 打印初始状态
+                if retry == 0 {
+                    log::debug!(
+                        "USBDP PHY{}: RX CDR initial status - LOCK={}, val=0x{:08x}",
+                        self.config.id,
+                        cdr_locked,
+                        value
+                    );
+                }
+
+                if cdr_locked {
+                    log::info!(
+                        "✓ USBDP PHY{}: RX CDR locked successfully (retry={}, val=0x{:08x})",
+                        self.config.id,
+                        retry,
+                        value
+                    );
+                    return Ok(()); // LCPLL 和 RX CDR 都锁定成功
+                }
+
+                // 打印调试信息 (每 100 次循环)
+                if retry % 100 == 0 && retry > 0 {
+                    log::debug!(
+                        "USBDP PHY{}: RX CDR waiting... LOCK={}, val=0x{:08x}",
+                        self.config.id,
+                        cdr_locked,
+                        value
+                    );
+                }
+
+                self.delay_us(200); // 200 微秒轮询间隔
+
+                // 超时检查
+                if retry == MAX_RETRIES - 1 {
+                    let value = unsafe { cdr_reg.read_volatile() };
+                    let cdr_locked = (value & 0x1) == 1;
+
+                    log::error!(
+                        "❌ USBDP PHY{}: RX CDR lock timeout after {} retries! LOCK={}, val=0x{:08x}",
+                        self.config.id,
+                        MAX_RETRIES,
+                        cdr_locked,
+                        value
+                    );
+                    log::error!(
+                        "❌ USBDP PHY{}: USB3 RX path may not work properly!",
+                        self.config.id
+                    );
+                    return Err(crate::err::USBError::Timeout);
+                }
+            }
         }
 
-        log::info!("✓ USBDP PHY{}: PLL lock check skipped (mode={:?})",
-                  self.config.id, self.config.mode);
+        log::info!(
+            "✓ USBDP PHY{}: PLL lock check skipped (mode={:?})",
+            self.config.id,
+            self.config.mode
+        );
         Ok(())
     }
 
@@ -1322,11 +878,15 @@ impl UsbDpPhy {
         };
 
         // 打印详细状态
-        log::info!("USBDP PHY{}: Status - LCPLL={} (val=0x{:08x}), ROPLL={} (val=0x{:08x}), mode={:?}",
-                  self.config.id,
-                  lcpll_locked, lcpll_value,
-                  ropll_locked, ropll_value,
-                  self.config.mode);
+        log::info!(
+            "USBDP PHY{}: Status - LCPLL={} (val=0x{:08x}), ROPLL={} (val=0x{:08x}), mode={:?}",
+            self.config.id,
+            lcpll_locked,
+            lcpll_value,
+            ropll_locked,
+            ropll_value,
+            self.config.mode
+        );
 
         status
     }
