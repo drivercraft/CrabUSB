@@ -12,23 +12,36 @@ mod regmap;
 
 use consts::*;
 
-/// USBDP PHY 模式
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-pub enum UsbDpMode {
-    None = 0,
-    Usb = 1,
-    Dp = 2,
-    UsbDp = 3,
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct UdphyMode: u8 {
+        const NONE = 0;
+        const USB = 1;
+        const DP = 1 << 1;
+        const DP_USB = Self::DP.bits | Self::USB.bits;
+    }
 }
 
 /// USBDP PHY 寄存器偏移
 pub const UDPHY_PMA: usize = 0x8000;
 pub const UDPHY_PCS: usize = 0x4000;
 
+pub struct UdphyParam<'a> {
+    /// prop `rockchip,usb2phy-grf`
+    pub u2phy_grf: Mmio,
+    /// prop `rockchip,usb-grf`
+    pub usb_grf: Mmio,
+    /// prop `rockchip,usbdpphy-grf`
+    pub usbdpphy_grf: Mmio,
+    /// prop `rockchip,vo-grf`
+    pub vo_grf: Mmio,
+    /// prop `rockchip,dp-lane-mux`
+    pub dp_lane_mux: &'a [u32],
+}
+
 pub struct Udphy {
     cfg: config::UdphyCfg,
-    mode: UsbDpMode,
+    mode: UdphyMode,
     /// PHY MMIO 基址
     phy_base: usize,
 
@@ -40,19 +53,43 @@ pub struct Udphy {
     // /// USB2PHY GRF
     // usb2phy_grf: Grf,
     lane_mux_sel: [u32; 4],
+    dp_lane_sel: [u32; 4],
 }
 
 impl Udphy {
-    pub fn new(base: Mmio, usb_grf: Mmio, dp_grf: Mmio, usb2phy_grf: Mmio) -> Self {
+    pub fn new(base: Mmio, param: UdphyParam<'_>) -> Self {
         let cfg = config::RK3588_UDPHY_CFGS.clone();
+        let mut lane_mux_sel = [0u32; 4];
+        let mut dp_lane_sel = [0u32; 4];
+        for (i, &lane) in param.dp_lane_mux.iter().enumerate() {
+            debug!("DP lane {} mux select: {}", i, lane);
+            dp_lane_sel[i] = lane;
+            if lane > 3 {
+                panic!("lane mux between 0 and 3, exceeding the range");
+            }
+            lane_mux_sel[lane as usize] = PHY_LANE_MUX_DP;
+
+            for j in 0..param.dp_lane_mux.len() {
+                if lane == dp_lane_sel[j] {
+                    panic!("set repeat lane mux value")
+                }
+            }
+        }
+
+        let mut mode = UdphyMode::DP;
+
+        if param.dp_lane_mux.len() == 2 {
+            mode |= UdphyMode::USB;
+        }
 
         Udphy {
             cfg,
-            mode: UsbDpMode::Usb,
+            mode,
             phy_base: base.as_ptr() as usize,
             pma_remap: Regmap::new(unsafe { base.add(UDPHY_PMA) }),
-            udphygrf: Regmap::new(dp_grf),
-            lane_mux_sel: [0; 4],
+            udphygrf: Regmap::new(param.usbdpphy_grf),
+            lane_mux_sel,
+            dp_lane_sel,
         }
     }
 

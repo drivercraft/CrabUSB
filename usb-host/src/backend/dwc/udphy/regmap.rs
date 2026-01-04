@@ -45,584 +45,92 @@ pub struct RegSequence {
     def: u32,
 }
 
-// =============================================================================
-// 寄存器初始化序列 (基于 u-boot drivers/phy/phy-rockchip-usbdp.c)
-// =============================================================================
+macro_rules! def_sequence {
+    ($n:ident; $({$reg:expr, $val:expr}),* $(,)?) => {
+        pub const $n: &[RegSequence] = &[
+            $(
+                RegSequence {
+                    reg: $reg,
+                    def: $val,
+                },
+            )*
+        ];
+    };
+}
 
-/// RK3588 USBDP PHY 24MHz 参考时钟配置序列
-///
-/// 参考 u-boot: rk3588_udphy_24m_refclk_cfg
-/// 位置: drivers/phy/phy-rockchip-usbdp.c:226-263
-pub const RK3588_UDPHY_24M_REFCLK_CFG: &[RegSequence] = &[
-    // PMA 寄存器配置块 0
-    RegSequence {
-        reg: 0x0090,
-        def: 0x68,
-    },
-    RegSequence {
-        reg: 0x0094,
-        def: 0x68,
-    },
-    RegSequence {
-        reg: 0x0128,
-        def: 0x24,
-    },
-    RegSequence {
-        reg: 0x012c,
-        def: 0x44,
-    },
-    RegSequence {
-        reg: 0x0130,
-        def: 0x3f,
-    },
-    RegSequence {
-        reg: 0x0134,
-        def: 0x44,
-    },
-    RegSequence {
-        reg: 0x015c,
-        def: 0xa9,
-    },
-    RegSequence {
-        reg: 0x0160,
-        def: 0x71,
-    },
-    RegSequence {
-        reg: 0x0164,
-        def: 0x71,
-    },
-    RegSequence {
-        reg: 0x0168,
-        def: 0xa9,
-    },
-    RegSequence {
-        reg: 0x0174,
-        def: 0xa9,
-    },
-    RegSequence {
-        reg: 0x0178,
-        def: 0x71,
-    },
-    RegSequence {
-        reg: 0x017c,
-        def: 0x71,
-    },
-    RegSequence {
-        reg: 0x0180,
-        def: 0xa9,
-    },
-    RegSequence {
-        reg: 0x018c,
-        def: 0x41,
-    },
-    RegSequence {
-        reg: 0x0190,
-        def: 0x00,
-    },
-    RegSequence {
-        reg: 0x0194,
-        def: 0x05,
-    },
-    RegSequence {
-        reg: 0x01ac,
-        def: 0x2a,
-    },
-    RegSequence {
-        reg: 0x01b0,
-        def: 0x17,
-    },
-    RegSequence {
-        reg: 0x01b4,
-        def: 0x17,
-    },
-    RegSequence {
-        reg: 0x01b8,
-        def: 0x2a,
-    },
-    RegSequence {
-        reg: 0x01c8,
-        def: 0x04,
-    },
-    RegSequence {
-        reg: 0x01cc,
-        def: 0x08,
-    },
-    RegSequence {
-        reg: 0x01d0,
-        def: 0x08,
-    },
-    RegSequence {
-        reg: 0x01d4,
-        def: 0x04,
-    },
-    RegSequence {
-        reg: 0x01d8,
-        def: 0x20,
-    },
-    RegSequence {
-        reg: 0x01dc,
-        def: 0x01,
-    },
-    RegSequence {
-        reg: 0x01e0,
-        def: 0x09,
-    },
-    RegSequence {
-        reg: 0x01e4,
-        def: 0x03,
-    },
-    RegSequence {
-        reg: 0x01f0,
-        def: 0x29,
-    },
-    RegSequence {
-        reg: 0x01f4,
-        def: 0x02,
-    },
-    RegSequence {
-        reg: 0x01f8,
-        def: 0x02,
-    },
-    RegSequence {
-        reg: 0x01fc,
-        def: 0x29,
-    },
-    RegSequence {
-        reg: 0x0208,
-        def: 0x2a,
-    },
-    RegSequence {
-        reg: 0x020c,
-        def: 0x17,
-    },
-    RegSequence {
-        reg: 0x0210,
-        def: 0x17,
-    },
-    RegSequence {
-        reg: 0x0214,
-        def: 0x2a,
-    },
-    RegSequence {
-        reg: 0x0224,
-        def: 0x20,
-    },
-    RegSequence {
-        reg: 0x03f0,
-        def: 0x0a,
-    },
-    RegSequence {
-        reg: 0x03f4,
-        def: 0x07,
-    },
-    RegSequence {
-        reg: 0x03f8,
-        def: 0x07,
-    },
-    RegSequence {
-        reg: 0x03fc,
-        def: 0x0c,
-    },
-    RegSequence {
-        reg: 0x0404,
-        def: 0x12,
-    },
-    RegSequence {
-        reg: 0x0408,
-        def: 0x1a,
-    },
-    RegSequence {
-        reg: 0x040c,
-        def: 0x1a,
-    },
-    RegSequence {
-        reg: 0x0410,
-        def: 0x3f,
-    },
-    // Lane 0 和 Lane 1 配置
-    RegSequence {
-        reg: 0x0ce0,
-        def: 0x68,
-    },
-    RegSequence {
-        reg: 0x0ce8,
-        def: 0xd0,
-    },
-    RegSequence {
-        reg: 0x0cf0,
-        def: 0x87,
-    },
-    RegSequence {
-        reg: 0x0cf8,
-        def: 0x70,
-    },
-    RegSequence {
-        reg: 0x0d00,
-        def: 0x70,
-    },
-    RegSequence {
-        reg: 0x0d08,
-        def: 0xa9,
-    },
-    // Lane 2 和 Lane 3 配置
-    RegSequence {
-        reg: 0x1ce0,
-        def: 0x68,
-    },
-    RegSequence {
-        reg: 0x1ce8,
-        def: 0xd0,
-    },
-    RegSequence {
-        reg: 0x1cf0,
-        def: 0x87,
-    },
-    RegSequence {
-        reg: 0x1cf8,
-        def: 0x70,
-    },
-    RegSequence {
-        reg: 0x1d00,
-        def: 0x70,
-    },
-    RegSequence {
-        reg: 0x1d08,
-        def: 0xa9,
-    },
-    // Lane 0 Tx 驱动配置
-    RegSequence {
-        reg: 0x0a3c,
-        def: 0xd0,
-    },
-    RegSequence {
-        reg: 0x0a44,
-        def: 0xd0,
-    },
-    RegSequence {
-        reg: 0x0a48,
-        def: 0x01,
-    },
-    RegSequence {
-        reg: 0x0a4c,
-        def: 0x0d,
-    },
-    RegSequence {
-        reg: 0x0a54,
-        def: 0xe0,
-    },
-    RegSequence {
-        reg: 0x0a5c,
-        def: 0xe0,
-    },
-    RegSequence {
-        reg: 0x0a64,
-        def: 0xa8,
-    },
-    // Lane 2 Tx 驱动配置
-    RegSequence {
-        reg: 0x1a3c,
-        def: 0xd0,
-    },
-    RegSequence {
-        reg: 0x1a44,
-        def: 0xd0,
-    },
-    RegSequence {
-        reg: 0x1a48,
-        def: 0x01,
-    },
-    RegSequence {
-        reg: 0x1a4c,
-        def: 0x0d,
-    },
-    RegSequence {
-        reg: 0x1a54,
-        def: 0xe0,
-    },
-    RegSequence {
-        reg: 0x1a5c,
-        def: 0xe0,
-    },
-    RegSequence {
-        reg: 0x1a64,
-        def: 0xa8,
-    },
-];
+def_sequence! {
+    RK3588_UDPHY_24M_REFCLK_CFG;
+    {0x0090, 0x68}, {0x0094, 0x68},
+    {0x0128, 0x24}, {0x012c, 0x44},
+    {0x0130, 0x3f}, {0x0134, 0x44},
+    {0x015c, 0xa9}, {0x0160, 0x71},
+    {0x0164, 0x71}, {0x0168, 0xa9},
+    {0x0174, 0xa9}, {0x0178, 0x71},
+    {0x017c, 0x71}, {0x0180, 0xa9},
+    {0x018c, 0x41}, {0x0190, 0x00},
+    {0x0194, 0x05}, {0x01ac, 0x2a},
+    {0x01b0, 0x17}, {0x01b4, 0x17},
+    {0x01b8, 0x2a}, {0x01c8, 0x04},
+    {0x01cc, 0x08}, {0x01d0, 0x08},
+    {0x01d4, 0x04}, {0x01d8, 0x20},
+    {0x01dc, 0x01}, {0x01e0, 0x09},
+    {0x01e4, 0x03}, {0x01f0, 0x29},
+    {0x01f4, 0x02}, {0x01f8, 0x02},
+    {0x01fc, 0x29}, {0x0208, 0x2a},
+    {0x020c, 0x17}, {0x0210, 0x17},
+    {0x0214, 0x2a}, {0x0224, 0x20},
+    {0x03f0, 0x0a}, {0x03f4, 0x07},
+    {0x03f8, 0x07}, {0x03fc, 0x0c},
+    {0x0404, 0x12}, {0x0408, 0x1a},
+    {0x040c, 0x1a}, {0x0410, 0x3f},
+    {0x0ce0, 0x68}, {0x0ce8, 0xd0},
+    {0x0cf0, 0x87}, {0x0cf8, 0x70},
+    {0x0d00, 0x70}, {0x0d08, 0xa9},
+    {0x1ce0, 0x68}, {0x1ce8, 0xd0},
+    {0x1cf0, 0x87}, {0x1cf8, 0x70},
+    {0x1d00, 0x70}, {0x1d08, 0xa9},
+    {0x0a3c, 0xd0}, {0x0a44, 0xd0},
+    {0x0a48, 0x01}, {0x0a4c, 0x0d},
+    {0x0a54, 0xe0}, {0x0a5c, 0xe0},
+    {0x0a64, 0xa8}, {0x1a3c, 0xd0},
+    {0x1a44, 0xd0}, {0x1a48, 0x01},
+    {0x1a4c, 0x0d}, {0x1a54, 0xe0},
+    {0x1a5c, 0xe0}, {0x1a64, 0xa8}
+}
 
-/// RK3588 USBDP PHY 初始化序列
-///
-/// 参考 u-boot: rk3588_udphy_init_sequence
-/// 位置: drivers/phy/phy-rockchip-usbdp.c:265-299
-pub const RK3588_UDPHY_INIT_SEQUENCE: &[RegSequence] = &[
-    // CMN 和 Lane 0 初始化
-    RegSequence {
-        reg: 0x0104,
-        def: 0x44,
-    },
-    RegSequence {
-        reg: 0x0234,
-        def: 0xE8,
-    },
-    RegSequence {
-        reg: 0x0248,
-        def: 0x44,
-    },
-    RegSequence {
-        reg: 0x028C,
-        def: 0x18,
-    },
-    RegSequence {
-        reg: 0x081C,
-        def: 0xE5,
-    },
-    RegSequence {
-        reg: 0x0878,
-        def: 0x00,
-    },
-    RegSequence {
-        reg: 0x0994,
-        def: 0x1C,
-    },
-    RegSequence {
-        reg: 0x0AF0,
-        def: 0x00,
-    },
-    // Lane 2 初始化
-    RegSequence {
-        reg: 0x181C,
-        def: 0xE5,
-    },
-    RegSequence {
-        reg: 0x1878,
-        def: 0x00,
-    },
-    RegSequence {
-        reg: 0x1994,
-        def: 0x1C,
-    },
-    RegSequence {
-        reg: 0x1AF0,
-        def: 0x00,
-    },
-    // CMN 配置
-    RegSequence {
-        reg: 0x0428,
-        def: 0x60,
-    },
-    RegSequence {
-        reg: 0x0D58,
-        def: 0x33,
-    },
-    RegSequence {
-        reg: 0x1D58,
-        def: 0x33,
-    },
-    // Lane 0 配置
-    RegSequence {
-        reg: 0x0990,
-        def: 0x74,
-    },
-    RegSequence {
-        reg: 0x0D64,
-        def: 0x17,
-    },
-    RegSequence {
-        reg: 0x08C8,
-        def: 0x13,
-    },
-    // Lane 2 配置
-    RegSequence {
-        reg: 0x1990,
-        def: 0x74,
-    },
-    RegSequence {
-        reg: 0x1D64,
-        def: 0x17,
-    },
-    RegSequence {
-        reg: 0x18C8,
-        def: 0x13,
-    },
-    // Lane 0 RX/TX 配置
-    RegSequence {
-        reg: 0x0D90,
-        def: 0x40,
-    },
-    RegSequence {
-        reg: 0x0DA8,
-        def: 0x40,
-    },
-    RegSequence {
-        reg: 0x0DC0,
-        def: 0x40,
-    },
-    RegSequence {
-        reg: 0x0DD8,
-        def: 0x40,
-    },
-    // Lane 2 RX/TX 配置
-    RegSequence {
-        reg: 0x1D90,
-        def: 0x40,
-    },
-    RegSequence {
-        reg: 0x1DA8,
-        def: 0x40,
-    },
-    RegSequence {
-        reg: 0x1DC0,
-        def: 0x40,
-    },
-    RegSequence {
-        reg: 0x1DD8,
-        def: 0x40,
-    },
-    // CMN PLL 配置
-    RegSequence {
-        reg: 0x03C0,
-        def: 0x30,
-    },
-    RegSequence {
-        reg: 0x03C4,
-        def: 0x06,
-    },
-    RegSequence {
-        reg: 0x0E10,
-        def: 0x00,
-    },
-    RegSequence {
-        reg: 0x1E10,
-        def: 0x00,
-    },
-    RegSequence {
-        reg: 0x043C,
-        def: 0x0F,
-    },
-    RegSequence {
-        reg: 0x0D2C,
-        def: 0xFF,
-    },
-    RegSequence {
-        reg: 0x1D2C,
-        def: 0xFF,
-    },
-    RegSequence {
-        reg: 0x0D34,
-        def: 0x0F,
-    },
-    RegSequence {
-        reg: 0x1D34,
-        def: 0x0F,
-    },
-    // Lane 0 精细配置
-    RegSequence {
-        reg: 0x08FC,
-        def: 0x2A,
-    },
-    RegSequence {
-        reg: 0x0914,
-        def: 0x28,
-    },
-    RegSequence {
-        reg: 0x0A30,
-        def: 0x03,
-    },
-    RegSequence {
-        reg: 0x0E38,
-        def: 0x05,
-    },
-    RegSequence {
-        reg: 0x0ECC,
-        def: 0x27,
-    },
-    RegSequence {
-        reg: 0x0ED0,
-        def: 0x22,
-    },
-    RegSequence {
-        reg: 0x0ED4,
-        def: 0x26,
-    },
-    // Lane 2 精细配置
-    RegSequence {
-        reg: 0x18FC,
-        def: 0x2A,
-    },
-    RegSequence {
-        reg: 0x1914,
-        def: 0x28,
-    },
-    RegSequence {
-        reg: 0x1A30,
-        def: 0x03,
-    },
-    RegSequence {
-        reg: 0x1E38,
-        def: 0x05,
-    },
-    RegSequence {
-        reg: 0x1ECC,
-        def: 0x27,
-    },
-    RegSequence {
-        reg: 0x1ED0,
-        def: 0x22,
-    },
-    RegSequence {
-        reg: 0x1ED4,
-        def: 0x26,
-    },
-    // CMN 最终配置
-    RegSequence {
-        reg: 0x0048,
-        def: 0x0F,
-    },
-    RegSequence {
-        reg: 0x0060,
-        def: 0x3C,
-    },
-    RegSequence {
-        reg: 0x0064,
-        def: 0xF7,
-    },
-    RegSequence {
-        reg: 0x006C,
-        def: 0x20,
-    },
-    RegSequence {
-        reg: 0x0070,
-        def: 0x7D,
-    },
-    RegSequence {
-        reg: 0x0074,
-        def: 0x68,
-    },
-    RegSequence {
-        reg: 0x0AF4,
-        def: 0x1A,
-    },
-    RegSequence {
-        reg: 0x1AF4,
-        def: 0x1A,
-    },
-    RegSequence {
-        reg: 0x0440,
-        def: 0x3F,
-    },
-    RegSequence {
-        reg: 0x10D4,
-        def: 0x08,
-    },
-    RegSequence {
-        reg: 0x20D4,
-        def: 0x08,
-    },
-    RegSequence {
-        reg: 0x00D4,
-        def: 0x30,
-    },
-    RegSequence {
-        reg: 0x0024,
-        def: 0x6e,
-    },
-];
+def_sequence! {
+    RK3588_UDPHY_INIT_SEQUENCE;
+    {0x0104, 0x44}, {0x0234, 0xE8},
+    {0x0248, 0x44}, {0x028C, 0x18},
+    {0x081C, 0xE5}, {0x0878, 0x00},
+    {0x0994, 0x1C}, {0x0AF0, 0x00},
+    {0x181C, 0xE5}, {0x1878, 0x00},
+    {0x1994, 0x1C}, {0x1AF0, 0x00},
+    {0x0428, 0x60}, {0x0D58, 0x33},
+    {0x1D58, 0x33}, {0x0990, 0x74},
+    {0x0D64, 0x17}, {0x08C8, 0x13},
+    {0x1990, 0x74}, {0x1D64, 0x17},
+    {0x18C8, 0x13}, {0x0D90, 0x40},
+    {0x0DA8, 0x40}, {0x0DC0, 0x40},
+    {0x0DD8, 0x40}, {0x1D90, 0x40},
+    {0x1DA8, 0x40}, {0x1DC0, 0x40},
+    {0x1DD8, 0x40}, {0x03C0, 0x30},
+    {0x03C4, 0x06}, {0x0E10, 0x00},
+    {0x1E10, 0x00}, {0x043C, 0x0F},
+    {0x0D2C, 0xFF}, {0x1D2C, 0xFF},
+    {0x0D34, 0x0F}, {0x1D34, 0x0F},
+    {0x08FC, 0x2A}, {0x0914, 0x28},
+    {0x0A30, 0x03}, {0x0E38, 0x05},
+    {0x0ECC, 0x27}, {0x0ED0, 0x22},
+    {0x0ED4, 0x26}, {0x18FC, 0x2A},
+    {0x1914, 0x28}, {0x1A30, 0x03},
+    {0x1E38, 0x05}, {0x1ECC, 0x27},
+    {0x1ED0, 0x22}, {0x1ED4, 0x26},
+    {0x0048, 0x0F}, {0x0060, 0x3C},
+    {0x0064, 0xF7}, {0x006C, 0x20},
+    {0x0070, 0x7D}, {0x0074, 0x68},
+    {0x0AF4, 0x1A}, {0x1AF4, 0x1A},
+    {0x0440, 0x3F}, {0x10D4, 0x08},
+    {0x20D4, 0x08}, {0x00D4, 0x30},
+    {0x0024, 0x6e},
+}
