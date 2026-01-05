@@ -3,7 +3,7 @@
 #![feature(used_with_arg)]
 
 use bare_test::driver::register;
-use rdrive::{PlatformDevice, probe::OnProbeError, register::FdtInfo};
+use rdrive::{Phandle, PlatformDevice, probe::OnProbeError, register::FdtInfo};
 
 extern crate alloc;
 
@@ -20,6 +20,7 @@ use bare_test::{
 };
 use core::{
     hint::spin_loop,
+    ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
@@ -28,8 +29,9 @@ use futures::{FutureExt, future::BoxFuture};
 use log::info;
 use log::*;
 use pcie::*;
-// use rk3588_clk::Rk3588Cru;
 use rockchip_pm::{PowerDomain, RockchipPM};
+use rockchip_soc::rk3588::Cru;
+use spin::Mutex;
 use usb_if::{
     descriptor::{ConfigurationDescriptor, EndpointType},
     transfer::Direction,
@@ -237,27 +239,87 @@ mod tests {
 
                 let irq = node.irq_info();
 
-                let phy = 0xfed90000usize;
+                let phy_phandle = Phandle::from(0x495);
 
-                let u3grf = 0xfd5ac000usize;
-                let dpgrf = 0xfd5cc000usize;
-                let usb2phy_grf = 0xfd5d4000usize;  // USB2PHY1 GRF 基址
-                let cru = 0xfd7c0000usize;
+                let u3_phy_node = fdt
+                    .get_node_by_phandle(phy_phandle)
+                    .expect("Failed to find u3phy node");
 
-                // USB2 PHY 地址 (RK3588 USB2PHY1)
-                // 从设备树: syscon@fd5d4000 + offset@4000 = 0xfd5d8000
-                // USB2 PHY 输出 480MHz 时钟给 DWC3 控制器，这是 PHY 寄存器可访问的必要条件
-                let usb2_phy = 0xfd5d8000usize;
+                info!("Found phy node: {}", u3_phy_node.name());
 
-                let phy = iomap(phy.into(), 0x10000);
-                let usb2_phy = iomap(usb2_phy.into(), 0x4000);
-                let dpgrf = iomap(dpgrf.into(), 0x4000);
-                let u3grf = iomap(u3grf.into(), 0x4000);
-                let usb2phy_grf = iomap(usb2phy_grf.into(), 0x4000);
-                let cru = iomap(cru.into(), 0x5c000);
+                let u3phy_reg = u3_phy_node.reg().unwrap().collect::<Vec<_>>().remove(0);
+
+                let phy = iomap(
+                    (u3phy_reg.address as usize).into(),
+                    u3phy_reg.size.unwrap_or(0x1000),
+                );
+
+                let u2phy_grf = get_grf(
+                    u3_phy_node
+                        .find_property("rockchip,u2phy-grf")
+                        .unwrap()
+                        .u32()
+                        .into(),
+                );
+
+                let usb_grf = get_grf(
+                    u3_phy_node
+                        .find_property("rockchip,usb-grf")
+                        .unwrap()
+                        .u32()
+                        .into(),
+                );
+
+                let usbdpphy_grf = get_grf(
+                    u3_phy_node
+                        .find_property("rockchip,usbdpphy-grf")
+                        .unwrap()
+                        .u32()
+                        .into(),
+                );
+
+                let vo_grf = get_grf(
+                    u3_phy_node
+                        .find_property("rockchip,vo-grf")
+                        .unwrap()
+                        .u32()
+                        .into(),
+                );
+
+                let dp_lane_mux_prop = u3_phy_node
+                    .find_property("rockchip,dp-lane-mux")
+                    .expect("Missing rockchip,dp-lane-mux property");
+
+                let dp_lane_mux = dp_lane_mux_prop.u32_list().collect::<Vec<_>>();
+                let mut rst_list = Vec::new();
+                let resets_prop = u3_phy_node
+                    .find_property("resets")
+                    .expect("Missing resets property");
+                let resets = resets_prop.u32_list().collect::<Vec<_>>();
+                let reset_names_prop = u3_phy_node
+                    .find_property("reset-names")
+                    .expect("Missing reset-names property");
+                let reset_names = reset_names_prop.str_list().collect::<Vec<_>>();
+                for (cell, &name) in resets.chunks(2).zip(reset_names.iter()) {
+                    rst_list.push((name, cell[1] as u64));
+                }
 
                 return XhciInfo {
-                    usb: USBHost::new_dwc(addr, phy, usb2_phy, u3grf, dpgrf, usb2phy_grf, cru, u32::MAX as usize).unwrap(),
+                    usb: USBHost::new_dwc(
+                        addr,
+                        phy,
+                        UdphyParam {
+                            u2phy_grf,
+                            usb_grf,
+                            usbdpphy_grf,
+                            vo_grf,
+                            dp_lane_mux: &dp_lane_mux,
+                            rst_list: &rst_list,
+                        },
+                        CruOpImpl,
+                        u32::MAX as usize,
+                    )
+                    .unwrap(),
                     irq,
                 };
             }
@@ -345,50 +407,78 @@ mod tests {
     }
 }
 
-// rdrive::module_driver! {
-//     name: "CRU",
-//     level: ProbeLevel::PostKernel,
-//     priority: ProbePriority::DEFAULT,
-//     probe_kinds: &[ProbeKind::Fdt {
-//         compatibles: &["rockchip,rk3588-cru"],
-//         // Use `probe_clk` above; this usage is because doctests cannot find the parent module.
-//         on_probe: on_probe_cru,
-//     }],
-// }
+fn get_grf(phandle: Phandle) -> NonNull<u8> {
+    let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
+    let fdt = fdt.get();
 
-// fn on_probe_cru(node: FdtInfo<'_>, dev: PlatformDevice) -> Result<(), OnProbeError> {
-//     // Initialization code for CRU can be added here if needed.
-//     // 获取 CRU 寄存器基址
-//     let Some(reg) = node.node.reg().and_then(|mut r| r.next()) else {
-//         warn!("CRU node has no valid register, skip clock enable");
-//         return Err(OnProbeError::KError(rdrive::KError::BadAddr(0)));
-//     };
+    let node = fdt.get_node_by_phandle(phandle).unwrap();
 
-//     let base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000));
+    info!("Found node: {}", node.name());
 
-//     info!("RK3588 CRU base at {:p}", base.as_ptr());
+    let regs = node.reg().unwrap().collect::<Vec<_>>();
+    let reg = regs[0];
+    iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000))
+}
 
-//     let clk = Rk3588Cru::new(base);
+rdrive::module_driver! {
+    name: "CRU",
+    level: ProbeLevel::PostKernel,
+    priority: ProbePriority::CLK,
+    probe_kinds: &[ProbeKind::Fdt {
+        compatibles: &["rockchip,rk3588-cru"],
+        // Use `probe_clk` above; this usage is because doctests cannot find the parent module.
+        on_probe: on_probe_cru,
+    }],
+}
 
-//     dev.register(Cru(clk));
+fn on_probe_cru(node: FdtInfo<'_>, dev: PlatformDevice) -> Result<(), OnProbeError> {
+    // Initialization code for CRU can be added here if needed.
+    // 获取 CRU 寄存器基址
+    let Some(reg) = node.node.reg().and_then(|mut r| r.next()) else {
+        warn!("CRU node has no valid register, skip clock enable");
+        return Err(OnProbeError::KError(rdrive::KError::BadAddr(0)));
+    };
 
-//     Ok(())
-// }
+    let base = iomap((reg.address as usize).into(), reg.size.unwrap_or(0x1000));
 
-// struct Cru(Rk3588Cru);
+    info!("RK3588 CRU base at {:p}", base.as_ptr());
 
-// unsafe impl Send for Cru {}
-// unsafe impl Sync for Cru {}
+    let grf_phandle = node
+        .node
+        .find_property("rockchip,grf")
+        .unwrap()
+        .u32()
+        .into();
 
-// impl rdrive::DriverGeneric for Cru {
-//     fn open(&mut self) -> Result<(), rdrive::KError> {
-//         Ok(())
-//     }
+    let grf = get_grf(grf_phandle);
 
-//     fn close(&mut self) -> Result<(), rdrive::KError> {
-//         Ok(())
-//     }
-// }
+    let clk = CruDev(Cru::new(base, grf));
+
+    dev.register(clk);
+
+    Ok(())
+}
+
+struct CruDev(Cru);
+
+impl rdrive::DriverGeneric for CruDev {
+    fn open(&mut self) -> Result<(), rdrive::KError> {
+        Ok(())
+    }
+
+    fn close(&mut self) -> Result<(), rdrive::KError> {
+        Ok(())
+    }
+}
+
+struct CruOpImpl;
+
+impl CruOp for CruOpImpl {
+    fn reset_assert(&self, id: u64) {
+        let cru = rdrive::get_list::<CruDev>().remove(0);
+        cru.lock().unwrap().0.reset_assert(id.into());
+    }
+}
 
 trait Align {
     fn align_up(&self, align: usize) -> usize;

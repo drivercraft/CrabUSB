@@ -8,11 +8,9 @@ pub struct UdphyGrfReg {
     pub enable: u32,
 }
 
-
-
 #[derive(Clone)]
 pub struct UdphyCfg {
-    pub rst_list: &[&'static str],
+    pub rst_list: &'static [&'static str],
     pub grf: UdphyGrfCfg,
 }
 
