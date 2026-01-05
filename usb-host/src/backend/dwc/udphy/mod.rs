@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -11,6 +13,7 @@ use crate::{
         RK3588_UDPHY_24M_REFCLK_CFG, RK3588_UDPHY_INIT_SEQUENCE, Regmap,
     },
     err::Result,
+    osal::SpinWhile,
 };
 
 mod config;
@@ -18,10 +21,7 @@ mod consts;
 mod regmap;
 
 use consts::*;
-use tock_registers::{
-    interfaces::{ReadWriteable, Writeable},
-    registers::ReadWrite,
-};
+use tock_registers::{interfaces::*, registers::*};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +75,12 @@ impl Udphy {
         let cfg = Box::new(config::RK3588_UDPHY_CFGS.clone());
         let mut lane_mux_sel = [0u32; 4];
         let mut dp_lane_sel = [0u32; 4];
+        let num_lanes = param.dp_lane_mux.len();
+
+        if num_lanes != 2 && num_lanes != 4 {
+            panic!("dp_lane_mux length must be 2 or 4");
+        }
+
         for (i, &lane) in param.dp_lane_mux.iter().enumerate() {
             debug!("DP lane {} mux select: {}", i, lane);
             dp_lane_sel[i] = lane;
@@ -83,10 +89,12 @@ impl Udphy {
             }
             lane_mux_sel[lane as usize] = PHY_LANE_MUX_DP;
 
-            for j in 0..param.dp_lane_mux.len() {
-                if lane == dp_lane_sel[j] {
-                    panic!("set repeat lane mux value")
+            let mut j = i + 1;
+            while j < num_lanes {
+                if dp_lane_sel[j] == lane {
+                    panic!("duplicate lane mux selection for lane {}", lane);
                 }
+                j += 1;
             }
         }
 
@@ -113,7 +121,7 @@ impl Udphy {
             udphygrf: Regmap::new(param.usbdpphy_grf),
             lane_mux_sel,
             dp_lane_sel,
-            cru: cru,
+            cru,
             rsts,
         }
     }
@@ -133,9 +141,16 @@ impl Udphy {
         self.reset_assert("pma_apb");
         self.reset_assert("pcs_apb");
 
+        debug!("PMA powered on and APB resets deasserted");
+
+        // Step 2: set init sequence and phy refclk
         self.pma_remap.multi_reg_write(RK3588_UDPHY_INIT_SEQUENCE);
 
+        debug!("Initial register sequences applied");
+
         self.pma_remap.multi_reg_write(RK3588_UDPHY_24M_REFCLK_CFG);
+
+        debug!("24M reference clock configured");
 
         // Step 3: configure lane mux
         self.cmn_lane_mux_and_en().write(
@@ -149,12 +164,43 @@ impl Udphy {
                 + CMN_LANE_MUX_EN::LANE3_EN::Disable,
         );
         // Step 4: deassert init rstn and wait for 200ns from datasheet
+        if self.mode.contains(UdphyMode::USB) {
+            self.reset_assert("init");
+        }
 
+        if self.mode.contains(UdphyMode::DP) {
+            self.cmn_dp_rstn().modify(CMN_DP_RSTN::DP_INIT_RSTN::Enable);
+        }
+
+        crate::osal::kernel::delay(Duration::from_micros(1));
+
+        if self.mode.contains(UdphyMode::USB) {
+            // Step 5: deassert usb rstn
+            self.reset_assert("cmn");
+            self.reset_assert("lane");
+        }
+        //  Step 6: wait for lock done of pll
+        debug!("Waiting for PLL lock...");
+        SpinWhile::new(|| {
+            !self.cmn_ana_lcpll().is_set(CMN_ANA_LCPLL::AFC_DONE)
+                || !self.cmn_ana_lcpll().is_set(CMN_ANA_LCPLL::LOCK_DONE)
+        })
+        .await;
+
+        info!("Udphy initialized");
         Ok(())
     }
 
     fn cmn_lane_mux_and_en(&self) -> &ReadWrite<u32, CMN_LANE_MUX_EN::Register> {
         unsafe { &*((self.phy_base + UDPHY_PMA + pma_offset::CMN_LANE_MUX_AND_EN) as *const _) }
+    }
+
+    fn cmn_dp_rstn(&self) -> &ReadWrite<u32, CMN_DP_RSTN::Register> {
+        unsafe { &*((self.phy_base + UDPHY_PMA + pma_offset::CMN_DP_RSTN) as *const _) }
+    }
+
+    fn cmn_ana_lcpll(&self) -> &ReadWrite<u32, CMN_ANA_LCPLL::Register> {
+        unsafe { &*((self.phy_base + UDPHY_PMA + pma_offset::CMN_ANA_LCPLL_DONE) as *const _) }
     }
 
     fn reset_assert(&self, name: &str) {

@@ -71,3 +71,45 @@ register_bitfields![u32,
         ],
     ]
 ];
+
+// CMN_DP_RSTN 寄存器位字段
+register_bitfields![u32,
+    pub CMN_DP_RSTN [
+        // CDR watchdog enable
+        CDR_WTCHGD_MSK_CDR_EN OFFSET(0) NUMBITS(1) [
+            Mask = 0,
+            Enable = 1
+        ],
+        // CDR watchdog enable
+        CDR_WTCHDG_EN OFFSET(1) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+        // DP common reset
+        DP_CMN_RSTN OFFSET(2) NUMBITS(1) [
+            Reset = 0,
+            Enable = 1
+        ],
+        // DP init reset
+        DP_INIT_RSTN OFFSET(3) NUMBITS(1) [
+            Reset = 0,
+            Enable = 1
+        ],
+    ]
+];
+
+// CMN_ANA_LCPLL_DONE 寄存器位字段
+register_bitfields![u32,
+    pub CMN_ANA_LCPLL [
+        // LCPLL AFC done
+        AFC_DONE OFFSET(6) NUMBITS(1) [
+            NotDone = 0,
+            Done = 1
+        ],
+        // LCPLL lock done
+        LOCK_DONE OFFSET(7) NUMBITS(1) [
+            NotLocked = 0,
+            Locked = 1
+        ],
+    ]
+];
