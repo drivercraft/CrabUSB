@@ -11,6 +11,10 @@ mod consts;
 mod regmap;
 
 use consts::*;
+use tock_registers::{
+    interfaces::{ReadWriteable, Writeable},
+    registers::ReadWrite,
+};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,16 +114,23 @@ impl Udphy {
         self.pma_remap.multi_reg_write(RK3588_UDPHY_24M_REFCLK_CFG);
 
         // Step 3: configure lane mux
-        self.pma_remap.update_bits(
-            CMN_LANE_MUX_AND_EN_OFFSET,
-            CMN_DP_LANE_MUX_ALL | CMN_DP_LANE_EN_ALL,
-            FIELD_PREP(CMN_DP_LANE_MUX_N(3), self.lane_mux_sel[3])
-                | FIELD_PREP(CMN_DP_LANE_MUX_N(2), self.lane_mux_sel[2])
-                | FIELD_PREP(CMN_DP_LANE_MUX_N(1), self.lane_mux_sel[1])
-                | FIELD_PREP(CMN_DP_LANE_MUX_N(0), self.lane_mux_sel[0])
-                | FIELD_PREP(CMN_DP_LANE_EN_ALL, 0),
+        self.cmn_lane_mux_and_en().write(
+            CMN_LANE_MUX_EN::LANE0_MUX.val(self.lane_mux_sel[0])
+                + CMN_LANE_MUX_EN::LANE1_MUX.val(self.lane_mux_sel[1])
+                + CMN_LANE_MUX_EN::LANE2_MUX.val(self.lane_mux_sel[2])
+                + CMN_LANE_MUX_EN::LANE3_MUX.val(self.lane_mux_sel[3])
+                + CMN_LANE_MUX_EN::LANE0_EN::Disable
+                + CMN_LANE_MUX_EN::LANE1_EN::Disable
+                + CMN_LANE_MUX_EN::LANE2_EN::Disable
+                + CMN_LANE_MUX_EN::LANE3_EN::Disable,
         );
+        // Step 4: deassert init rstn and wait for 200ns from datasheet
+        
 
         Ok(())
+    }
+
+    fn cmn_lane_mux_and_en(&self) -> &ReadWrite<u32, CMN_LANE_MUX_EN::Register> {
+        unsafe { &*((self.phy_base + UDPHY_PMA + pma_offset::CMN_LANE_MUX_AND_EN) as *const _) }
     }
 }
