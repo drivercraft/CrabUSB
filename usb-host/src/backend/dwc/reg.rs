@@ -10,8 +10,22 @@ use tock_registers::{
     registers::{ReadOnly, ReadWrite},
 };
 
+use super::consts::*;
+
 /// DWC3 全局寄存器基址偏移 (相对于 xHCI 寄存器区域)
 const DWC3_GLOBALS_REGS_START: usize = 0xc100;
+
+pub struct Dwc3Hwparams {
+    pub hwparams0: u32,
+    pub hwparams1: u32,
+    pub hwparams2: u32,
+    pub hwparams3: u32,
+    pub hwparams4: u32,
+    pub hwparams5: u32,
+    pub hwparams6: u32,
+    pub hwparams7: u32,
+    pub hwparams8: u32,
+}
 
 /// DWC3 寄存器映射结构
 #[repr(C)]
@@ -438,6 +452,10 @@ impl Dwc3Regs {
         unsafe { &*(addr as *const Dwc3Registers) }
     }
 
+    fn reg_offset(&self, offset: usize) -> *mut u32 {
+        (self.base + DWC3_GLOBALS_REGS_START + offset) as *mut u32
+    }
+
     /// 获取可变的全局寄存器
     fn globals_mut(&mut self) -> &'static mut Dwc3Registers {
         let addr = self.base + DWC3_GLOBALS_REGS_START;
@@ -445,6 +463,20 @@ impl Dwc3Regs {
     }
 
     // ==================== 寄存器操作封装 ====================
+
+    // pub fn hwparams(&self) -> Dwc3Hwparams {
+    //     Dwc3Hwparams {
+    //         hwparams0: self.globals().gsnpsid.get(),
+    //         hwparams1: 0, // TODO: 读取其他 HWPARAMS 寄存器
+    //         hwparams2: 0,
+    //         hwparams3: 0,
+    //         hwparams4: 0,
+    //         hwparams5: 0,
+    //         hwparams6: 0,
+    //         hwparams7: 0,
+    //         hwparams8: 0,
+    //     }
+    // }
 
     /// 读取 SNPSID 寄存器（完整值）
     pub fn read_snpsid(&self) -> u32 {
@@ -596,6 +628,11 @@ impl Dwc3Regs {
         }
 
         (ip_id as u16, product_id, revision)
+    }
+
+    pub fn num_event_buffers(&self) -> usize {
+        let val = unsafe { self.reg_offset(DWC3_GHWPARAMS1).read_volatile() };
+        (((val) & (0x3f << 15)) >> 15) as usize
     }
 
     /// 配置 GCTL 寄存器

@@ -306,12 +306,25 @@ mod tests {
                     .expect("Missing rockchip,dp-lane-mux property");
 
                 let dp_lane_mux = dp_lane_mux_prop.u32_list().collect::<Vec<_>>();
-                let mut rst_list = Vec::new();
+                let mut phy_rst_list = Vec::new();
                 let resets_prop = u3_phy_node
                     .find_property("resets")
                     .expect("Missing resets property");
                 let resets = resets_prop.u32_list().collect::<Vec<_>>();
                 let reset_names_prop = u3_phy_node
+                    .find_property("reset-names")
+                    .expect("Missing reset-names property");
+                let reset_names = reset_names_prop.str_list().collect::<Vec<_>>();
+                for (cell, &name) in resets.chunks(2).zip(reset_names.iter()) {
+                    phy_rst_list.push((name, cell[1] as u64));
+                }
+
+                let mut rst_list = Vec::new();
+                let resets_prop = node
+                    .find_property("resets")
+                    .expect("Missing resets property");
+                let resets = resets_prop.u32_list().collect::<Vec<_>>();
+                let reset_names_prop = node
                     .find_property("reset-names")
                     .expect("Missing reset-names property");
                 let reset_names = reset_names_prop.str_list().collect::<Vec<_>>();
@@ -329,8 +342,9 @@ mod tests {
                             usbdpphy_grf,
                             vo_grf,
                             dp_lane_mux: &dp_lane_mux,
-                            rst_list: &rst_list,
+                            rst_list: &phy_rst_list,
                         },
+                        &rst_list,
                         CruOpImpl,
                         u32::MAX as usize,
                     )

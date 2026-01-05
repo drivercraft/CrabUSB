@@ -172,7 +172,7 @@ impl Udphy {
         );
         // Step 4: deassert init rstn and wait for 200ns from datasheet
         if self.mode.contains(UdphyMode::USB) {
-            self.reset_assert("init");
+            self.reset_deassert("init");
         }
 
         if self.mode.contains(UdphyMode::DP) {
