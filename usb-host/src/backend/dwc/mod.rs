@@ -31,6 +31,7 @@ pub use usb2phy::Usb2Phy;
 /// CRU (Clock and Reset Unit)
 pub trait CruOp: Sync + Send + 'static {
     fn reset_assert(&self, id: u64);
+    fn reset_deassert(&self, id: u64);
 }
 
 /// DWC3 控制器

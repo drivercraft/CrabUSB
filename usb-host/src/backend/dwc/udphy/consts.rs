@@ -113,3 +113,26 @@ register_bitfields![u32,
         ],
     ]
 ];
+
+register_bitfields![u32,
+    pub TRSV_LN0_MON_RX_CDR [
+        // RX CDR lock done (bit 0)
+        // 从接收数据流中恢复时钟的锁定状态
+        LOCK_DONE OFFSET(0) NUMBITS(1) [
+            NotLocked = 0,
+            Locked = 1
+        ],
+    ]
+];
+
+// TRSV_LN2_MON_RX_CDR 寄存器位字段 (Lane 2 RX CDR 监控)
+// 用于 USB3 模式下的 Lane 2 检查
+register_bitfields![u32,
+    pub TRSV_LN2_MON_RX_CDR [
+        // RX CDR lock done (bit 0)
+        LOCK_DONE OFFSET(0) NUMBITS(1) [
+            NotLocked = 0,
+            Locked = 1
+        ],
+    ]
+];

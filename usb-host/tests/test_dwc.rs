@@ -247,6 +247,21 @@ mod tests {
 
                 info!("Found phy node: {}", u3_phy_node.name());
 
+                info!("Preper PHY clocks");
+                for clk in u3_phy_node.clocks() {
+                    info!("enable `{:?}`, id: {}", clk.name, clk.select);
+                    if clk.select == 0 {
+                        debug!("skip clock with id 0");
+                        continue;
+                    }
+                    let cru = rdrive::get_list::<CruDev>().remove(0);
+                    let mut g = cru.lock().unwrap();
+                    let id = clk.select.into();
+                    if !g.0.clk_is_enabled(id).unwrap() {
+                        g.0.clk_enable(id).unwrap();
+                    }
+                }
+
                 let u3phy_reg = u3_phy_node.reg().unwrap().collect::<Vec<_>>().remove(0);
 
                 let phy = iomap(
@@ -452,7 +467,9 @@ fn on_probe_cru(node: FdtInfo<'_>, dev: PlatformDevice) -> Result<(), OnProbeErr
 
     let grf = get_grf(grf_phandle);
 
-    let clk = CruDev(Cru::new(base, grf));
+    let mut clk = CruDev(Cru::new(base, grf));
+
+    clk.0.init();
 
     dev.register(clk);
 
@@ -477,6 +494,10 @@ impl CruOp for CruOpImpl {
     fn reset_assert(&self, id: u64) {
         let cru = rdrive::get_list::<CruDev>().remove(0);
         cru.lock().unwrap().0.reset_assert(id.into());
+    }
+    fn reset_deassert(&self, id: u64) {
+        let cru = rdrive::get_list::<CruDev>().remove(0);
+        cru.lock().unwrap().0.reset_deassert(id.into());
     }
 }
 

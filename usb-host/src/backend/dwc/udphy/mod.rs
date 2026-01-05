@@ -66,6 +66,8 @@ pub struct Udphy {
     // usb2phy_grf: Grf,
     lane_mux_sel: [u32; 4],
     dp_lane_sel: [u32; 4],
+    /// Type C 反转标志
+    flip: bool,
     cru: Arc<dyn CruOp>,
     rsts: BTreeMap<String, u64>,
 }
@@ -99,9 +101,11 @@ impl Udphy {
         }
 
         let mut mode = UdphyMode::DP;
+        let mut flip = false;
 
         if param.dp_lane_mux.len() == 2 {
             mode |= UdphyMode::USB;
+            flip = lane_mux_sel[0] == PHY_LANE_MUX_DP;
         }
 
         let mut rsts = BTreeMap::new();
@@ -123,11 +127,15 @@ impl Udphy {
             dp_lane_sel,
             cru,
             rsts,
+            flip,
         }
     }
 
     pub async fn init(&mut self) -> Result<()> {
         info!("Starting initialization");
+        for &rst in self.cfg.rst_list {
+            self.reset_assert(rst);
+        }
 
         // enable rx lfps for usb
         if self.mode.contains(UdphyMode::USB) {
@@ -138,9 +146,8 @@ impl Udphy {
         // Step 1: power on pma and deassert apb rstn
         self.udphygrf.grfreg_write(&self.cfg.grf.low_pwrn, true);
 
-        self.reset_assert("pma_apb");
-        self.reset_assert("pcs_apb");
-
+        self.reset_deassert("pma_apb");
+        self.reset_deassert("pcs_apb");
         debug!("PMA powered on and APB resets deasserted");
 
         // Step 2: set init sequence and phy refclk
@@ -176,19 +183,40 @@ impl Udphy {
 
         if self.mode.contains(UdphyMode::USB) {
             // Step 5: deassert usb rstn
-            self.reset_assert("cmn");
-            self.reset_assert("lane");
+            self.reset_deassert("cmn");
+            self.reset_deassert("lane");
         }
         //  Step 6: wait for lock done of pll
-        debug!("Waiting for PLL lock...");
-        SpinWhile::new(|| {
-            !self.cmn_ana_lcpll().is_set(CMN_ANA_LCPLL::AFC_DONE)
-                || !self.cmn_ana_lcpll().is_set(CMN_ANA_LCPLL::LOCK_DONE)
-        })
-        .await;
-
+        self.status_check().await;
         info!("Udphy initialized");
         Ok(())
+    }
+
+    async fn status_check(&self) {
+        if self.mode.contains(UdphyMode::USB) {
+            debug!("Waiting for PLL lock...");
+            SpinWhile::new(|| {
+                !self.cmn_ana_lcpll().is_set(CMN_ANA_LCPLL::AFC_DONE)
+                    || !self.cmn_ana_lcpll().is_set(CMN_ANA_LCPLL::LOCK_DONE)
+            })
+            .await;
+
+            if self.flip {
+                SpinWhile::new(|| {
+                    !self
+                        .trsv_ln2_mon_rx_cdr()
+                        .is_set(TRSV_LN2_MON_RX_CDR::LOCK_DONE)
+                })
+                .await;
+            } else {
+                SpinWhile::new(|| {
+                    !self
+                        .trsv_ln0_mon_rx_cdr()
+                        .is_set(TRSV_LN0_MON_RX_CDR::LOCK_DONE)
+                })
+                .await;
+            }
+        }
     }
 
     fn cmn_lane_mux_and_en(&self) -> &ReadWrite<u32, CMN_LANE_MUX_EN::Register> {
@@ -203,9 +231,25 @@ impl Udphy {
         unsafe { &*((self.phy_base + UDPHY_PMA + pma_offset::CMN_ANA_LCPLL_DONE) as *const _) }
     }
 
+    fn trsv_ln0_mon_rx_cdr(&self) -> &ReadOnly<u32, TRSV_LN0_MON_RX_CDR::Register> {
+        unsafe { &*((self.phy_base + UDPHY_PMA + pma_offset::TRSV_LN0_MON_RX_CDR) as *const _) }
+    }
+
+    fn trsv_ln2_mon_rx_cdr(&self) -> &ReadOnly<u32, TRSV_LN2_MON_RX_CDR::Register> {
+        unsafe { &*((self.phy_base + UDPHY_PMA + pma_offset::TRSV_LN2_MON_RX_CDR) as *const _) }
+    }
+
     fn reset_assert(&self, name: &str) {
         if let Some(&rst_id) = self.rsts.get(name) {
             self.cru.reset_assert(rst_id);
+        } else {
+            panic!("unsupported reset name: {}", name);
+        }
+    }
+
+    fn reset_deassert(&self, name: &str) {
+        if let Some(&rst_id) = self.rsts.get(name) {
+            self.cru.reset_deassert(rst_id);
         } else {
             panic!("unsupported reset name: {}", name);
         }
