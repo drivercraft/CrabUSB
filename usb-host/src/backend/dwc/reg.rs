@@ -97,7 +97,7 @@ register_structs! {
         (0x60 => _rsv_debug),
 
         /// 0xc200 - USB2 PHY Configuration Register 0
-        (0x100 => gusb2phycfg0: ReadWrite<u32, GUSB2PHYCFG::Register>),
+        (0x100 => pub gusb2phycfg0: ReadWrite<u32, GUSB2PHYCFG::Register>),
 
         // 0xc204 - 0xc2bc: USB2 PHY 其他寄存器 (未使用)
         (0x104 => _reserved_usb2phy),
@@ -236,7 +236,7 @@ register_bitfields![u32,
 
 /// Global USB2 PHY Configuration Register (GUSB2PHYCFG) - 0xc200
 register_bitfields![u32,
-    GUSB2PHYCFG [
+    pub GUSB2PHYCFG [
         /// PHY 软复位
         PHYSOFTRST OFFSET(31) NUMBITS(1) [
             Normal = 0,
@@ -328,6 +328,34 @@ register_bitfields![u32,
             Disable = 0,
             Enable = 1
         ],
+
+        /// 延迟 P1/P2/P3 (bit 19)
+        /// 值为 1 表示使能
+        DEP1P2P3 OFFSET(19) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// 延迟 PHY 电源变化 (bit 18)
+        DEPOCHANGE OFFSET(18) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// LFPS 滤波 (bit 9)
+        LFPSFILT OFFSET(9) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// RX 检测轮询 (bit 8)
+        RX_DETOPOLL OFFSET(8) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// TX 去加重值 (bits 0-1)
+        TX_DEEPH OFFSET(0) NUMBITS(2) [],
 
         /// 禁止接收检测在 P3
         DISRXDETINP3 OFFSET(14) NUMBITS(1) [

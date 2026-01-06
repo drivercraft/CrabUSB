@@ -345,6 +345,13 @@ mod tests {
                     _ => {}
                 }
 
+                let phy_type = node.find_property("phy_type").unwrap().str();
+                match phy_type {
+                    "utmi" => params.hsphy_mode = UsbPhyInterfaceMode::Utmi,
+                    "utmi_wide" => params.hsphy_mode = UsbPhyInterfaceMode::UtmiWide,
+                    _ => {}
+                }
+
                 if node.find_property("snps,has-lpm-erratum").is_some() {
                     params.has_lpm_erratum = true;
                 }
@@ -397,7 +404,10 @@ mod tests {
                     params.dis_enblslpm_quirk = true;
                 }
 
-                if node.find_property("snps,dis-u2-freeclk-exists-quirk").is_some() {
+                if node
+                    .find_property("snps,dis-u2-freeclk-exists-quirk")
+                    .is_some()
+                {
                     params.dis_u2_freeclk_exists_quirk = true;
                 }
 
@@ -419,7 +429,7 @@ mod tests {
                         },
                         rst_list: &rst_list,
                         cru: CruOpImpl,
-                        dma_mask: u32::MAXasusize,
+                        dma_mask: u32::MAX as usize,
                         params,
                     })
                     .unwrap(),

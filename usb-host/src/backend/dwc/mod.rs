@@ -18,7 +18,7 @@ use crate::{
     backend::{
         dwc::{
             event::EventBuffer,
-            reg::{GCTL, GHWPARAMS1, GHWPARAMS4, GUSB3PIPECTL},
+            reg::{GCTL, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1, GUSB3PIPECTL},
             udphy::Udphy,
         },
         ty::HostOp,
@@ -30,6 +30,18 @@ pub use crate::backend::xhci::*;
 
 use device::DeviceInfo;
 use host::EventHandler;
+
+/// USB PHY 接口模式
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UsbPhyInterfaceMode {
+    /// 未知模式
+    #[default]
+    Unknown,
+    /// UTMI 8-bit 接口
+    Utmi,
+    /// UTMI 16-bit 接口 (UTMIW)
+    UtmiWide,
+}
 
 pub mod grf;
 // pub mod phy;
@@ -65,6 +77,7 @@ pub struct DwcNewParams<'a, C: CruOp> {
 pub struct DwcParams {
     pub dr_mode: DrMode,
     pub max_speed: DeviceSpeed,
+    pub hsphy_mode: UsbPhyInterfaceMode,
     pub delayed_status: bool,
     pub ep0_bounced: bool,
     pub ep0_expect_in: bool,
@@ -174,10 +187,29 @@ impl Dwc {
         self.revistion += self.dwc_regs.read_product_id();
         debug!("DWC3: Detected revision 0x{:08x}", self.revistion);
 
+        if let Some(GHWPARAMS3::SSPHY_IFC::Value::Disabled) = self
+            .dwc_regs
+            .globals()
+            .ghwparams3
+            .read_as_enum(GHWPARAMS3::SSPHY_IFC)
+            && self.max_speed == DeviceSpeed::Super
+        {
+            self.max_speed = DeviceSpeed::High;
+        }
+
+        debug!("DWC3: Max speed {:?}", self.max_speed);
+
         self.dwc_regs.device_soft_reset().await;
         self.dwc_regs.core_soft_reset().await;
         if self.revistion >= DWC3_REVISION_250A {
             debug!("DWC3: Revision 250A or later detected");
+
+            if matches!(self.max_speed, DeviceSpeed::Full | DeviceSpeed::High) {
+                self.dwc_regs
+                    .globals()
+                    .guctl1
+                    .modify(GUCTL1::DEV_FORCE_20_CLK_FOR_30_CLK::Enable);
+            }
         }
 
         let mut reg = self.dwc_regs.globals().gctl.extract();
@@ -209,7 +241,11 @@ impl Dwc {
                 debug!("No power optimization available");
             }
         }
+        reg.modify(GCTL::DISSCRAMBLE::Disable);
 
+        if self.u2exit_lfps_quirk {
+            reg.modify(GCTL::U2EXIT_LFPS::Enable);
+        }
         /*
          * WORKAROUND: DWC3 revisions <1.90a have a bug
          * where the device can fail to connect at SuperSpeed
@@ -230,12 +266,137 @@ impl Dwc {
         Ok(())
     }
 
-    async fn phy_setup(&mut self) -> Result<()> {
-        let mut reg = self.dwc_regs.globals().gusb3pipectl0.extract();
+    /// 配置 USB2 High-Speed PHY 接口模式
+    ///
+    /// 根据 hsphy_mode 配置 PHY 接口：
+    /// - Utmi: 8-bit UTMI 接口 (USBTRDTIM=9, PHYIF=0)
+    /// - UtmiWide: 16-bit UTMI 接口 (USBTRDTIM=5, PHYIF=1)
+    fn hsphy_mode_setup(&mut self) {
+        use reg::GUSB2PHYCFG;
 
-        if self.revistion >= DWC3_REVISION_194A {
-            reg.modify(GUSB3PIPECTL::SUSPHY::Enable);
+        match self.hsphy_mode {
+            UsbPhyInterfaceMode::Utmi => {
+                // 8-bit UTMI 接口
+                self.dwc_regs.globals().gusb2phycfg0.modify(
+                    GUSB2PHYCFG::PHYIF.val(0) + // UTMI_PHYIF_8_BIT
+                    GUSB2PHYCFG::USBTRDTIM.val(9), // USBTRDTIM_UTMI_8_BIT
+                );
+                debug!("DWC3: HS PHY configured as UTMI 8-bit");
+            }
+            UsbPhyInterfaceMode::UtmiWide => {
+                // 16-bit UTMI 接口
+                self.dwc_regs.globals().gusb2phycfg0.modify(
+                    GUSB2PHYCFG::PHYIF.val(1) + // UTMI_PHYIF_16_BIT
+                    GUSB2PHYCFG::USBTRDTIM.val(5), // USBTRDTIM_UTMI_16_BIT
+                );
+                debug!("DWC3: HS PHY configured as UTMI 16-bit");
+            }
+            UsbPhyInterfaceMode::Unknown => {
+                debug!("DWC3: HS PHY mode unknown, using default configuration");
+            }
         }
+    }
+
+    async fn phy_setup(&mut self) -> Result<()> {
+        use reg::{GUSB2PHYCFG, GUSB3PIPECTL};
+
+        info!("DWC3: Configuring PHY");
+
+        // === USB3 PHY 配置 ===
+        let mut gusb3 = self.dwc_regs.globals().gusb3pipectl0.extract();
+
+        /*
+         * Above 1.94a, it is recommended to set DWC3_GUSB3PIPECTL_SUSPHY
+         * to '0' during coreConsultant configuration. So default value
+         * will be '0' when the core is reset. Application needs to set it
+         * to '1' after the core initialization is completed.
+         */
+        if self.revistion > DWC3_REVISION_194A {
+            gusb3.modify(GUSB3PIPECTL::SUSPHY::Enable);
+        }
+
+        if self.u2ss_inp3_quirk {
+            gusb3.modify(GUSB3PIPECTL::U2SSINP3OK::Enable);
+        }
+
+        if self.req_p1p2p3_quirk {
+            gusb3.modify(GUSB3PIPECTL::REQP0P1P2P3::Yes);
+        }
+
+        if self.del_p1p2p3_quirk {
+            gusb3.modify(GUSB3PIPECTL::DEP1P2P3::Enable);
+        }
+
+        if self.del_phy_power_chg_quirk {
+            gusb3.modify(GUSB3PIPECTL::DEPOCHANGE::Enable);
+        }
+
+        if self.lfps_filter_quirk {
+            gusb3.modify(GUSB3PIPECTL::LFPSFILT::Enable);
+        }
+
+        if self.rx_detect_poll_quirk {
+            gusb3.modify(GUSB3PIPECTL::RX_DETOPOLL::Enable);
+        }
+
+        if self.tx_de_emphasis_quirk {
+            gusb3.modify(GUSB3PIPECTL::TX_DEEPH.val(self.tx_de_emphasis as u32));
+        }
+
+        /*
+         * For some Rockchip SoCs like RK3588, if the USB3 PHY is suspended
+         * in U-Boot would cause the PHY initialize abortively in Linux Kernel,
+         * so disable the DWC3_GUSB3PIPECTL_SUSPHY feature here to fix it.
+         */
+        if self.dis_u3_susphy_quirk {
+            gusb3.modify(GUSB3PIPECTL::SUSPHY::Disable);
+        }
+
+        self.dwc_regs.globals().gusb3pipectl0.set(gusb3.get());
+
+        // 配置 USB2 High-Speed PHY 接口模式
+        self.hsphy_mode_setup();
+
+        crate::osal::kernel::delay(core::time::Duration::from_millis(100));
+
+        // === USB2 PHY 配置 ===
+        let mut gusb2 = self.dwc_regs.globals().gusb2phycfg0.extract();
+
+        /*
+         * Above 1.94a, it is recommended to set DWC3_GUSB2PHYCFG_SUSPHY to
+         * '0' during coreConsultant configuration. So default value will
+         * be '0' when the core is reset. Application needs to set it to
+         * '1' after the core initialization is completed.
+         */
+        if self.revistion > DWC3_REVISION_194A {
+            gusb2.modify(GUSB2PHYCFG::SUSPHY::Enable);
+        }
+
+        if self.dis_u2_susphy_quirk {
+            gusb2.modify(GUSB2PHYCFG::SUSPHY::Disable);
+        }
+
+        if self.dis_enblslpm_quirk {
+            gusb2.modify(GUSB2PHYCFG::ENBLSLPM::Disable);
+        }
+
+        if self.dis_u2_freeclk_exists_quirk {
+            gusb2.modify(GUSB2PHYCFG::U2_FREECLK_EXISTS::No);
+        }
+
+        if self.usb2_phyif_utmi_width == 16 {
+            // 清除 PHYIF 和 USBTRDTIM 字段
+            gusb2.modify(
+                GUSB2PHYCFG::PHYIF.val(1) + // UTMI_PHYIF_16_BIT
+                GUSB2PHYCFG::USBTRDTIM.val(9), // USBTRDTIM_UTMI_16_BIT
+            );
+        }
+
+        self.dwc_regs.globals().gusb2phycfg0.set(gusb2.get());
+
+        crate::osal::kernel::delay(core::time::Duration::from_millis(100));
+
+        debug!("DWC3: PHY configuration completed");
 
         Ok(())
     }
