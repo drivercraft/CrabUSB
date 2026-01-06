@@ -332,11 +332,36 @@ mod tests {
                     rst_list.push((name, cell[1] as u64));
                 }
 
+                let mut params = DwcParams::default();
+
+                let dr_mode = node
+                    .find_property("dr_mode")
+                    .map(|p| p.str())
+                    .unwrap_or("host");
+                match dr_mode {
+                    "host" => params.dr_mode = DrMode::Host,
+                    "peripheral" => params.dr_mode = DrMode::Peripheral,
+                    "otg" => params.dr_mode = DrMode::Otg,
+                    _ => {}
+                }
+
+                if node.find_property("snps,has-lpm-erratum").is_some() {
+                    params.has_lpm_erratum = true;
+                }
+
+                if node.find_property("snps,is-utmi-l1-suspend").is_some() {
+                    params.is_utmi_l1_suspend = true;
+                }
+
+                if node.find_property("snps,disable_scramble_quirk").is_some() {
+                    params.disable_scramble_quirk = true;
+                }
+
                 return XhciInfo {
-                    usb: USBHost::new_dwc(
-                        addr,
+                    usb: USBHost::new_dwc(DwcNewParams {
+                        ctrl: addr,
                         phy,
-                        UdphyParam {
+                        phy_param: UdphyParam {
                             u2phy_grf,
                             usb_grf,
                             usbdpphy_grf,
@@ -344,10 +369,11 @@ mod tests {
                             dp_lane_mux: &dp_lane_mux,
                             rst_list: &phy_rst_list,
                         },
-                        &rst_list,
-                        CruOpImpl,
-                        u32::MAX as usize,
-                    )
+                        rst_list: &rst_list,
+                        cru: CruOpImpl,
+                        dma_mask: u32::MAXasusize,
+                        params,
+                    })
                     .unwrap(),
                     irq,
                 };

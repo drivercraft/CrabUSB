@@ -6,7 +6,7 @@ use crate::device::*;
 use crate::err::Result;
 
 pub use crate::backend::{
-    dwc::{CruOp, Dwc, UdphyParam},
+    dwc::{CruOp, Dwc, DwcNewParams, DwcParams, UdphyParam},
     xhci::Xhci,
 };
 
@@ -22,17 +22,8 @@ impl USBHost<Xhci> {
 }
 
 impl USBHost<Dwc> {
-    pub fn new_dwc(
-        ctrl: Mmio,
-        phy: Mmio,
-        param: UdphyParam<'_>,
-        rst_list: &'_ [(&'_ str, u64)],
-        cru: impl CruOp,
-        dma_mask: usize,
-    ) -> Result<USBHost<Dwc>> {
-        Ok(USBHost::new(Dwc::new(
-            ctrl, phy, param, cru, rst_list, dma_mask,
-        )?))
+    pub fn new_dwc(params: DwcNewParams<'_, impl CruOp>) -> Result<USBHost<Dwc>> {
+        Ok(USBHost::new(Dwc::new(params)?))
     }
 }
 

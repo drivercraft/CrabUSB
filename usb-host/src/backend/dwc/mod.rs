@@ -3,11 +3,15 @@
 //! DWC3 是一个 USB3 DRD (Dual Role Device) 控制器，支持 Host 和 Device 模式。
 //! 本模块实现 Host 模式驱动，基于 xHCI 规范。
 
+use core::ops::{Deref, DerefMut};
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use tock_registers::interfaces::*;
+use usb_if::DeviceSpeed;
+pub use usb_if::DrMode;
 
 use crate::{
     Mmio, Xhci,
@@ -47,6 +51,52 @@ pub trait CruOp: Sync + Send + 'static {
     fn reset_deassert(&self, id: u64);
 }
 
+pub struct DwcNewParams<'a, C: CruOp> {
+    pub ctrl: Mmio,
+    pub phy: Mmio,
+    pub phy_param: UdphyParam<'a>,
+    pub cru: C,
+    pub rst_list: &'a [(&'a str, u64)],
+    pub dma_mask: usize,
+    pub params: DwcParams,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct DwcParams {
+    pub dr_mode: DrMode,
+    pub max_speed: DeviceSpeed,
+    pub delayed_status: bool,
+    pub ep0_bounced: bool,
+    pub ep0_expect_in: bool,
+    pub has_hibernation: bool,
+    pub has_lpm_erratum: bool,
+    pub is_utmi_l1_suspend: bool,
+    pub is_selfpowered: bool,
+    pub is_fpga: bool,
+    pub needs_fifo_resize: bool,
+    pub pullups_connected: bool,
+    pub resize_fifos: bool,
+    pub setup_packet_pending: bool,
+    pub start_config_issued: bool,
+    pub three_stage_setup: bool,
+    pub disable_scramble_quirk: bool,
+    pub u2exit_lfps_quirk: bool,
+    pub u2ss_inp3_quirk: bool,
+    pub req_p1p2p3_quirk: bool,
+    pub del_p1p2p3_quirk: bool,
+    pub del_phy_power_chg_quirk: bool,
+    pub lfps_filter_quirk: bool,
+    pub rx_detect_poll_quirk: bool,
+    pub dis_u3_susphy_quirk: bool,
+    pub dis_u2_susphy_quirk: bool,
+    pub dis_u1u2_quirk: bool,
+    pub dis_enblslpm_quirk: bool,
+    pub dis_u2_freeclk_exists_quirk: bool,
+    pub tx_de_emphasis_quirk: bool,
+    pub tx_de_emphasis: u8,        // 2 bits
+    pub usb2_phyif_utmi_width: u8, // 5 bits
+}
+
 /// DWC3 控制器
 ///
 /// DWC3 实际上是 xHCI 主机控制器的封装。在 Host 模式下，
@@ -61,29 +111,23 @@ pub struct Dwc {
     rsts: BTreeMap<String, u64>,
     ev_buffs: Vec<EventBuffer>,
     revistion: u32,
-    nr_scratch: u32, // maximum_speed
+    nr_scratch: u32,
+    params: DwcParams,
 }
 
 impl Dwc {
-    pub fn new(
-        ctrl: Mmio,
-        phy: Mmio,
-        param: UdphyParam<'_>,
-        cru: impl CruOp,
-        rst_list: &'_ [(&'_ str, u64)],
-        dma_mask: usize,
-    ) -> Result<Self> {
-        let mmio_base = ctrl.as_ptr() as usize;
-        let cru = Arc::new(cru);
+    pub fn new(params: DwcNewParams<'_, impl CruOp>) -> Result<Self> {
+        let mmio_base = params.ctrl.as_ptr() as usize;
+        let cru = Arc::new(params.cru);
 
-        let phy = Udphy::new(phy, cru.clone(), param);
+        let phy = Udphy::new(params.phy, cru.clone(), params.phy_param);
 
-        let xhci = Xhci::new(ctrl, dma_mask)?;
+        let xhci = Xhci::new(params.ctrl, params.dma_mask)?;
 
         let dwc_regs = unsafe { Dwc3Regs::new(mmio_base) };
 
         let mut rsts = BTreeMap::new();
-        for &(name, id) in rst_list.iter() {
+        for &(name, id) in params.rst_list.iter() {
             rsts.insert(String::from(name), id);
         }
 
@@ -96,6 +140,7 @@ impl Dwc {
             ev_buffs: vec![],
             revistion: 0,
             nr_scratch: 0,
+            params: params.params,
             // usb2_phy,
         })
     }
@@ -191,8 +236,6 @@ impl Dwc {
             reg.modify(GUSB3PIPECTL::SUSPHY::Enable);
         }
 
-
-
         Ok(())
     }
 }
@@ -258,5 +301,19 @@ impl HostOp for Dwc {
     /// 创建事件处理器
     fn create_event_handler(&mut self) -> Self::EventHandler {
         self.xhci.create_event_handler()
+    }
+}
+
+impl Deref for Dwc {
+    type Target = DwcParams;
+
+    fn deref(&self) -> &Self::Target {
+        &self.params
+    }
+}
+
+impl DerefMut for Dwc {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.params
     }
 }

@@ -20,8 +20,9 @@ pub mod err;
 mod host;
 pub(crate) mod queue;
 
-pub use host::*;
 pub use backend::ty::Event;
+pub use host::*;
+pub use usb_if::{DeviceSpeed, DrMode};
 
 #[macro_use]
 mod osal;
