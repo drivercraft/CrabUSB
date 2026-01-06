@@ -23,6 +23,15 @@ mod regmap;
 use consts::*;
 use tock_registers::{interfaces::*, registers::*};
 
+// RK3588 VO GRF 寄存器定义
+const RK3588_GRF_VO0_CON0: u32 = 0x0000;
+const RK3588_GRF_VO0_CON2: u32 = 0x0008;
+
+// DP 位定义
+const DP_AUX_DIN_SEL: u32 = 1 << 9;
+const DP_AUX_DOUT_SEL: u32 = 1 << 8;
+const DP_LANE_SEL_ALL: u32 = 0xFF;
+
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct UdphyMode: u8 {
@@ -64,6 +73,8 @@ pub struct Udphy {
     udphygrf: Regmap,
     /// USB GRF
     usb_grf: Regmap,
+    /// VO GRF (用于 DP lane 选择)
+    vo_grf: Regmap,
     // /// USB2PHY GRF
     // usb2phy_grf: Grf,
     lane_mux_sel: [u32; 4],
@@ -79,38 +90,46 @@ impl Udphy {
         let cfg = Box::new(config::RK3588_UDPHY_CFGS.clone());
         let mut lane_mux_sel = [0u32; 4];
         let mut dp_lane_sel = [0u32; 4];
-        let num_lanes = param.dp_lane_mux.len();
 
-        if num_lanes != 2 && num_lanes != 4 {
-            panic!("dp_lane_mux length must be 2 or 4");
-        }
-
-        for (i, &lane) in param.dp_lane_mux.iter().enumerate() {
-            debug!("DP lane {} mux select: {}", i, lane);
-            dp_lane_sel[i] = lane;
-            if lane > 3 {
-                panic!("lane mux between 0 and 3, exceeding the range");
-            }
-            lane_mux_sel[lane as usize] = PHY_LANE_MUX_DP;
-
-            let mut j = i + 1;
-            while j < num_lanes {
-                if dp_lane_sel[j] == lane {
-                    panic!("duplicate lane mux selection for lane {}", lane);
-                }
-                j += 1;
-            }
-        }
-
-        debug!("dp_lane_sel: {:?}", dp_lane_sel);
-        debug!("lane_mux_sel: {:?}", lane_mux_sel);
-
+        // 完全按照 U-Boot 的逻辑：udphy_parse_lane_mux_data()
         let mut mode = UdphyMode::DP;
         let mut flip = false;
 
-        if param.dp_lane_mux.len() == 2 {
-            mode |= UdphyMode::USB;
-            flip = lane_mux_sel[0] == PHY_LANE_MUX_DP;
+        if param.dp_lane_mux.is_empty() {
+            // 没有找到 dp-lane-mux 属性 → 纯 USB 模式
+            mode = UdphyMode::USB;
+            info!("Udphy: No dp-lane-mux property, using USB-only mode");
+        } else {
+            // 有 dp-lane-mux 属性
+            let num_lanes = param.dp_lane_mux.len();
+
+            if num_lanes != 2 && num_lanes != 4 {
+                panic!("Invalid number of lane mux: {}", num_lanes);
+            }
+
+            // 解析 lane mux 配置
+            for (i, &lane) in param.dp_lane_mux.iter().enumerate() {
+                if lane > 3 {
+                    panic!("Lane mux must be between 0 and 3, got {}", lane);
+                }
+                lane_mux_sel[lane as usize] = PHY_LANE_MUX_DP;
+                dp_lane_sel[i] = lane;
+            }
+
+            mode = UdphyMode::DP; // 默认是 DP 模式
+            if num_lanes == 2 {
+                // 2 个 lanes → USB + DP 混合模式
+                mode |= UdphyMode::USB;
+                flip = lane_mux_sel[0] == PHY_LANE_MUX_DP;
+                info!("Udphy: Configured for USB+DP mode with 2 DP lanes");
+            } else {
+                // 4 个 lanes → 纯 DP 模式
+                info!("Udphy: Configured for DP-only mode with 4 DP lanes");
+            }
+
+            // 输出 lane 配置信息（参考 U-Boot 的 debug 输出）
+            debug!("dp_lane_sel: {:?}", dp_lane_sel);
+            debug!("lane_mux_sel: {:?}", lane_mux_sel);
         }
 
         let mut rsts = BTreeMap::new();
@@ -130,6 +149,7 @@ impl Udphy {
             pma_remap: Regmap::new(unsafe { base.add(UDPHY_PMA) }),
             udphygrf: Regmap::new(param.usbdpphy_grf),
             usb_grf: Regmap::new(param.usb_grf),
+            vo_grf: Regmap::new(param.vo_grf),
             lane_mux_sel,
             dp_lane_sel,
             cru,
@@ -205,8 +225,62 @@ impl Udphy {
             self.mode, dplanes
         );
         self.dplane_enable(dplanes);
+        self.dplane_select();
 
         Ok(())
+    }
+
+    /// 选择 DP lane（配置 VO GRF 寄存器）
+    ///
+    /// 完全按照 U-Boot 的逻辑：rk3588_udphy_dplane_select()
+    fn dplane_select(&self) {
+        let mut value = 0u32;
+
+        match self.mode {
+            UdphyMode::DP => {
+                // 4 lanes: 配置所有 4 个 lanes
+                value |= 0u32 << (self.dp_lane_sel[0] * 2);
+                value |= 1u32 << (self.dp_lane_sel[1] * 2);
+                value |= 2u32 << (self.dp_lane_sel[2] * 2);
+                value |= 3u32 << (self.dp_lane_sel[3] * 2);
+            }
+            UdphyMode::DP_USB => {
+                // 2 lanes: 只配置 lane 0 和 lane 1
+                value |= 0u32 << (self.dp_lane_sel[0] * 2);
+                value |= 1u32 << (self.dp_lane_sel[1] * 2);
+            }
+            UdphyMode::USB => {
+                // 纯 USB 模式：不配置 DP lane
+                debug!("Udphy: USB-only mode, skipping DP lane selection");
+                return;
+            }
+            _ => {
+                debug!("Udphy: Unknown mode, skipping DP lane selection");
+                return;
+            }
+        }
+
+        // 选择 VO GRF 寄存器（id 0 用 CON0，id 1 用 CON2）
+        let reg_offset = if self.id > 0 {
+            RK3588_GRF_VO0_CON2
+        } else {
+            RK3588_GRF_VO0_CON0
+        };
+
+        // 构造写入值：
+        // mask = DP_AUX_DIN_SEL | DP_AUX_DOUT_SEL | DP_LANE_SEL_ALL
+        // 默认 dp_aux_din_sel = 0, dp_aux_dout_sel = 0
+        let mask = (DP_AUX_DIN_SEL | DP_AUX_DOUT_SEL | DP_LANE_SEL_ALL) << 16;
+        let dp_aux_val = 0; // dp_aux_din_sel 和 dp_aux_dout_sel 都设为 0
+
+        let final_value = mask | dp_aux_val | value;
+
+        debug!(
+            "Udphy: Writing VO GRF register 0x{:03x} with value 0x{:08x} (lane value: 0x{:02x})",
+            reg_offset, final_value, value
+        );
+
+        self.vo_grf.reg_write(reg_offset, final_value);
     }
 
     fn dplane_enable(&self, lanes: usize) {
@@ -222,24 +296,28 @@ impl Udphy {
             return;
         }
 
-        // Enable only the lanes actually muxed to DP according to dp_lane_mux
-        let mut fv = CMN_LANE_MUX_EN::LANE0_EN::Disable
-            + CMN_LANE_MUX_EN::LANE1_EN::Disable
-            + CMN_LANE_MUX_EN::LANE2_EN::Disable
-            + CMN_LANE_MUX_EN::LANE3_EN::Disable;
+        // // Enable only the lanes actually muxed to DP according to dp_lane_mux
+        // let mut fv = CMN_LANE_MUX_EN::LANE0_EN::Disable
+        //     + CMN_LANE_MUX_EN::LANE1_EN::Disable
+        //     + CMN_LANE_MUX_EN::LANE2_EN::Disable
+        //     + CMN_LANE_MUX_EN::LANE3_EN::Disable;
 
-        for (idx, sel) in self.lane_mux_sel.iter().enumerate() {
-            if *sel == PHY_LANE_MUX_DP {
-                fv = fv
-                    + match idx {
-                        0 => CMN_LANE_MUX_EN::LANE0_EN::Enable,
-                        1 => CMN_LANE_MUX_EN::LANE1_EN::Enable,
-                        2 => CMN_LANE_MUX_EN::LANE2_EN::Enable,
-                        3 => CMN_LANE_MUX_EN::LANE3_EN::Enable,
-                        _ => unreachable!(),
-                    };
-            }
-        }
+        // for (idx, sel) in self.lane_mux_sel.iter().enumerate() {
+        //     if *sel == PHY_LANE_MUX_DP {
+        //         fv = fv
+        //             + match idx {
+        //                 0 => CMN_LANE_MUX_EN::LANE0_EN::Enable,
+        //                 1 => CMN_LANE_MUX_EN::LANE1_EN::Enable,
+        //                 2 => CMN_LANE_MUX_EN::LANE2_EN::Enable,
+        //                 3 => CMN_LANE_MUX_EN::LANE3_EN::Enable,
+        //                 _ => unreachable!(),
+        //             };
+        //     }
+        // }
+        let fv = CMN_LANE_MUX_EN::LANE0_EN::Enable
+            + CMN_LANE_MUX_EN::LANE1_EN::Enable
+            + CMN_LANE_MUX_EN::LANE2_EN::Enable
+            + CMN_LANE_MUX_EN::LANE3_EN::Enable;
 
         self.cmn_lane_mux_and_en().modify(fv);
     }

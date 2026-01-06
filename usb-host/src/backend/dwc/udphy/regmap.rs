@@ -23,7 +23,7 @@ impl Regmap {
         unsafe { addr.read_volatile() }
     }
 
-    fn reg_write(&self, offset: u32, val: u32) {
+    pub fn reg_write(&self, offset: u32, val: u32) {
         let addr = (self.0 + offset as usize) as *mut u32;
         // debug!(
         //     "Regmap write: addr=0x{:p}, val=0x{:08x}, offset=0x{:x}",

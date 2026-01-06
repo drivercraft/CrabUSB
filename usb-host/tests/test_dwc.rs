@@ -308,11 +308,15 @@ mod tests {
                         .into(),
                 );
 
-                let dp_lane_mux_prop = u3_phy_node
+                // 完全按照 U-Boot 的逻辑处理 dp-lane-mux
+                // 如果设备树中没有 rockchip,dp-lane-mux 属性，则使用纯 USB 模式
+                let dp_lane_mux: Vec<u32> = match u3_phy_node
                     .find_property("rockchip,dp-lane-mux")
-                    .expect("Missing rockchip,dp-lane-mux property");
+                {
+                    Some(prop) => prop.u32_list().collect(), // 有属性 → 读取 lane 配置
+                    None => Vec::new(),                              // 无属性 → 纯 USB 模式
+                };
 
-                let dp_lane_mux = dp_lane_mux_prop.u32_list().collect::<Vec<_>>();
                 let mut phy_rst_list = Vec::new();
                 let resets_prop = u3_phy_node
                     .find_property("resets")

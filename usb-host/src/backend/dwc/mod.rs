@@ -495,6 +495,69 @@ impl Dwc {
 
         Ok(())
     }
+
+    /// 输出关键寄存器状态用于调试
+    fn dump_registers(&self) {
+        use crate::backend::dwc::reg::*;
+
+        let regs = self.dwc_regs.globals();
+
+        info!("=== DWC3 寄存器状态 ===");
+
+        // 检查 GCTL
+        let gctl = regs.gctl.extract();
+        let gctl_val = gctl.get();
+        info!("GCTL         = {:#010x}", gctl_val);
+        let prtcapdir_val = gctl.read(GCTL::PRTCAPDIR);
+        let prtcapdir_str = match prtcapdir_val {
+            0 => "Device",
+            1 => "Host",
+            2 => "OTG",
+            3 => "Reserved",
+            _ => "Unknown",
+        };
+        info!("  PRTCAPDIR   = {} ({})", prtcapdir_str, prtcapdir_val);
+
+        // 检查 GUSB3PIPECTL
+        let gusb3 = regs.gusb3pipectl0.extract();
+        let gusb3_val = gusb3.get();
+        info!("GUSB3PIPECTL = {:#010x}", gusb3_val);
+        info!("  SUSPHY      = {}", gusb3.is_set(GUSB3PIPECTL::SUSPHY));
+        info!("  U2SSINP3OK  = {}", gusb3.is_set(GUSB3PIPECTL::U2SSINP3OK));
+        info!("  REQP0P1P2P3 = {}", gusb3.is_set(GUSB3PIPECTL::REQP0P1P2P3));
+        info!("  DEP1P2P3    = {}", gusb3.is_set(GUSB3PIPECTL::DEP1P2P3));
+
+        // 检查 GUSB2PHYCFG
+        let gusb2 = regs.gusb2phycfg0.extract();
+        let gusb2_val = gusb2.get();
+        info!("GUSB2PHYCFG  = {:#010x}", gusb2_val);
+        info!("  SUSPHY      = {}", gusb2.is_set(GUSB2PHYCFG::SUSPHY));
+        info!("  ENBLSLPM    = {}", gusb2.is_set(GUSB2PHYCFG::ENBLSLPM));
+        let phyif = gusb2.read(GUSB2PHYCFG::PHYIF);
+        info!("  PHYIF       = {} ({}-bit)", phyif, if phyif == 0 { 8 } else { 16 });
+        let usbtrdtim = gusb2.read(GUSB2PHYCFG::USBTRDTIM);
+        info!("  USBTRDTIM   = {}", usbtrdtim);
+
+        // 检查 GHWPARAMS
+        let hwparams0 = regs.ghwparams0.extract();
+        info!("GHWPARAMS0   = {:#010x}", hwparams0.get());
+        let mode_val = hwparams0.read(GHWPARAMS0::MODE);
+        let mode_str = match mode_val {
+            0 => "Gadget",
+            1 => "Host",
+            2 => "DRD",
+            3 => "Reserved",
+            _ => "Unknown",
+        };
+        info!("  MODE        = {} ({})", mode_str, mode_val);
+
+        let hwparams1 = regs.ghwparams1.extract();
+        let num_event_buffers = hwparams1.read(GHWPARAMS1::NUM_EVENT_BUFFERS);
+        info!("GHWPARAMS1   = {:#010x}", hwparams1.get());
+        info!("  NUM_EVENT_BUFFERS = {}", num_event_buffers);
+
+        info!("======================");
+    }
 }
 
 impl HostOp for Dwc {
@@ -535,6 +598,10 @@ impl HostOp for Dwc {
         self.dwc3_init().await?;
 
         self.xhci.init().await?;
+
+        // 输出关键寄存器状态用于调试
+        self.dump_registers();
+
         Ok(())
     }
 
