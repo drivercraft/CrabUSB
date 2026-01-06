@@ -7,11 +7,12 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use tock_registers::interfaces::*;
 
 use crate::{
     Mmio, Xhci,
     backend::{
-        dwc::{event::EventBuffer, udphy::Udphy},
+        dwc::{event::EventBuffer, reg::GCTL, udphy::Udphy},
         ty::HostOp,
     },
     err::{Result, USBError},
@@ -56,6 +57,7 @@ pub struct Dwc {
     rsts: BTreeMap<String, u64>,
     ev_buffs: Vec<EventBuffer>,
     revistion: u32,
+    // maximum_speed
 }
 
 impl Dwc {
@@ -96,6 +98,7 @@ impl Dwc {
     async fn dwc3_init(&mut self) -> Result<()> {
         self.alloc_event_buffers(DWC3_EVENT_BUFFERS_SIZE)?;
         self.core_init().await?;
+
         Ok(())
     }
 
@@ -120,6 +123,14 @@ impl Dwc {
 
         self.dwc_regs.device_soft_reset().await;
         self.dwc_regs.core_soft_reset().await;
+        if self.revistion >= DWC3_REVISION_250A {
+            debug!("DWC3: Revision 250A or later detected");
+        }
+
+        let mut reg = GCTL::SCALEDOWN::None;
+
+        
+
 
         Ok(())
     }

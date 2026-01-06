@@ -6,7 +6,7 @@ use core::sync::atomic::Ordering;
 
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 use tock_registers::{
-    register_bitfields,
+    register_bitfields, register_structs,
     registers::{ReadOnly, ReadWrite},
 };
 
@@ -29,53 +29,66 @@ pub struct Dwc3Hwparams {
     pub hwparams8: u32,
 }
 
-/// DWC3 寄存器映射结构
-#[repr(C)]
-pub struct Dwc3Registers {
-    // 0xc100 - 0xc10c: 保留和其他寄存器
-    _reserved0: [u32; 4],
+// DWC3 寄存器映射结构
+// 使用 register_structs! 宏定义，自动计算 padding 和偏移
+//
+// 基于 U-Boot drivers/usb/dwc3/core.h 的寄存器定义
+// 全局寄存器区域: 0xc100 - 0xc6ff
+// 设备寄存器区域: 0xc700 - 0xcbff
+register_structs! {
+    pub Dwc3Registers {
+        // === 全局寄存器区域 (0xc100 - 0xc6ff) ===
 
-    /// 0xc110 - Global Control Register
-    pub gctl: ReadWrite<u32, GCTL::Register>,
+        // 0xc100 - 0xc10c: 总线配置寄存器 (未使用)
+        (0x00 => _rsv1),
 
-    /// 0xc114 - Global Event Enable Register
-    pub gevten: ReadWrite<u32, GEVTEN::Register>,
+        /// 0xc110 - Global Control Register
+        (0x10 => pub gctl: ReadWrite<u32, GCTL::Register>),
 
-    /// 0xc118 - Global Status Register
-    pub gsts: ReadWrite<u32, GSTS::Register>,
+        /// 0xc114 - Global Event Enable Register
+        (0x14 => gevten: ReadWrite<u32, GEVTEN::Register>),
 
-    /// 0xc11c - Global User Control 1 Register
-    pub guctl1: ReadWrite<u32, GUCTL1::Register>,
+        /// 0xc118 - Global Status Register
+        (0x18 => gsts: ReadWrite<u32, GSTS::Register>),
 
-    /// 0xc120 - SNPSID Register (只读)
-    pub gsnpsid: ReadOnly<u32, GSNPSID::Register>,
+        /// 0xc11c - Global User Control 1 Register
+        (0x1C => pub guctl1: ReadWrite<u32, GUCTL1::Register>),
 
-    /// 0xc124 - GPIO Register
-    pub ggpio: ReadWrite<u32, GGPIO::Register>,
+        /// 0xc120 - SNPSID Register (只读)
+        (0x20 => gsnpsid: ReadOnly<u32, GSNPSID::Register>),
 
-    /// 0xc128 - GUID Register
-    pub guid: ReadWrite<u32, GUID::Register>,
+        /// 0xc124 - GPIO Register
+        (0x24 => ggpio: ReadWrite<u32, GGPIO::Register>),
 
-    /// 0xc12c - User Control Register
-    pub guctl: ReadWrite<u32, GUCTL::Register>,
+        /// 0xc128 - GUID Register
+        (0x28 => guid: ReadWrite<u32, GUID::Register>),
 
-    // 0xc130 - 0xc1fc: 其他寄存器
-    _reserved1: [u32; 46],
+        /// 0xc12c - User Control Register
+        (0x2C => guctl: ReadWrite<u32, GUCTL::Register>),
 
-    /// 0xc200 - USB2 PHY Configuration Register 0
-    pub gusb2phycfg0: ReadWrite<u32, GUSB2PHYCFG::Register>,
+        // 0xc130 - 0xc17c: 总线错误和端口映射寄存器 (未使用)
+        (0x30 => _reserved_buserr),
 
-    // 0xc204 - 0xc2bc: 保留
-    _reserved2: [u32; 28],
+        /// 0xc200 - USB2 PHY Configuration Register 0
+        (0x100 => gusb2phycfg0: ReadWrite<u32, GUSB2PHYCFG::Register>),
 
-    /// 0xc2c0 - USB3 PIPE Control Register 0
-    pub gusb3pipectl0: ReadWrite<u32, GUSB3PIPECTL::Register>,
+        // 0xc204 - 0xc2bc: USB2 PHY 其他寄存器 (未使用)
+        (0x104 => _reserved_usb2phy),
 
-    // 0xc2c4 - 0xc700: 保留
-    _reserved3: [u32; 273],
+        /// 0xc2c0 - USB3 PIPE Control Register 0
+        (0x1C0 => gusb3pipectl0: ReadWrite<u32, GUSB3PIPECTL::Register>),
 
-    /// 0xc704 - Device Control Register
-    pub dctl: ReadWrite<u32, DCTL::Register>,
+        // 0xc2c4 - 0xc5fc: USB3 PHY 和 FIFO 寄存器 (未使用)
+        (0x1C4 => _reserved_usb3),
+
+        // === 设备寄存器区域 (0xc700 - 0xcbff) ===
+
+        /// 0xc704 - Device Control Register
+        (0x604 => dctl: ReadWrite<u32, DCTL::Register>),
+
+        // 标记结构体结束 (0xc708 = 偏移 0x608)
+        (0x608 => @END),
+    }
 }
 
 // =============================================================================
@@ -84,7 +97,7 @@ pub struct Dwc3Registers {
 
 // Global Control Register (GCTL) - 0xc110
 register_bitfields![u32,
-    GCTL [
+    pub GCTL [
         /// 禁止时钟门控
         DSBLCLKGTNG OFFSET(0) NUMBITS(1) [
             Enable = 0,
@@ -154,7 +167,7 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global Status Register (GSTS) - 0xc118
+// Global Status Register (GSTS) - 0xc118
 register_bitfields![u32,
     GSTS [
         /// 当前模式
@@ -238,7 +251,7 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global USB3 PIPE Control Register (GUSB3PIPECTL) - 0xc2c0
+// Global USB3 PIPE Control Register (GUSB3PIPECTL) - 0xc2c0
 register_bitfields![u32,
     GUSB3PIPECTL [
         /// PIPE 物理复位
@@ -327,7 +340,7 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global Event Enable Register (GEVTEN) - 0xc114
+// Global Event Enable Register (GEVTEN) - 0xc114
 register_bitfields![u32,
     GEVTEN [
         /// OTG 事件使能
@@ -356,9 +369,9 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global User Control 1 Register (GUCTL1) - 0xc11c
+// Global User Control 1 Register (GUCTL1) - 0xc11c
 register_bitfields![u32,
-    GUCTL1 [
+    pub GUCTL1 [
         /// 设备解耦 L1L2 事件
         DEV_DECOUPLE_L1L2_EVT OFFSET(31) NUMBITS(1) [
             Disable = 0,
@@ -633,6 +646,8 @@ impl Dwc3Regs {
 
         // After PHYs are stable we can take Core out of reset state
         self.globals().gctl.modify(GCTL::CORESOFTRESET::Normal);
+
+        debug!("DWC3: Core soft reset completed");
     }
 
     /// 修改 GCTL 的 PRTCAPDIR 字段
