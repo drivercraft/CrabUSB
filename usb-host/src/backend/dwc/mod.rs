@@ -307,6 +307,8 @@ impl Dwc {
 
         self.setup_scratch_buffers();
 
+        self.core_init_mode()?;
+
         Ok(())
     }
 
@@ -478,14 +480,11 @@ impl Dwc {
         }
     }
 
-    async fn core_init_mode(&mut self) -> Result<()> {
+    fn core_init_mode(&mut self) -> Result<()> {
         match self.dr_mode {
             DrMode::Host => {
                 info!("DWC3: Initializing in HOST mode");
-                self.dwc_regs
-                    .globals()
-                    .gctl
-                    .modify(GCTL::PWRDNSCALE::Disable);
+                self.dwc_regs.globals().gctl.modify(GCTL::PRTCAPDIR::Host);
             }
             DrMode::Otg => {
                 todo!()
