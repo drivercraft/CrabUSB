@@ -102,6 +102,9 @@ impl Udphy {
             }
         }
 
+        debug!("dp_lane_sel: {:?}", dp_lane_sel);
+        debug!("lane_mux_sel: {:?}", lane_mux_sel);
+
         let mut mode = UdphyMode::DP;
         let mut flip = false;
 
@@ -207,26 +210,38 @@ impl Udphy {
     }
 
     fn dplane_enable(&self, lanes: usize) {
-        match lanes {
-            4 => {
-                self.cmn_lane_mux_and_en().modify(
-                    CMN_LANE_MUX_EN::LANE0_EN::Enable
-                        + CMN_LANE_MUX_EN::LANE1_EN::Enable
-                        + CMN_LANE_MUX_EN::LANE2_EN::Enable
-                        + CMN_LANE_MUX_EN::LANE3_EN::Enable,
-                );
-            }
-            2 => {
-                self.cmn_lane_mux_and_en()
-                    .modify(CMN_LANE_MUX_EN::LANE0_EN::Enable + CMN_LANE_MUX_EN::LANE1_EN::Enable);
-            }
-            0 => {
-                self.cmn_dp_rstn().modify(CMN_DP_RSTN::DP_CMN_RSTN::CLEAR);
-            }
-            _ => {
-                panic!("unsupported dplane lanes: {}", lanes);
+        // Disable all DP lanes and assert common reset when DP is unused
+        if lanes == 0 {
+            self.cmn_lane_mux_and_en().modify(
+                CMN_LANE_MUX_EN::LANE0_EN::Disable
+                    + CMN_LANE_MUX_EN::LANE1_EN::Disable
+                    + CMN_LANE_MUX_EN::LANE2_EN::Disable
+                    + CMN_LANE_MUX_EN::LANE3_EN::Disable,
+            );
+            self.cmn_dp_rstn().modify(CMN_DP_RSTN::DP_CMN_RSTN::Reset);
+            return;
+        }
+
+        // Enable only the lanes actually muxed to DP according to dp_lane_mux
+        let mut fv = CMN_LANE_MUX_EN::LANE0_EN::Disable
+            + CMN_LANE_MUX_EN::LANE1_EN::Disable
+            + CMN_LANE_MUX_EN::LANE2_EN::Disable
+            + CMN_LANE_MUX_EN::LANE3_EN::Disable;
+
+        for (idx, sel) in self.lane_mux_sel.iter().enumerate() {
+            if *sel == PHY_LANE_MUX_DP {
+                fv = fv
+                    + match idx {
+                        0 => CMN_LANE_MUX_EN::LANE0_EN::Enable,
+                        1 => CMN_LANE_MUX_EN::LANE1_EN::Enable,
+                        2 => CMN_LANE_MUX_EN::LANE2_EN::Enable,
+                        3 => CMN_LANE_MUX_EN::LANE3_EN::Enable,
+                        _ => unreachable!(),
+                    };
             }
         }
+
+        self.cmn_lane_mux_and_en().modify(fv);
     }
 
     fn dplane_get(&self) -> usize {
