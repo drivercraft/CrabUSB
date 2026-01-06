@@ -7,7 +7,7 @@ use rdrive::{Phandle, PlatformDevice, probe::OnProbeError, register::FdtInfo};
 
 extern crate alloc;
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::ToString, vec::Vec};
 use bare_test::{
     GetIrqConfig,
     async_std::time::{self, sleep},
@@ -239,7 +239,21 @@ mod tests {
 
                 let irq = node.irq_info();
 
-                let phy_phandle = Phandle::from(0x495);
+                let phys = node
+                    .find_property("phys")
+                    .unwrap()
+                    .u32_list()
+                    .collect::<Vec<_>>();
+
+                let u3phy_ph = phys[1].into();
+                debug!("u3phy phandle: {}", u3phy_ph);
+
+                // let phy_phandle = Phandle::from(0x495);
+                let phy_node = find_phy(u3phy_ph);
+                let phy_id = phy_node.id;
+                let phy_phandle = phy_node.phandle;
+
+                debug!("u3phy id: {}, phandle: {}", phy_id, phy_phandle);
 
                 let u3_phy_node = fdt
                     .get_node_by_phandle(phy_phandle)
@@ -420,6 +434,7 @@ mod tests {
                         ctrl: addr,
                         phy,
                         phy_param: UdphyParam {
+                            id: phy_id,
                             u2phy_grf,
                             usb_grf,
                             usbdpphy_grf,
@@ -584,6 +599,65 @@ impl rdrive::DriverGeneric for CruDev {
     fn close(&mut self) -> Result<(), rdrive::KError> {
         Ok(())
     }
+}
+
+pub struct PhyNode {
+    pub id: usize,
+    pub phandle: Phandle,
+}
+
+pub fn find_phy(ph: Phandle) -> PhyNode {
+    let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
+    let fdt = fdt.get();
+
+    let mut als = Vec::new();
+
+    let aliases = fdt.find_nodes("/aliases").next().unwrap();
+    for prop in aliases.propertys() {
+        if prop.name.starts_with("usbdp") {
+            let id = prop
+                .name
+                .trim_start_matches("usbdp")
+                .parse::<usize>()
+                .unwrap();
+            als.push((id, prop.str().to_string()));
+        }
+    }
+
+    for (id, path) in als {
+        let name = path.split("/").last().unwrap();
+        debug!("search phy node by name: {}", name);
+        let mut iter = fdt.all_nodes();
+        if let Some((usdpph, level)) = fdt_iter_find(&mut iter, name) {
+            debug!("found phy node: {}", name);
+            for node in iter {
+                if node.level <= level {
+                    break;
+                }
+                if let Some(p) = node.phandle()
+                    && p == ph
+                {
+                    return PhyNode {
+                        id,
+                        phandle: usdpph,
+                    };
+                }
+            }
+        }
+    }
+    panic!("no phy node found");
+}
+
+fn fdt_iter_find<'a>(
+    iter: &mut impl Iterator<Item = Node<'a>>,
+    name: &str,
+) -> Option<(Phandle, usize)> {
+    for node in iter.by_ref() {
+        if node.name() == name {
+            return Some((node.phandle().unwrap(), node.level));
+        }
+    }
+    None
 }
 
 struct CruOpImpl;

@@ -389,12 +389,13 @@ impl Dwc {
             gusb3.modify(GUSB3PIPECTL::TX_DEEPH.val(self.tx_de_emphasis as u32));
         }
 
+        const IS_ROCKCHIP: bool = true;
         /*
          * For some Rockchip SoCs like RK3588, if the USB3 PHY is suspended
          * in U-Boot would cause the PHY initialize abortively in Linux Kernel,
          * so disable the DWC3_GUSB3PIPECTL_SUSPHY feature here to fix it.
          */
-        if self.dis_u3_susphy_quirk {
+        if self.dis_u3_susphy_quirk || IS_ROCKCHIP {
             gusb3.modify(GUSB3PIPECTL::SUSPHY::Disable);
         }
 

@@ -38,6 +38,7 @@ pub const UDPHY_PMA: usize = 0x8000;
 pub const UDPHY_PCS: usize = 0x4000;
 
 pub struct UdphyParam<'a> {
+    pub id: usize,
     /// prop `rockchip,usb2phy-grf`
     pub u2phy_grf: Mmio,
     /// prop `rockchip,usb-grf`
@@ -52,6 +53,7 @@ pub struct UdphyParam<'a> {
 }
 
 pub struct Udphy {
+    id: usize,
     cfg: Box<config::UdphyCfg>,
     mode: UdphyMode,
     /// PHY MMIO 基址
@@ -118,6 +120,7 @@ impl Udphy {
         }
 
         Udphy {
+            id: param.id,
             cfg,
             mode,
             phy_base: base.as_ptr() as usize,
@@ -217,6 +220,13 @@ impl Udphy {
                 .await;
             }
         }
+    }
+
+    pub fn u3_port_disable(&self, disable: bool) {
+        self.udphygrf
+            .grfreg_write(&self.cfg.grf.usb3otg0_cfg, false);
+        self.udphygrf
+            .grfreg_write(&self.cfg.grf.usb3otg1_cfg, false);
     }
 
     fn cmn_lane_mux_and_en(&self) -> &ReadWrite<u32, CMN_LANE_MUX_EN::Register> {
