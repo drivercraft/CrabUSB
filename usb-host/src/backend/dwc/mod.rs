@@ -14,7 +14,7 @@ use crate::{
         dwc::{event::EventBuffer, udphy::Udphy},
         ty::HostOp,
     },
-    err::Result,
+    err::{Result, USBError},
 };
 
 pub use crate::backend::xhci::*;
@@ -55,6 +55,7 @@ pub struct Dwc {
     cru: Arc<dyn CruOp>,
     rsts: BTreeMap<String, u64>,
     ev_buffs: Vec<EventBuffer>,
+    revistion: u32,
 }
 
 impl Dwc {
@@ -87,13 +88,14 @@ impl Dwc {
             cru,
             rsts,
             ev_buffs: vec![],
+            revistion: 0,
             // usb2_phy,
         })
     }
 
     async fn dwc3_init(&mut self) -> Result<()> {
         self.alloc_event_buffers(DWC3_EVENT_BUFFERS_SIZE)?;
-
+        self.core_init().await?;
         Ok(())
     }
 
@@ -104,6 +106,21 @@ impl Dwc {
             let ev_buff = EventBuffer::new(len, self.xhci.dma_mask)?;
             self.ev_buffs.push(ev_buff);
         }
+        Ok(())
+    }
+
+    async fn core_init(&mut self) -> Result<()> {
+        self.revistion = self.dwc_regs.read_revision() as _;
+        if self.revistion != 0x55330000 {
+            return Err(USBError::Other(format!(
+                "Unsupported DWC3 revision: 0x{:08x}",
+                self.revistion
+            )));
+        }
+
+        self.dwc_regs.device_soft_reset().await;
+        self.dwc_regs.core_soft_reset().await;
+
         Ok(())
     }
 }

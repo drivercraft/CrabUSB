@@ -10,6 +10,8 @@ use tock_registers::{
     registers::{ReadOnly, ReadWrite},
 };
 
+use crate::osal::SpinWhile;
+
 use super::consts::*;
 
 /// DWC3 全局寄存器基址偏移 (相对于 xHCI 寄存器区域)
@@ -68,13 +70,19 @@ pub struct Dwc3Registers {
 
     /// 0xc2c0 - USB3 PIPE Control Register 0
     pub gusb3pipectl0: ReadWrite<u32, GUSB3PIPECTL::Register>,
+
+    // 0xc2c4 - 0xc700: 保留
+    _reserved3: [u32; 273],
+
+    /// 0xc704 - Device Control Register
+    pub dctl: ReadWrite<u32, DCTL::Register>,
 }
 
 // =============================================================================
 // 寄存器位字段定义
 // =============================================================================
 
-/// Global Control Register (GCTL) - 0xc110
+// Global Control Register (GCTL) - 0xc110
 register_bitfields![u32,
     GCTL [
         /// 禁止时钟门控
@@ -169,7 +177,7 @@ register_bitfields![u32,
     ]
 ];
 
-/// SNPSID Register (GSNPSID) - 0xc120 (只读)
+// SNPSID Register (GSNPSID) - 0xc120 (只读)
 register_bitfields![u32,
     GSNPSID [
         /// 仿真 ID
@@ -431,6 +439,107 @@ register_bitfields![u32,
     ]
 ];
 
+/// Device Control Register (DCTL) - 0xc704
+register_bitfields![u32,
+    DCTL [
+        /// 运行/停止 (bit 31)
+        /// 0 = 停止，1 = 运行
+        RUN_STOP OFFSET(31) NUMBITS(1) [
+            Stop = 0,
+            Run = 1
+        ],
+
+        /// 核心软复位 (bit 30)
+        CSFTRST OFFSET(30) NUMBITS(1) [
+            Normal = 0,
+            Reset = 1
+        ],
+
+        /// 链路层软复位 (bit 29)
+        LSFTRST OFFSET(29) NUMBITS(1) [
+            Normal = 0,
+            Reset = 1
+        ],
+
+        /// HIRD 阈值 (bits 24-28)
+        /// 主机发起的远程唤醒延迟阈值
+        HIRD_THRES OFFSET(24) NUMBITS(5) [],
+
+        /// 应用层特定复位 (bit 23)
+        APPL1RES OFFSET(23) NUMBITS(1) [
+            Normal = 0,
+            Reset = 1
+        ],
+
+        /// LPM Errata (bits 20-23)
+        /// 仅适用于版本 1.94a 及更新
+        LPM_ERRATA OFFSET(20) NUMBITS(4) [],
+
+        /// 保持连接 (bit 19)
+        /// 仅适用于版本 1.94a 及更新
+        KEEP_CONNECT OFFSET(19) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// L1 休眠使能 (bit 18)
+        L1_HIBER_EN OFFSET(18) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// 继续远程唤醒 (bit 17)
+        CRS OFFSET(17) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// 继续同步 (bit 16)
+        CSS OFFSET(16) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// 初始化 U2 使能 (bit 12)
+        INITU2ENA OFFSET(12) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// 接受 U2 使能 (bit 11)
+        ACCEPTU2ENA OFFSET(11) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// 初始化 U1 使能 (bit 10)
+        INITU1ENA OFFSET(10) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// 接受 U1 使能 (bit 9)
+        ACCEPTU1ENA OFFSET(9) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// 测试控制掩码 (bits 1-4)
+        TSTCTRL_MASK OFFSET(1) NUMBITS(4) [],
+
+        /// USB 链路状态改变请求 (bits 5-8)
+        ULSTCHNGREQ OFFSET(5) NUMBITS(4) [
+            NoAction = 0,
+            SSDisabled = 4,
+            RxDetect = 5,
+            SSInactive = 6,
+            Recovery = 8,
+            Compliance = 10,
+            Loopback = 11
+        ]
+    ]
+];
+
 /// DWC3 寄存器访问器
 pub struct Dwc3Regs {
     base: usize,
@@ -447,7 +556,7 @@ impl Dwc3Regs {
     }
 
     /// 获取全局寄存器
-    fn globals(&self) -> &'static Dwc3Registers {
+    pub fn globals(&self) -> &'static Dwc3Registers {
         let addr = self.base + DWC3_GLOBALS_REGS_START;
         unsafe { &*(addr as *const Dwc3Registers) }
     }
@@ -478,29 +587,52 @@ impl Dwc3Regs {
     //     }
     // }
 
-    /// 读取 SNPSID 寄存器（完整值）
-    pub fn read_snpsid(&self) -> u32 {
-        self.globals().gsnpsid.get()
-    }
-
     /// 读取 SNPSID 的产品 ID
     pub fn read_product_id(&self) -> u16 {
         self.globals().gsnpsid.read(GSNPSID::PRODUCT_ID) as u16
     }
 
     /// 读取 SNPSID 的版本号
-    pub fn read_revision(&self) -> u16 {
-        self.globals().gsnpsid.read(GSNPSID::REVISION) as u16
+    pub fn read_revision(&self) -> u32 {
+        self.globals().gsnpsid.read(GSNPSID::REVISION) << 16
     }
 
-    /// 读取 GCTL 寄存器
-    pub fn read_gctl(&self) -> u32 {
-        self.globals().gctl.get()
+    pub async fn device_soft_reset(&mut self) {
+        self.globals().dctl.modify(DCTL::CSFTRST::Reset);
+        trace!("DWC3: Device waiting for soft reset...");
+        SpinWhile::new(|| self.globals().dctl.is_set(DCTL::CSFTRST)).await;
+        trace!("DWC3: Device soft reset completed");
     }
 
-    /// 设置 GCTL 寄存器
-    pub fn write_gctl(&mut self, value: u32) {
-        self.globals_mut().gctl.set(value);
+    pub async fn core_soft_reset(&mut self) {
+        // Before Resetting PHY, put Core in Reset
+        self.globals().gctl.modify(GCTL::CORESOFTRESET::Reset);
+
+        // Assert USB3 PHY reset
+        self.globals()
+            .gusb3pipectl0
+            .modify(GUSB3PIPECTL::PHYSOFTRST::Reset);
+
+        self.globals()
+            .gusb2phycfg0
+            .modify(GUSB2PHYCFG::PHYSOFTRST::Reset);
+
+        self.delay_ms(100);
+
+        // Clear USB3 PHY reset
+        self.globals()
+            .gusb3pipectl0
+            .modify(GUSB3PIPECTL::PHYSOFTRST::Normal);
+
+        // Clear USB2 PHY reset
+        self.globals()
+            .gusb2phycfg0
+            .modify(GUSB2PHYCFG::PHYSOFTRST::Normal);
+
+        self.delay_ms(100);
+
+        // After PHYs are stable we can take Core out of reset state
+        self.globals().gctl.modify(GCTL::CORESOFTRESET::Normal);
     }
 
     /// 修改 GCTL 的 PRTCAPDIR 字段
@@ -589,46 +721,46 @@ impl Dwc3Regs {
         (usb2_reset, usb3_reset)
     }
 
-    // ==================== 高级方法封装 ====================
+    // // ==================== 高级方法封装 ====================
 
-    /// 验证 SNPSID 寄存器
-    ///
-    /// 返回 (ip_id, product_id, revision)
-    pub fn verify_snpsid(&self) -> (u16, u16, u16) {
-        let snpsid_full = self.read_snpsid();
-        let product_id = self.read_product_id();
-        let revision = self.read_revision();
-        let ip_id = (snpsid_full >> 16) & 0xffff;
+    // /// 验证 SNPSID 寄存器
+    // ///
+    // /// 返回 (ip_id, product_id, revision)
+    // pub fn verify_snpsid(&self) -> (u16, u16, u16) {
+    //     let snpsid_full = self.read_snpsid();
+    //     let product_id = self.read_product_id();
+    //     let revision = self.read_revision();
+    //     let ip_id = (snpsid_full >> 16) & 0xffff;
 
-        log::info!(
-            "DWC3 SNPSID: full={:#010x}, ip_id={:#06x}, product_id={:#06x}, revision={:#06x}",
-            snpsid_full,
-            ip_id,
-            product_id,
-            revision
-        );
+    //     log::info!(
+    //         "DWC3 SNPSID: full={:#010x}, ip_id={:#06x}, product_id={:#06x}, revision={:#06x}",
+    //         snpsid_full,
+    //         ip_id,
+    //         product_id,
+    //         revision
+    //     );
 
-        match ip_id {
-            0x5533 => {
-                log::info!("Detected DWC_usb3 controller");
-            }
-            0x3331 => {
-                log::info!("Detected DWC_usb31 controller");
-            }
-            0x3332 => {
-                log::info!("Detected DWC_usb32 controller");
-            }
-            _ => {
-                log::warn!(
-                    "Unknown DWC3 IP ID: {:#06x} (expected 0x5533, 0x3331, or 0x3332)",
-                    ip_id
-                );
-                log::warn!("Continuing with initialization - may be a custom or FPGA variant");
-            }
-        }
+    //     match ip_id {
+    //         0x5533 => {
+    //             log::info!("Detected DWC_usb3 controller");
+    //         }
+    //         0x3331 => {
+    //             log::info!("Detected DWC_usb31 controller");
+    //         }
+    //         0x3332 => {
+    //             log::info!("Detected DWC_usb32 controller");
+    //         }
+    //         _ => {
+    //             log::warn!(
+    //                 "Unknown DWC3 IP ID: {:#06x} (expected 0x5533, 0x3331, or 0x3332)",
+    //                 ip_id
+    //             );
+    //             log::warn!("Continuing with initialization - may be a custom or FPGA variant");
+    //         }
+    //     }
 
-        (ip_id as u16, product_id, revision)
-    }
+    //     (ip_id as u16, product_id, revision)
+    // }
 
     pub fn num_event_buffers(&self) -> usize {
         let val = unsafe { self.reg_offset(DWC3_GHWPARAMS1).read_volatile() };
@@ -641,7 +773,7 @@ impl Dwc3Regs {
     pub fn setup_gctl(&mut self) {
         log::info!("DWC3: Configuring GCTL");
 
-        let current = self.read_gctl();
+        let current = self.globals().gctl.get();
         log::debug!("DWC3: GCTL before configuration: {:#010x}", current);
 
         let revision = self.read_revision() as u32;
@@ -666,9 +798,9 @@ impl Dwc3Regs {
         reg &= !(1 << 0); // DSBLCLKGTNG = 0 (enable clock gating)
         log::debug!("DWC3: Clock gating enabled");
 
-        self.write_gctl(reg);
+        self.globals().gctl.set(reg);
 
-        let updated = self.read_gctl();
+        let updated = self.globals().gctl.get();
         log::debug!("DWC3: GCTL after configuration: {:#010x}", updated);
 
         // 验证关键位
@@ -695,7 +827,7 @@ impl Dwc3Regs {
     pub fn setup_host_mode(&mut self) {
         log::info!("DWC3: Configuring HOST mode");
 
-        let current = self.read_gctl();
+        let current = self.globals().gctl.get();
         log::debug!("DWC3: Current GCTL: {:#010x}", current);
 
         let current_prtcap = (current >> 12) & 0x3;
@@ -707,7 +839,7 @@ impl Dwc3Regs {
         // 设置为 HOST 模式
         self.set_prtcap_dir(1); // 1 = Host mode
 
-        let updated = self.read_gctl();
+        let updated = self.globals().gctl.get();
         let updated_prtcap = (updated >> 12) & 0x3;
         log::debug!("DWC3: Updated GCTL: {:#010x}", updated);
         log::debug!("DWC3: Updated PRTCAPDIR: {}", updated_prtcap);
@@ -882,7 +1014,7 @@ impl Dwc3Regs {
 
             // 打印诊断信息
             log::error!("❌ DWC3: Diagnostic information:");
-            log::error!("   GCTL:          {:#010x}", self.read_gctl());
+            log::error!("   GCTL:          {:#010x}", self.globals().gctl.get());
             log::error!("   GSTS:          {:#010x}", self.globals().gsts.get());
             log::error!("   GGPIO:         {:#010x}", self.globals().ggpio.get());
 
@@ -988,5 +1120,119 @@ impl Dwc3Regs {
     /// 简单的毫秒级延时（使用忙等待）
     pub fn delay_ms(&self, ms: u32) {
         crate::osal::kernel::delay(core::time::Duration::from_millis(ms as _));
+    }
+
+    // ==================== DCTL 寄存器操作 ====================
+
+    /// 读取 DCTL 寄存器
+    pub fn read_dctl(&self) -> u32 {
+        self.globals().dctl.get()
+    }
+
+    /// 设置 DCTL 寄存器
+    pub fn write_dctl(&mut self, value: u32) {
+        self.globals_mut().dctl.set(value);
+        core::sync::atomic::fence(Ordering::SeqCst);
+    }
+
+    /// 启动/停止设备
+    ///
+    /// 参考 U-Boot drivers/usb/dwc3/core.c:dwc3_gadget_run()
+    pub fn set_run_stop(&mut self, run: bool) {
+        if run {
+            self.globals_mut().dctl.modify(DCTL::RUN_STOP::Run);
+            info!("DWC3: Device started (RUN_STOP=1)");
+        } else {
+            self.globals_mut().dctl.modify(DCTL::RUN_STOP::Stop);
+            info!("DWC3: Device stopped (RUN_STOP=0)");
+        }
+
+        // 等待设备启动/停止完成（参考 U-Boot 的 100ms 延时）
+        self.delay_ms(100);
+    }
+
+    /// 设置 U1 低功耗状态
+    pub fn set_u1_enable(&mut self, init: bool, accept: bool) {
+        self.globals_mut()
+            .dctl
+            .modify(DCTL::INITU1ENA.val(init as u32) + DCTL::ACCEPTU1ENA.val(accept as u32));
+
+        log::debug!(
+            "DWC3: U1 power state - INITU1ENA={}, ACCEPTU1ENA={}",
+            init,
+            accept
+        );
+    }
+
+    /// 设置 U2 低功耗状态
+    pub fn set_u2_enable(&mut self, init: bool, accept: bool) {
+        self.globals_mut()
+            .dctl
+            .modify(DCTL::INITU2ENA.val(init as u32) + DCTL::ACCEPTU2ENA.val(accept as u32));
+
+        log::debug!(
+            "DWC3: U2 power state - INITU2ENA={}, ACCEPTU2ENA={}",
+            init,
+            accept
+        );
+    }
+
+    /// 请求链路状态改变
+    ///
+    /// 参考 U-Boot drivers/usb/dwc3/gadget.c:dwc3_gadget_set_link_state()
+    pub fn set_link_state(&mut self, state: u32) {
+        // 清除 ULSTCHNGREQ 字段
+        self.globals_mut().dctl.modify(DCTL::ULSTCHNGREQ.val(state));
+
+        log::info!("DWC3: Link state change requested to state={}", state);
+
+        // 等待状态改变完成
+        self.delay_ms(5);
+    }
+
+    /// 清除测试控制模式
+    ///
+    /// 参考 U-Boot drivers/usb/dwc3/gadget.c:dwc3_gadget_set_test_mode()
+    pub fn clear_test_mode(&mut self) {
+        self.globals_mut().dctl.modify(DCTL::TSTCTRL_MASK.val(0));
+        log::info!("DWC3: Test mode cleared");
+    }
+
+    /// 设置 HIRD 阈值
+    ///
+    /// HIRD (Host Initiated Remote Wakeup) 阈值用于远程唤醒延迟控制
+    pub fn set_hird_threshold(&mut self, threshold: u32) {
+        self.globals_mut()
+            .dctl
+            .modify(DCTL::HIRD_THRES.val(threshold & 0x1f));
+        log::debug!("DWC3: HIRD threshold set to {}", threshold);
+    }
+
+    /// 保持连接控制（用于休眠模式）
+    pub fn set_keep_connect(&mut self, enable: bool) {
+        if enable {
+            self.globals_mut().dctl.modify(DCTL::KEEP_CONNECT::Enable);
+            log::debug!("DWC3: Keep connect enabled");
+        } else {
+            self.globals_mut().dctl.modify(DCTL::KEEP_CONNECT::Disable);
+            log::debug!("DWC3: Keep connect disabled");
+        }
+    }
+
+    /// 读取当前运行状态
+    pub fn is_running(&self) -> bool {
+        let reg = self.read_dctl();
+        (reg >> 31) & 0x1 == 1
+    }
+
+    /// 读取当前 U1/U2 使能状态
+    pub fn read_u1u2_status(&self) -> (bool, bool, bool, bool) {
+        let reg = self.read_dctl();
+        let init_u2 = (reg >> 12) & 0x1 == 1;
+        let accept_u2 = (reg >> 11) & 0x1 == 1;
+        let init_u1 = (reg >> 10) & 0x1 == 1;
+        let accept_u1 = (reg >> 9) & 0x1 == 1;
+
+        (init_u1, accept_u1, init_u2, accept_u2)
     }
 }
