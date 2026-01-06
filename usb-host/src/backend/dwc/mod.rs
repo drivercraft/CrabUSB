@@ -9,6 +9,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use dma_api::DVec;
 use tock_registers::interfaces::*;
 use usb_if::DeviceSpeed;
 pub use usb_if::DrMode;
@@ -18,12 +19,13 @@ use crate::{
     backend::{
         dwc::{
             event::EventBuffer,
-            reg::{GCTL, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1, GUSB3PIPECTL},
+            reg::{GCTL, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1},
             udphy::Udphy,
         },
         ty::HostOp,
     },
     err::{Result, USBError},
+    osal::kernel::page_size,
 };
 
 pub use crate::backend::xhci::*;
@@ -126,6 +128,7 @@ pub struct Dwc {
     revistion: u32,
     nr_scratch: u32,
     params: DwcParams,
+    scratchbuf: Option<DVec<u8>>,
 }
 
 impl Dwc {
@@ -155,6 +158,7 @@ impl Dwc {
             revistion: 0,
             nr_scratch: 0,
             params: params.params,
+            scratchbuf: None,
             // usb2_phy,
         })
     }
@@ -162,18 +166,54 @@ impl Dwc {
     async fn dwc3_init(&mut self) -> Result<()> {
         self.alloc_event_buffers(DWC3_EVENT_BUFFERS_SIZE)?;
         self.core_init().await?;
+        self.event_buffers_setup();
 
         Ok(())
     }
 
     fn alloc_event_buffers(&mut self, len: usize) -> Result<()> {
-        let num_buffs = self.dwc_regs.num_event_buffers();
+        let num_buffs = self
+            .dwc_regs
+            .globals()
+            .ghwparams1
+            .read(GHWPARAMS1::NUM_EVENT_BUFFERS);
         debug!("Allocating {} event buffers", num_buffs);
         for _ in 0..num_buffs {
             let ev_buff = EventBuffer::new(len, self.xhci.dma_mask)?;
             self.ev_buffs.push(ev_buff);
         }
         Ok(())
+    }
+
+    fn event_buffers_setup(&mut self) {
+        use reg::GEVNTSIZ;
+
+        info!("DWC3: Setting up event buffers");
+
+        let regs = self.dwc_regs.globals();
+
+        for (i, ev_buff) in self.ev_buffs.iter().enumerate() {
+            if i >= regs.gevnt.len() {
+                warn!("DWC3: Invalid event buffer index {}", i);
+                break;
+            }
+
+            let dma_addr = ev_buff.dma_addr();
+            let length = ev_buff.buffer.len();
+
+            debug!(
+                "DWC3: Event buffer {} - DMA addr: {:#x}, length: {}",
+                i, dma_addr, length
+            );
+
+            // 使用 gevnt 数组访问事件缓冲区寄存器
+            regs.gevnt[i].adrlo.set((dma_addr & 0xffffffff) as u32);
+            regs.gevnt[i].adrhi.set((dma_addr >> 32) as u32);
+            regs.gevnt[i].size.set(length as u32);
+            regs.gevnt[i].count.set(0);
+        }
+
+        debug!("DWC3: Event buffers setup completed");
     }
 
     async fn core_init(&mut self) -> Result<()> {
@@ -262,6 +302,10 @@ impl Dwc {
         self.dwc_regs.globals().gctl.set(reg.get());
 
         self.phy_setup().await?;
+
+        self.alloc_scratch_buffers()?;
+
+        self.setup_scratch_buffers();
 
         Ok(())
     }
@@ -397,6 +441,57 @@ impl Dwc {
         crate::osal::kernel::delay(core::time::Duration::from_millis(100));
 
         debug!("DWC3: PHY configuration completed");
+
+        Ok(())
+    }
+
+    fn alloc_scratch_buffers(&mut self) -> Result<()> {
+        if !self.has_hibernation {
+            return Ok(());
+        }
+
+        if self.nr_scratch == 0 {
+            return Ok(());
+        }
+
+        let scratch_size = (self.nr_scratch as usize) * DWC3_SCRATCHBUF_SIZE;
+        let scratchbuf = DVec::zeros(
+            self.xhci.dma_mask as _,
+            scratch_size,
+            page_size(),
+            dma_api::Direction::Bidirectional,
+        )
+        .map_err(|_| USBError::NoMemory)?;
+
+        self.scratchbuf = Some(scratchbuf);
+        debug!(
+            "DWC3: Allocated {} scratch buffers (total {} bytes)",
+            self.nr_scratch, scratch_size
+        );
+
+        Ok(())
+    }
+
+    fn setup_scratch_buffers(&mut self) {
+        if let Some(_scratchbuf) = &self.scratchbuf {
+            todo!()
+        }
+    }
+
+    async fn core_init_mode(&mut self) -> Result<()> {
+        match self.dr_mode {
+            DrMode::Host => {
+                info!("DWC3: Initializing in HOST mode");
+                self.dwc_regs
+                    .globals()
+                    .gctl
+                    .modify(GCTL::PWRDNSCALE::Disable);
+            }
+            DrMode::Otg => {
+                todo!()
+            }
+            DrMode::Peripheral => todo!(),
+        }
 
         Ok(())
     }
