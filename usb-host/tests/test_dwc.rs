@@ -357,6 +357,54 @@ mod tests {
                     params.disable_scramble_quirk = true;
                 }
 
+                if node.find_property("snps,u2exit_lfps_quirk").is_some() {
+                    params.u2exit_lfps_quirk = true;
+                }
+
+                if node.find_property("snps,u2ss_inp3_quirk").is_some() {
+                    params.u2ss_inp3_quirk = true;
+                }
+
+                if node.find_property("snps,req_p1p2p3_quirk").is_some() {
+                    params.req_p1p2p3_quirk = true;
+                }
+
+                if node.find_property("snps,del_p1p2p3_quirk").is_some() {
+                    params.del_p1p2p3_quirk = true;
+                }
+
+                if node.find_property("snps,del_phy_power_chg_quirk").is_some() {
+                    params.del_phy_power_chg_quirk = true;
+                }
+
+                if node.find_property("snps,lfps_filter_quirk").is_some() {
+                    params.lfps_filter_quirk = true;
+                }
+
+                if node.find_property("snps,rx_detect_poll_quirk").is_some() {
+                    params.rx_detect_poll_quirk = true;
+                }
+
+                if node.find_property("snps,dis_u3_susphy_quirk").is_some() {
+                    params.dis_u3_susphy_quirk = true;
+                }
+
+                if node.find_property("snps,dis_u2_susphy_quirk").is_some() {
+                    params.dis_u2_susphy_quirk = true;
+                }
+
+                if node.find_property("snps,dis_enblslpm_quirk").is_some() {
+                    params.dis_enblslpm_quirk = true;
+                }
+
+                if node.find_property("snps,dis-u2-freeclk-exists-quirk").is_some() {
+                    params.dis_u2_freeclk_exists_quirk = true;
+                }
+
+                if node.find_property("snps,tx_de_emphasis_quirk").is_some() {
+                    params.tx_de_emphasis_quirk = true;
+                }
+
                 return XhciInfo {
                     usb: USBHost::new_dwc(DwcNewParams {
                         ctrl: addr,

@@ -43,7 +43,7 @@ pub mod usb2phy;
 use consts::*;
 use reg::Dwc3Regs;
 pub use udphy::UdphyParam;
-pub use usb2phy::Usb2Phy;
+// pub use usb2phy::Usb2Phy;
 
 /// CRU (Clock and Reset Unit)
 pub trait CruOp: Sync + Send + 'static {
@@ -116,8 +116,9 @@ pub struct Dwc {
 }
 
 impl Dwc {
-    pub fn new(params: DwcNewParams<'_, impl CruOp>) -> Result<Self> {
+    pub fn new(mut params: DwcNewParams<'_, impl CruOp>) -> Result<Self> {
         let mmio_base = params.ctrl.as_ptr() as usize;
+        params.params.max_speed = DeviceSpeed::Super;
         let cru = Arc::new(params.cru);
 
         let phy = Udphy::new(params.phy, cru.clone(), params.phy_param);
