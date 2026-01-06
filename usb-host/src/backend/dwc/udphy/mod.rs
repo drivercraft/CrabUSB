@@ -62,8 +62,8 @@ pub struct Udphy {
     pma_remap: Regmap,
     /// USBDP PHY GRF
     udphygrf: Regmap,
-    // /// USB GRF
-    // usb_grf: Grf,
+    /// USB GRF
+    usb_grf: Regmap,
     // /// USB2PHY GRF
     // usb2phy_grf: Grf,
     lane_mux_sel: [u32; 4],
@@ -126,6 +126,7 @@ impl Udphy {
             phy_base: base.as_ptr() as usize,
             pma_remap: Regmap::new(unsafe { base.add(UDPHY_PMA) }),
             udphygrf: Regmap::new(param.usbdpphy_grf),
+            usb_grf: Regmap::new(param.usb_grf),
             lane_mux_sel,
             dp_lane_sel,
             cru,
@@ -192,6 +193,9 @@ impl Udphy {
         //  Step 6: wait for lock done of pll
         self.status_check().await;
         info!("Udphy initialized");
+
+        self.u3_port_disable(!self.mode.contains(UdphyMode::USB));
+
         Ok(())
     }
 
@@ -223,10 +227,15 @@ impl Udphy {
     }
 
     pub fn u3_port_disable(&self, disable: bool) {
-        self.udphygrf
-            .grfreg_write(&self.cfg.grf.usb3otg0_cfg, false);
-        self.udphygrf
-            .grfreg_write(&self.cfg.grf.usb3otg1_cfg, false);
+        debug!("udphy{}: u3 port set disable: {disable}", self.id);
+
+        let cfg = if self.id > 0 {
+            &self.cfg.grf.usb3otg1_cfg
+        } else {
+            &self.cfg.grf.usb3otg0_cfg
+        };
+
+        self.usb_grf.grfreg_write(cfg, disable);
     }
 
     fn cmn_lane_mux_and_en(&self) -> &ReadWrite<u32, CMN_LANE_MUX_EN::Register> {

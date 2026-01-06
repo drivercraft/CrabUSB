@@ -2,7 +2,6 @@
 #![no_main]
 #![feature(used_with_arg)]
 
-use bare_test::driver::register;
 use rdrive::{Phandle, PlatformDevice, probe::OnProbeError, register::FdtInfo};
 
 extern crate alloc;
@@ -10,32 +9,26 @@ extern crate alloc;
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use bare_test::{
     GetIrqConfig,
-    async_std::time::{self, sleep},
-    fdt_parser::{Fdt, Node, PciSpace, Status},
+    async_std::time::sleep,
+    fdt_parser::{Node, Status},
     globals::{PlatformInfoKind, global_val},
     irq::{IrqHandleResult, IrqInfo, IrqParam},
     mem::{iomap, page_size},
-    platform::fdt::GetPciIrqConfig,
     println,
 };
 use core::{
-    hint::spin_loop,
     ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 use crab_usb::{impl_trait, *};
-use futures::{FutureExt, future::BoxFuture};
 use log::info;
 use log::*;
 use pcie::*;
 use rockchip_pm::{PowerDomain, RockchipPM};
 use rockchip_soc::rk3588::Cru;
 use spin::Mutex;
-use usb_if::{
-    descriptor::{ConfigurationDescriptor, EndpointType},
-    transfer::Direction,
-};
+use usb_if::descriptor::ConfigurationDescriptor;
 
 #[bare_test::tests]
 mod tests {
