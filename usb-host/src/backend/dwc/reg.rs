@@ -66,8 +66,35 @@ register_structs! {
         /// 0xc12c - User Control Register
         (0x2C => guctl: ReadWrite<u32, GUCTL::Register>),
 
-        // 0xc130 - 0xc17c: 总线错误和端口映射寄存器 (未使用)
-        (0x30 => _reserved_buserr),
+        // 0xc130 - 0xc13c: 总线错误和端口映射寄存器
+        (0x30 => _rsv_buserr),
+
+        /// 0xc140 - Global Hardware Parameters 0
+        (0x40 => pub ghwparams0: ReadOnly<u32, GHWPARAMS0::Register>),
+
+        /// 0xc144 - Global Hardware Parameters 1
+        (0x44 => pub ghwparams1: ReadOnly<u32, GHWPARAMS1::Register>),
+
+        /// 0xc148 - Global Hardware Parameters 2
+        (0x48 => pub ghwparams2: ReadOnly<u32, GHWPARAMS2::Register>),
+
+        /// 0xc14c - Global Hardware Parameters 3
+        (0x4C => pub ghwparams3: ReadOnly<u32, GHWPARAMS3::Register>),
+
+        /// 0xc150 - Global Hardware Parameters 4
+        (0x50 => pub ghwparams4: ReadOnly<u32, GHWPARAMS4::Register>),
+
+        /// 0xc154 - Global Hardware Parameters 5
+        (0x54 => pub ghwparams5: ReadOnly<u32, GHWPARAMS5::Register>),
+
+        /// 0xc158 - Global Hardware Parameters 6
+        (0x58 => pub ghwparams6: ReadOnly<u32, GHWPARAMS6::Register>),
+
+        /// 0xc15c - Global Hardware Parameters 7
+        (0x5C => pub ghwparams7: ReadOnly<u32, GHWPARAMS7::Register>),
+
+        // 0xc160 - 0xc1fc: 调试和其他寄存器 (未使用)
+        (0x60 => _rsv_debug),
 
         /// 0xc200 - USB2 PHY Configuration Register 0
         (0x100 => gusb2phycfg0: ReadWrite<u32, GUSB2PHYCFG::Register>),
@@ -76,7 +103,7 @@ register_structs! {
         (0x104 => _reserved_usb2phy),
 
         /// 0xc2c0 - USB3 PIPE Control Register 0
-        (0x1C0 => gusb3pipectl0: ReadWrite<u32, GUSB3PIPECTL::Register>),
+        (0x1C0 => pub gusb3pipectl0: ReadWrite<u32, GUSB3PIPECTL::Register>),
 
         // 0xc2c4 - 0xc5fc: USB3 PHY 和 FIFO 寄存器 (未使用)
         (0x1C4 => _reserved_usb3),
@@ -253,7 +280,7 @@ register_bitfields![u32,
 
 // Global USB3 PIPE Control Register (GUSB3PIPECTL) - 0xc2c0
 register_bitfields![u32,
-    GUSB3PIPECTL [
+    pub GUSB3PIPECTL [
         /// PIPE 物理复位
         PHYSOFTRST OFFSET(31) NUMBITS(1) [
             Normal = 0,
@@ -452,6 +479,204 @@ register_bitfields![u32,
     ]
 ];
 
+// =============================================================================
+// Global Hardware Parameters Registers (GHWPARAMS0-7)
+// =============================================================================
+
+/// Global Hardware Parameters 0 Register (GHWPARAMS0) - 0xc140
+/// 描述 DWC3 控制器的基本硬件配置
+register_bitfields![u32,
+    pub GHWPARAMS0 [
+        /// 操作模式 (bits 0-1)
+        MODE OFFSET(0) NUMBITS(2) [
+            Gadget = 0,
+            Host = 1,
+            DRD = 2
+        ],
+
+        /// 主总线类型 (bits 3-5)
+        MBUS_TYPE OFFSET(3) NUMBITS(3) [],
+
+        /// 从总线类型 (bits 6-7)
+        SBUS_TYPE OFFSET(6) NUMBITS(2) [],
+
+        /// 主数据总线宽度 (bits 8-15)
+        /// 以 32-bit 字为单位
+        MDWIDTH OFFSET(8) NUMBITS(8) [],
+
+        /// 从数据总线宽度 (bits 16-23)
+        /// 以 32-bit 字为单位
+        SDWIDTH OFFSET(16) NUMBITS(8) [],
+
+        /// 地址总线宽度 (bits 24-31)
+        /// 以位为单位
+        AWIDTH OFFSET(24) NUMBITS(8) []
+    ]
+];
+
+/// Global Hardware Parameters 1 Register (GHWPARAMS1) - 0xc144
+/// 描述电源管理选项和事件缓冲区数量
+register_bitfields![u32,
+    pub GHWPARAMS1 [
+        /// 使能 Data Burst 能力 (bit 31)
+        ENDBC OFFSET(31) NUMBITS(1) [
+            Disable = 0,
+            Enable = 1
+        ],
+
+        /// 电源管理选项 (bits 24-25)
+        EN_PWROPT OFFSET(24) NUMBITS(2) [
+            No = 0,
+            Clock = 1,
+            Hibernation = 2
+        ],
+
+        /// 事件缓冲区数量 (bits 15-20)
+        NUM_EVENT_BUFFERS OFFSET(15) NUMBITS(6) [],
+
+        /// 设备端点数量 (bits 0-4)
+        NUM_DEVS OFFSET(0) NUMBITS(5) []
+    ]
+];
+
+/// Global Hardware Parameters 2 Register (GHWPARAMS2) - 0xc148
+/// 描述端点和 FIFO 特性
+register_bitfields![u32,
+    pub GHWPARAMS2 [
+        /// 事务类型 (bits 0-1)
+        TYPE_TRANSACTIONS OFFSET(0) NUMBITS(2) [],
+
+        /// 低功耗连接地址数量 (bits 1-5)
+        NUM_DEV_IN_EPS OFFSET(1) NUMBITS(5) [],
+
+        /// 设备端点总数 (bits 16-20)
+        NUM_DEV_EPS OFFSET(16) NUMBITS(5) []
+    ]
+];
+
+/// Global Hardware Parameters 3 Register (GHWPARAMS3) - 0xc14c
+/// 描述 PHY 接口类型
+register_bitfields![u32,
+    pub GHWPARAMS3 [
+        /// SuperSpeed PHY 接口类型 (bits 0-1)
+        SSPHY_IFC OFFSET(0) NUMBITS(2) [
+            Disabled = 0,
+            Enabled = 1,
+            Gen2 = 2
+        ],
+
+        /// HighSpeed PHY 接口类型 (bits 2-3)
+        HSPHY_IFC OFFSET(2) NUMBITS(2) [
+            Disabled = 0,
+            UTMI = 1,
+            ULPI = 2,
+            UTMI_ULPI = 3
+        ],
+
+        /// FullSpeed PHY 接口类型 (bits 4-5)
+        FSPHY_IFC OFFSET(4) NUMBITS(2) [
+            Disabled = 0,
+            Enabled = 1
+        ],
+
+        /// PHY 宽度 (bits 6-7)
+        PHY_WIDTH OFFSET(6) NUMBITS(2) [],
+
+        /// 控制 endpoint 数量 (bits 16-18)
+        NUM_CTRL_EPS OFFSET(16) NUMBITS(3) []
+    ]
+];
+
+/// Global Hardware Parameters 4 Register (GHWPARAMS4) - 0xc150
+/// 描述休眠模式和其他特性
+register_bitfields![u32,
+    pub GHWPARAMS4 [
+        /// 休眠 Scratch Buffer 数量 (bits 13-16)
+        HIBER_SCRATCHBUFS OFFSET(13) NUMBITS(4) [],
+
+        /// 低功耗资源地址数量 (bits 4-8)
+        NUM_DEV_MODE_EPS OFFSET(4) NUMBITS(5) [],
+
+        /// Host 端点数量 (bits 0-3)
+        NUM_HOST_EPS OFFSET(0) NUMBITS(4) []
+    ]
+];
+
+/// Global Hardware Parameters 5 Register (GHWPARAMS5) - 0xc154
+/// 描述超时和其他时序参数
+register_bitfields![u32,
+    pub GHWPARAMS5 [
+        /// 超时值 (bits 0-15)
+        TIMEOUT_VALUE OFFSET(0) NUMBITS(16) [],
+
+        /// 设备模式请求队列深度 (bits 16-23)
+        DEV_REQ_Q_DEPTH OFFSET(16) NUMBITS(8) []
+    ]
+];
+
+/// Global Hardware Parameters 6 Register (GHWPARAMS6) - 0xc158
+/// 描述 OTG、ADP 和其他高级特性
+register_bitfields![u32,
+    pub GHWPARAMS6 [
+        /// 充电支持 (bit 14)
+        BCSUPPORT OFFSET(14) NUMBITS(1) [
+            No = 0,
+            Yes = 1
+        ],
+
+        /// OTG 3.0 支持 (bit 13)
+        OTG3SUPPORT OFFSET(13) NUMBITS(1) [
+            No = 0,
+            Yes = 1
+        ],
+
+        /// ADP 支持 (bit 12)
+        ADPSUPPORT OFFSET(12) NUMBITS(1) [
+            No = 0,
+            Yes = 1
+        ],
+
+        /// HNP 支持 (bit 11)
+        HNPSUPPORT OFFSET(11) NUMBITS(1) [
+            No = 0,
+            Yes = 1
+        ],
+
+        /// SRP 支持 (bit 10)
+        SRPSUPPORT OFFSET(10) NUMBITS(1) [
+            No = 0,
+            Yes = 1
+        ],
+
+        /// FPGA 使能 (bit 7)
+        EN_FPGA OFFSET(7) NUMBITS(1) [
+            No = 0,
+            Yes = 1
+        ],
+
+        /// 总线宽度和流水线选项 (bits 4-6)
+        WIDTH_PIPED OFFSET(4) NUMBITS(3) [],
+
+        /// RAM0 深度 (bits 16-31)
+        /// 以 32-bit 字为单位
+        RAM0_DEPTH OFFSET(16) NUMBITS(16) []
+    ]
+];
+
+/// Global Hardware Parameters 7 Register (GHWPARAMS7) - 0xc15c
+/// 描述 RAM 深度
+register_bitfields![u32,
+    pub GHWPARAMS7 [
+        /// RAM1 深度 (bits 0-15)
+        /// 以 32-bit 字为单位
+        RAM1_DEPTH OFFSET(0) NUMBITS(16) [],
+
+        /// RAM2 深度 (bits 16-31)
+        /// 以 32-bit 字为单位
+        RAM2_DEPTH OFFSET(16) NUMBITS(16) []
+    ]
+];
+
 /// Device Control Register (DCTL) - 0xc704
 register_bitfields![u32,
     DCTL [
@@ -601,8 +826,8 @@ impl Dwc3Regs {
     // }
 
     /// 读取 SNPSID 的产品 ID
-    pub fn read_product_id(&self) -> u16 {
-        self.globals().gsnpsid.read(GSNPSID::PRODUCT_ID) as u16
+    pub fn read_product_id(&self) -> u32 {
+        self.globals().gsnpsid.read(GSNPSID::PRODUCT_ID)
     }
 
     /// 读取 SNPSID 的版本号

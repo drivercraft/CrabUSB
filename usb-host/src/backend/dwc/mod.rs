@@ -12,7 +12,11 @@ use tock_registers::interfaces::*;
 use crate::{
     Mmio, Xhci,
     backend::{
-        dwc::{event::EventBuffer, reg::GCTL, udphy::Udphy},
+        dwc::{
+            event::EventBuffer,
+            reg::{GCTL, GHWPARAMS1, GHWPARAMS4, GUSB3PIPECTL},
+            udphy::Udphy,
+        },
         ty::HostOp,
     },
     err::{Result, USBError},
@@ -57,7 +61,7 @@ pub struct Dwc {
     rsts: BTreeMap<String, u64>,
     ev_buffs: Vec<EventBuffer>,
     revistion: u32,
-    // maximum_speed
+    nr_scratch: u32, // maximum_speed
 }
 
 impl Dwc {
@@ -91,6 +95,7 @@ impl Dwc {
             rsts,
             ev_buffs: vec![],
             revistion: 0,
+            nr_scratch: 0,
             // usb2_phy,
         })
     }
@@ -120,6 +125,8 @@ impl Dwc {
                 self.revistion
             )));
         }
+        self.revistion += self.dwc_regs.read_product_id();
+        debug!("DWC3: Detected revision 0x{:08x}", self.revistion);
 
         self.dwc_regs.device_soft_reset().await;
         self.dwc_regs.core_soft_reset().await;
@@ -127,9 +134,63 @@ impl Dwc {
             debug!("DWC3: Revision 250A or later detected");
         }
 
-        let mut reg = GCTL::SCALEDOWN::None;
+        let mut reg = self.dwc_regs.globals().gctl.extract();
+        reg.modify(GCTL::SCALEDOWN::None);
 
-        
+        match self
+            .dwc_regs
+            .globals()
+            .ghwparams1
+            .read_as_enum(GHWPARAMS1::EN_PWROPT)
+        {
+            Some(GHWPARAMS1::EN_PWROPT::Value::Clock) => {
+                if (DWC3_REVISION_210A..=DWC3_REVISION_250A).contains(&self.revistion) {
+                    reg.modify(GCTL::DSBLCLKGTNG::Enable + GCTL::SOFITPSYNC::Enable);
+                } else {
+                    reg.modify(GCTL::DSBLCLKGTNG::Disable);
+                }
+            }
+            Some(GHWPARAMS1::EN_PWROPT::Value::Hibernation) => {
+                self.nr_scratch = self
+                    .dwc_regs
+                    .globals()
+                    .ghwparams4
+                    .read(GHWPARAMS4::HIBER_SCRATCHBUFS) as _;
+
+                reg.modify(GCTL::GBLHIBERNATIONEN::Enable);
+            }
+            _ => {
+                debug!("No power optimization available");
+            }
+        }
+
+        /*
+         * WORKAROUND: DWC3 revisions <1.90a have a bug
+         * where the device can fail to connect at SuperSpeed
+         * and falls back to high-speed mode which causes
+         * the device to enter a Connect/Disconnect loop
+         */
+        if self.revistion < DWC3_REVISION_190A {
+            debug!("Applying DWC3 <1.90a SuperSpeed connect workaround");
+            reg.modify(GCTL::U2RSTECN::Enable);
+        }
+
+        // core_num_eps
+
+        self.dwc_regs.globals().gctl.set(reg.get());
+
+        self.phy_setup().await?;
+
+        Ok(())
+    }
+
+    async fn phy_setup(&mut self) -> Result<()> {
+        let mut reg = self.dwc_regs.globals().gusb3pipectl0.extract();
+
+        if self.revistion >= DWC3_REVISION_194A {
+            reg.modify(GUSB3PIPECTL::SUSPHY::Enable);
+        }
+
 
 
         Ok(())
