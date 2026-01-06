@@ -135,7 +135,7 @@ impl Udphy {
         }
     }
 
-    pub async fn init(&mut self) -> Result<()> {
+    pub async fn setup(&mut self) -> Result<()> {
         info!("Starting initialization");
         for &rst in self.cfg.rst_list {
             self.reset_assert(rst);
@@ -196,7 +196,45 @@ impl Udphy {
 
         self.u3_port_disable(!self.mode.contains(UdphyMode::USB));
 
+        let dplanes = self.dplane_get();
+        debug!(
+            "Configured for {:?} mode with {} DP lanes",
+            self.mode, dplanes
+        );
+        self.dplane_enable(dplanes);
+
         Ok(())
+    }
+
+    fn dplane_enable(&self, lanes: usize) {
+        match lanes {
+            4 => {
+                self.cmn_lane_mux_and_en().modify(
+                    CMN_LANE_MUX_EN::LANE0_EN::Enable
+                        + CMN_LANE_MUX_EN::LANE1_EN::Enable
+                        + CMN_LANE_MUX_EN::LANE2_EN::Enable
+                        + CMN_LANE_MUX_EN::LANE3_EN::Enable,
+                );
+            }
+            2 => {
+                self.cmn_lane_mux_and_en()
+                    .modify(CMN_LANE_MUX_EN::LANE0_EN::Enable + CMN_LANE_MUX_EN::LANE1_EN::Enable);
+            }
+            0 => {
+                self.cmn_dp_rstn().modify(CMN_DP_RSTN::DP_CMN_RSTN::CLEAR);
+            }
+            _ => {
+                panic!("unsupported dplane lanes: {}", lanes);
+            }
+        }
+    }
+
+    fn dplane_get(&self) -> usize {
+        match self.mode {
+            UdphyMode::DP => 4,
+            UdphyMode::DP_USB => 2,
+            _ => 0,
+        }
     }
 
     async fn status_check(&self) {

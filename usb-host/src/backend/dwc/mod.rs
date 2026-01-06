@@ -526,10 +526,7 @@ impl HostOp for Dwc {
 
         crate::osal::kernel::delay(core::time::Duration::from_millis(1));
 
-        // 步骤 2: 配置 USBDP PHY 硬件（时钟、复位、PLL 等）
-        info!("DWC3: Step 2 - Configuring USBDP PHY hardware");
-
-        self.phy.init().await?;
+        self.phy.setup().await?;
 
         for &id in self.rsts.values() {
             self.cru.reset_deassert(id);
@@ -537,6 +534,7 @@ impl HostOp for Dwc {
 
         self.dwc3_init().await?;
 
+        self.xhci.init().await?;
         Ok(())
     }
 
