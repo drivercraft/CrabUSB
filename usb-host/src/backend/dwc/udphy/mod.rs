@@ -296,28 +296,28 @@ impl Udphy {
             return;
         }
 
-        // // Enable only the lanes actually muxed to DP according to dp_lane_mux
-        // let mut fv = CMN_LANE_MUX_EN::LANE0_EN::Disable
-        //     + CMN_LANE_MUX_EN::LANE1_EN::Disable
-        //     + CMN_LANE_MUX_EN::LANE2_EN::Disable
-        //     + CMN_LANE_MUX_EN::LANE3_EN::Disable;
+        // Enable only the lanes actually muxed to DP according to dp_lane_mux
+        let mut fv = CMN_LANE_MUX_EN::LANE0_EN::Disable
+            + CMN_LANE_MUX_EN::LANE1_EN::Disable
+            + CMN_LANE_MUX_EN::LANE2_EN::Disable
+            + CMN_LANE_MUX_EN::LANE3_EN::Disable;
 
-        // for (idx, sel) in self.lane_mux_sel.iter().enumerate() {
-        //     if *sel == PHY_LANE_MUX_DP {
-        //         fv = fv
-        //             + match idx {
-        //                 0 => CMN_LANE_MUX_EN::LANE0_EN::Enable,
-        //                 1 => CMN_LANE_MUX_EN::LANE1_EN::Enable,
-        //                 2 => CMN_LANE_MUX_EN::LANE2_EN::Enable,
-        //                 3 => CMN_LANE_MUX_EN::LANE3_EN::Enable,
-        //                 _ => unreachable!(),
-        //             };
-        //     }
-        // }
-        let fv = CMN_LANE_MUX_EN::LANE0_EN::Enable
-            + CMN_LANE_MUX_EN::LANE1_EN::Enable
-            + CMN_LANE_MUX_EN::LANE2_EN::Enable
-            + CMN_LANE_MUX_EN::LANE3_EN::Enable;
+        for (idx, sel) in self.lane_mux_sel.iter().enumerate() {
+            if *sel == PHY_LANE_MUX_DP {
+                fv = fv
+                    + match idx {
+                        0 => CMN_LANE_MUX_EN::LANE0_EN::Enable,
+                        1 => CMN_LANE_MUX_EN::LANE1_EN::Enable,
+                        2 => CMN_LANE_MUX_EN::LANE2_EN::Enable,
+                        3 => CMN_LANE_MUX_EN::LANE3_EN::Enable,
+                        _ => unreachable!(),
+                    };
+            }
+        }
+        // let fv = CMN_LANE_MUX_EN::LANE0_EN::Enable
+        //     + CMN_LANE_MUX_EN::LANE1_EN::Enable
+        //     + CMN_LANE_MUX_EN::LANE2_EN::Enable
+        //     + CMN_LANE_MUX_EN::LANE3_EN::Enable;
 
         self.cmn_lane_mux_and_en().modify(fv);
     }

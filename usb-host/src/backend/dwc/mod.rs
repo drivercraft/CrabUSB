@@ -19,7 +19,7 @@ use crate::{
     backend::{
         dwc::{
             event::EventBuffer,
-            reg::{GCTL, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1},
+            reg::{GCTL, GHWPARAMS0, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1},
             udphy::Udphy,
         },
         ty::HostOp,
@@ -353,6 +353,17 @@ impl Dwc {
 
         info!("DWC3: Configuring PHY");
 
+        let is_mode_drd = if let Some(GHWPARAMS0::MODE::Value::DRD) = self
+            .dwc_regs
+            .globals()
+            .ghwparams0
+            .read_as_enum(GHWPARAMS0::MODE)
+        {
+            true
+        } else {
+            false
+        };
+
         // === USB3 PHY 配置 ===
         let mut gusb3 = self.dwc_regs.globals().gusb3pipectl0.extract();
 
@@ -364,6 +375,10 @@ impl Dwc {
          */
         if self.revistion > DWC3_REVISION_194A {
             gusb3.modify(GUSB3PIPECTL::SUSPHY::Enable);
+        }
+
+        if is_mode_drd {
+            gusb3.modify(GUSB3PIPECTL::SUSPHY::Disable);
         }
 
         if self.u2ss_inp3_quirk {
@@ -424,12 +439,18 @@ impl Dwc {
             gusb2.modify(GUSB2PHYCFG::SUSPHY::Enable);
         }
 
+        if is_mode_drd {
+            gusb2.modify(GUSB2PHYCFG::SUSPHY::Disable);
+        }
+
         if self.dis_u2_susphy_quirk {
             gusb2.modify(GUSB2PHYCFG::SUSPHY::Disable);
         }
 
         if self.dis_enblslpm_quirk {
             gusb2.modify(GUSB2PHYCFG::ENBLSLPM::Disable);
+        } else {
+            gusb2.modify(GUSB2PHYCFG::ENBLSLPM::Enable);
         }
 
         if self.dis_u2_freeclk_exists_quirk {
@@ -440,7 +461,13 @@ impl Dwc {
             // 清除 PHYIF 和 USBTRDTIM 字段
             gusb2.modify(
                 GUSB2PHYCFG::PHYIF.val(1) + // UTMI_PHYIF_16_BIT
-                GUSB2PHYCFG::USBTRDTIM.val(9), // USBTRDTIM_UTMI_16_BIT
+                GUSB2PHYCFG::USBTRDTIM.val(5), // USBTRDTIM_UTMI_16_BIT
+            );
+        } else {
+            // 清除 PHYIF 和 USBTRDTIM 字段
+            gusb2.modify(
+                GUSB2PHYCFG::PHYIF.val(0) + // UTMI_PHYIF_8_BIT
+                GUSB2PHYCFG::USBTRDTIM.val(9), // USBTRDTIM_UTMI_8_BIT
             );
         }
 
