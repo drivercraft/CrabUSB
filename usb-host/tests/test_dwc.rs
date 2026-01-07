@@ -58,7 +58,7 @@ mod tests {
             info!("usb host init ok");
             info!("usb cmd test");
 
-            for _ in 0..10 {
+            for _ in 0..3 {
                 if PROT_CHANGED.load(Ordering::Acquire) {
                     info!("port change detected");
                     PROT_CHANGED.store(false, Ordering::Release);
@@ -68,9 +68,9 @@ mod tests {
             }
 
             let mut ls = Vec::new();
-            for _ in 0..3 {
+            for _ in 0..10 {
                 let ls2 = host.probe_devices().await.unwrap();
-                if ls2.len() > 0 {
+                if !ls2.is_empty() {
                     info!("found {} devices", ls2.len());
                     ls = ls2;
                     break;

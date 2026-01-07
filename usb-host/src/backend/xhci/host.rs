@@ -167,7 +167,7 @@ impl Xhci {
 
         for cap in self.extended_capabilities() {
             if let ExtendedCapability::UsbLegacySupport(usb_legacy_support) = cap {
-                self.legacy_init(usb_legacy_support).await?;
+                // self.legacy_init(usb_legacy_support).await?;
             }
         }
 
