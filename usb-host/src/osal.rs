@@ -8,8 +8,6 @@ pub trait Kernel {
     fn delay(duration: Duration);
 }
 
-
-
 pub struct SpinWhile<F>
 where
     F: Fn() -> bool,

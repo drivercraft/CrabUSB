@@ -8,7 +8,4 @@ pub trait EndpointKernel {
         dir: Direction,
         buff: Option<(usize, usize)>,
     ) -> impl Future<Output = Result<usize, TransferError>> + Send;
-
-
 }
-

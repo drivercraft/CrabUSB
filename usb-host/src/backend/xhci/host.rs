@@ -461,14 +461,16 @@ impl Xhci {
             let port_reg = regs.port_register_set.read_volatile_at(i);
 
             info!("Port {} initial status:", i);
-            info!("  Current Connect Status: {}",
-                port_reg.portsc.current_connect_status());
-            info!("  Port Enabled: {}",
-                port_reg.portsc.port_enabled_disabled());
-            info!("  Port Speed: {}",
-                port_reg.portsc.port_speed());
-            info!("  Port Power: {}",
-                port_reg.portsc.port_power());
+            info!(
+                "  Current Connect Status: {}",
+                port_reg.portsc.current_connect_status()
+            );
+            info!(
+                "  Port Enabled: {}",
+                port_reg.portsc.port_enabled_disabled()
+            );
+            info!("  Port Speed: {}", port_reg.portsc.port_speed());
+            info!("  Port Power: {}", port_reg.portsc.port_power());
 
             self.port_status.push(ProtStaus::Uninit);
             debug!("Port {} start reset", i);

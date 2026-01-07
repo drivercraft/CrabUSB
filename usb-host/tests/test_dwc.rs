@@ -49,6 +49,7 @@ mod tests {
     fn test_all() {
         // enable_clk();
         enable_power();
+        enable_vbus();
 
         spin_on::spin_on(async {
             let info = get_usb_host();
@@ -582,6 +583,45 @@ mod tests {
         let end = (end + page_size() - 1) & !(page_size() - 1);
         info!("Aligned Syscon address range: 0x{:x} - 0x{:x}", start, end);
         iomap(start.into(), end - start)
+    }
+
+    fn enable_vbus() {
+        // GPIO4 寄存器偏移定义
+        const GPIO_SWPORT_DR_L: usize = 0x0000; // 数据寄存器低 16 位
+        const GPIO_SWPORT_DR_H: usize = 0x0004; // 数据寄存器高 16 位
+        const GPIO_SWPORT_DDR_L: usize = 0x0008; // 方向寄存器低 16 位
+        const GPIO_SWPORT_DDR_H: usize = 0x000C; // 方向寄存器高 16 位
+
+        // GPIO 引脚 bit 8 的值（Rockchip GRF 格式：Bit[31:16] 是写使能掩码，Bit[15:0] 是数据值）
+        // 0x01000100 = (0x0100 << 16) | 0x0100，控制 bit 8
+        const GPIO_BIT8_VALUE: u32 = (0x0100u32 << 16) | 0x0100u32;
+
+        // 映射 GPIO4 寄存器基址
+        let gpio_base = iomap(0xFEC50000.into(), 0x1000);
+
+        // 配置 GPIO4_B0 和 GPIO4_D0 为输出模式（DDR 寄存器）
+        let ddr_l = (gpio_base.as_ptr() as usize + GPIO_SWPORT_DDR_L) as *mut u32;
+        let ddr_h = (gpio_base.as_ptr() as usize + GPIO_SWPORT_DDR_H) as *mut u32;
+
+        unsafe {
+            // 设置 GPIO4_B0 方向为输出
+            ddr_l.write_volatile(GPIO_BIT8_VALUE);
+            // 设置 GPIO4_D0 方向为输出
+            ddr_h.write_volatile(GPIO_BIT8_VALUE);
+        }
+
+        // 设置 GPIO4_B0 和 GPIO4_D0 输出高电平（DR 寄存器）
+        let dr_l = (gpio_base.as_ptr() as usize + GPIO_SWPORT_DR_L) as *mut u32;
+        let dr_h = (gpio_base.as_ptr() as usize + GPIO_SWPORT_DR_H) as *mut u32;
+
+        unsafe {
+            // 设置 GPIO4_B0 输出高电平
+            dr_l.write_volatile(GPIO_BIT8_VALUE);
+            // 设置 GPIO4_D0 输出高电平
+            dr_h.write_volatile(GPIO_BIT8_VALUE);
+        }
+
+        info!("VBUS power enabled: GPIO4_B0 and GPIO4_D0 set high");
     }
 }
 

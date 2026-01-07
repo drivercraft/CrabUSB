@@ -72,7 +72,6 @@ pub trait DeviceOp: Send + 'static {
 
 pub trait EndpintOp: Send + 'static {
     type Transfer: TransferOp;
-    
 }
 
 pub trait TransferOp: Send + 'static {

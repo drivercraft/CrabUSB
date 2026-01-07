@@ -6,7 +6,10 @@ use crate::device::*;
 use crate::err::Result;
 
 pub use crate::backend::{
-    dwc::{CruOp, Dwc, DwcNewParams, DwcParams, UdphyParam, UsbPhyInterfaceMode, Usb2PhyParam, Usb2PhyPortId},
+    dwc::{
+        CruOp, Dwc, DwcNewParams, DwcParams, UdphyParam, Usb2PhyParam, Usb2PhyPortId,
+        UsbPhyInterfaceMode,
+    },
     xhci::Xhci,
 };
 
