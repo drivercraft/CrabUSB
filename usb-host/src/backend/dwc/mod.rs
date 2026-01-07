@@ -33,6 +33,9 @@ pub use crate::backend::xhci::*;
 use device::DeviceInfo;
 use host::EventHandler;
 
+use usb2phy::Usb2Phy;
+pub use usb2phy::{Usb2PhyParam, Usb2PhyPortId};
+
 /// USB PHY 接口模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UsbPhyInterfaceMode {
@@ -69,6 +72,7 @@ pub struct DwcNewParams<'a, C: CruOp> {
     pub ctrl: Mmio,
     pub phy: Mmio,
     pub phy_param: UdphyParam<'a>,
+    pub usb2_phy_param: Usb2PhyParam<'a>,
     pub cru: C,
     pub rst_list: &'a [(&'a str, u64)],
     pub dma_mask: usize,
@@ -119,8 +123,8 @@ pub struct DwcParams {
 /// 全局寄存器区域 (0xc100 - 0xcfff) 包含 DWC3 特定配置。
 pub struct Dwc {
     xhci: Xhci,
-    phy: Udphy,
-    // usb2_phy: Usb2Phy,
+    usb3_phy: Udphy,
+    usb2_phy: Usb2Phy,
     dwc_regs: Dwc3Regs,
     cru: Arc<dyn CruOp>,
     rsts: BTreeMap<String, u64>,
@@ -138,6 +142,7 @@ impl Dwc {
         let cru = Arc::new(params.cru);
 
         let phy = Udphy::new(params.phy, cru.clone(), params.phy_param);
+        let usb2_phy = Usb2Phy::new(cru.clone(), params.usb2_phy_param);
 
         let xhci = Xhci::new(params.ctrl, params.dma_mask)?;
 
@@ -151,7 +156,8 @@ impl Dwc {
         Ok(Self {
             xhci,
             dwc_regs,
-            phy,
+            usb3_phy: phy,
+            usb2_phy,
             cru,
             rsts,
             ev_buffs: vec![],
@@ -159,7 +165,6 @@ impl Dwc {
             nr_scratch: 0,
             params: params.params,
             scratchbuf: None,
-            // usb2_phy,
         })
     }
 
@@ -524,7 +529,10 @@ impl Dwc {
         info!("GUSB3PIPECTL = {:#010x}", gusb3_val);
         info!("  SUSPHY      = {}", gusb3.is_set(GUSB3PIPECTL::SUSPHY));
         info!("  U2SSINP3OK  = {}", gusb3.is_set(GUSB3PIPECTL::U2SSINP3OK));
-        info!("  REQP0P1P2P3 = {}", gusb3.is_set(GUSB3PIPECTL::REQP0P1P2P3));
+        info!(
+            "  REQP0P1P2P3 = {}",
+            gusb3.is_set(GUSB3PIPECTL::REQP0P1P2P3)
+        );
         info!("  DEP1P2P3    = {}", gusb3.is_set(GUSB3PIPECTL::DEP1P2P3));
 
         // 检查 GUSB2PHYCFG
@@ -534,7 +542,11 @@ impl Dwc {
         info!("  SUSPHY      = {}", gusb2.is_set(GUSB2PHYCFG::SUSPHY));
         info!("  ENBLSLPM    = {}", gusb2.is_set(GUSB2PHYCFG::ENBLSLPM));
         let phyif = gusb2.read(GUSB2PHYCFG::PHYIF);
-        info!("  PHYIF       = {} ({}-bit)", phyif, if phyif == 0 { 8 } else { 16 });
+        info!(
+            "  PHYIF       = {} ({}-bit)",
+            phyif,
+            if phyif == 0 { 8 } else { 16 }
+        );
         let usbtrdtim = gusb2.read(GUSB2PHYCFG::USBTRDTIM);
         info!("  USBTRDTIM   = {}", usbtrdtim);
 
@@ -588,8 +600,10 @@ impl HostOp for Dwc {
         }
 
         crate::osal::kernel::delay(core::time::Duration::from_millis(1));
+        // 初始化 USB2 PHY（需要在 xHCI HCRST 之前）
+        self.usb2_phy.setup().await?;
 
-        self.phy.setup().await?;
+        self.usb3_phy.setup().await?;
 
         for &id in self.rsts.values() {
             self.cru.reset_deassert(id);

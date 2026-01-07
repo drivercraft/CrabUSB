@@ -1,6 +1,6 @@
 use crate::{
     Mmio,
-    backend::dwc::udphy::{config::UdphyGrfReg, consts::genmask},
+    backend::dwc::{consts::genmask, udphy::config::UdphyGrfReg},
 };
 
 #[derive(Clone, Copy)]
@@ -18,7 +18,7 @@ impl Regmap {
         self.reg_write(reg.offset, val);
     }
 
-    fn reg_read(&self, offset: u32) -> u32 {
+    pub fn reg_read(&self, offset: u32) -> u32 {
         let addr = (self.0 + offset as usize) as *const u32;
         unsafe { addr.read_volatile() }
     }

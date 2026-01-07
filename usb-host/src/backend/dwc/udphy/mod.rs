@@ -16,9 +16,9 @@ use crate::{
     osal::SpinWhile,
 };
 
-mod config;
+pub mod config;
 mod consts;
-mod regmap;
+pub mod regmap;
 
 use consts::*;
 use tock_registers::{interfaces::*, registers::*};

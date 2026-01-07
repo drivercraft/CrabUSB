@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 CrabUSB 是一个为嵌入式系统和操作系统内核设计的高性能异步 USB 主机驱动程序，使用 Rust 编写。该项目采用**无锁设计**，基于 TRB (Transfer Request Block) 环形结构，每个 TRB 代表一个异步任务。
 
 ### 核心特性
+
 - **Async/Await 支持**: 从头开始使用 async 原语构建非阻塞 USB 操作
 - **无锁设计**: 基于 TRB 环形架构，零锁异步操作
 - **xHCI 控制器支持**: 完整实现 xHCI (可扩展主机控制器接口) 规范
@@ -40,6 +41,19 @@ CrabUSB/
     └── uvc-frame-parser/ # UVC 帧解析工具
 ```
 
+## 必须遵守
+
+修改完代码后，确保 `cargo check -p crab-usb --test test --target aarch64-unknown-none-softfloat` 可以通过，
+执行 `cargo fmt --all` 保持代码风格一致。
+使用最新版本的依赖库，use context7 查询使用方法。
+
+## 参考资料
+
+rockchip 文档： `.spec-workflow/Rockchip_RK3588_TRM_V1.0-Part2.md`
+设备树：`/home/zhourui/opensource/proj_usb/u-boot-orangepi/orangepi5plus.dts`
+u-boot: `/home/zhourui/opensource/proj_usb/u-boot-orangepi`
+linux: `/home/zhourui/orangepi-build/kernel/orange-pi-6.1-rk35xx`
+
 ## 常用开发命令
 
 ### 构建与测试
@@ -58,19 +72,6 @@ cargo test -p crab-usb --features libusb --test test
 cargo run -p uvc-frame-parser -- -l target/uvc.log -o target/output
 ```
 
-### 系统依赖
-
-```bash
-# 安装 libusb 开发文件
-sudo apt install libudev-dev
-
-# 安装 ostool (用于 OS 测试)
-cargo install ostool
-
-# QEMU 要求 (aarch64)
-qemu-system-aarch64 --version
-```
-
 ### 目标平台
 
 - **默认目标**: `aarch64-unknown-none-softfloat`
@@ -84,6 +85,7 @@ qemu-system-aarch64 --version
 `usb-host/src/backend/` 提供了硬件抽象:
 
 - **xHCI**: 直接硬件访问，用于嵌入式系统和 OS 内核
+
   - `mod.rs`: `Xhci` 结构体实现 `usb_if::host::Controller` trait
   - `ring/`: TRB 环形管理，核心异步机制
   - `event.rs`: 事件处理和中断管理

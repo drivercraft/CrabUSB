@@ -1,10 +1,6 @@
 use tock_registers::register_bitfields;
 
-pub const fn genmask(high: u32, low: u32) -> u64 {
-    assert!(high < 64 && low < 64);
-    assert!(high >= low);
-    (u64::MAX << low) & (u64::MAX >> (63 - high))
-}
+use crate::backend::dwc::consts::genmask;
 
 pub const CMN_LANE_MUX_AND_EN_OFFSET: u32 = 0x0288;
 

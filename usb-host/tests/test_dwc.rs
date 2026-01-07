@@ -6,7 +6,11 @@ use rdrive::{Phandle, PlatformDevice, probe::OnProbeError, register::FdtInfo};
 
 extern crate alloc;
 
-use alloc::{boxed::Box, string::ToString, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec::Vec,
+};
 use bare_test::{
     GetIrqConfig,
     async_std::time::sleep,
@@ -238,12 +242,54 @@ mod tests {
                     .u32_list()
                     .collect::<Vec<_>>();
 
+                // === USB2PHY 解析（phys[0]）===
+                let u2phy_ph = phys[0].into();
+                debug!("u2phy phandle: {}", u2phy_ph);
+                let (u2_port_name, u2phy_pls) = find_phy_u2(u2phy_ph);
+
+                let usbphy_grf = get_grf(u2phy_pls[0]);
+                debug!("usb2phy-grf at {:p}", usbphy_grf.as_ptr());
+
+                let u2_phy_node = fdt
+                    .get_node_by_phandle(u2phy_pls[1])
+                    .expect("Failed to find u2phy node");
+
+                info!("Found USB2PHY node: {}", u2_phy_node.name());
+
+                info!("u2phy port: {}", u2_port_name);
+
+                let u2phy_reg = u2_phy_node.reg().unwrap().collect::<Vec<_>>().remove(0);
+                let usb2phy_reg = u2phy_reg.address as usize;
+
+                // // 解析 USB2PHY GRF
+                // let usbctrl_grf_ph = u2_phy_node
+                //     .find_property("rockchip,usbctrl-grf")
+                //     .unwrap()
+                //     .u32()
+                //     .into();
+                // let usbctrl_grf = get_grf(usbctrl_grf_ph);
+
+                // 解析 USB2PHY resets
+                let mut u2phy_rst_list = Vec::new();
+                if let Some(resets_prop) = u2_phy_node.find_property("resets") {
+                    let resets = resets_prop.u32_list().collect::<Vec<_>>();
+                    if let Some(reset_names_prop) = u2_phy_node.find_property("reset-names") {
+                        let reset_names = reset_names_prop.str_list().collect::<Vec<_>>();
+                        for (cell, &name) in resets.chunks(2).zip(reset_names.iter()) {
+                            u2phy_rst_list.push((name, cell[1] as u64));
+                        }
+                    }
+                }
+
+                // === USB3PHY 解析（phys[1]）===
                 let u3phy_ph = phys[1].into();
                 debug!("u3phy phandle: {}", u3phy_ph);
 
                 // let phy_phandle = Phandle::from(0x495);
-                let phy_node = find_phy(u3phy_ph);
+                let phy_node = find_phy_udp(u3phy_ph);
                 let phy_id = phy_node.id;
+
+                // 获取 USB2PHY ID
                 let phy_phandle = phy_node.phandle;
 
                 debug!("u3phy id: {}, phandle: {}", phy_id, phy_phandle);
@@ -310,11 +356,10 @@ mod tests {
 
                 // 完全按照 U-Boot 的逻辑处理 dp-lane-mux
                 // 如果设备树中没有 rockchip,dp-lane-mux 属性，则使用纯 USB 模式
-                let dp_lane_mux: Vec<u32> = match u3_phy_node
-                    .find_property("rockchip,dp-lane-mux")
+                let dp_lane_mux: Vec<u32> = match u3_phy_node.find_property("rockchip,dp-lane-mux")
                 {
                     Some(prop) => prop.u32_list().collect(), // 有属性 → 读取 lane 配置
-                    None => Vec::new(),                              // 无属性 → 纯 USB 模式
+                    None => Vec::new(),                      // 无属性 → 纯 USB 模式
                 };
 
                 let mut phy_rst_list = Vec::new();
@@ -438,6 +483,14 @@ mod tests {
                             vo_grf,
                             dp_lane_mux: &dp_lane_mux,
                             rst_list: &phy_rst_list,
+                        },
+
+                        usb2_phy_param: Usb2PhyParam {
+                            reg: usb2phy_reg,
+                            port_kind: Usb2PhyPortId::from_node_name(&u2_port_name)
+                                .expect("Unknown USB2PHY port name"),
+                            usb_grf: usbphy_grf,
+                            rst_list: &u2phy_rst_list,
                         },
                         rst_list: &rst_list,
                         cru: CruOpImpl,
@@ -603,7 +656,7 @@ pub struct PhyNode {
     pub phandle: Phandle,
 }
 
-pub fn find_phy(ph: Phandle) -> PhyNode {
+pub fn find_phy_udp(ph: Phandle) -> PhyNode {
     let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
     let fdt = fdt.get();
 
@@ -643,6 +696,34 @@ pub fn find_phy(ph: Phandle) -> PhyNode {
         }
     }
     panic!("no phy node found");
+}
+
+pub fn find_phy_u2(ph: Phandle) -> (String, [Phandle; 3]) {
+    let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
+    let fdt = fdt.get();
+
+    debug!("search phy node by {ph}");
+    let iter = fdt.all_nodes();
+    let mut out = [Phandle::from(0); 3];
+    for node in iter {
+        if let Some(p) = node.phandle() {
+            if node
+                .compatibles()
+                .any(|c| c == "rockchip,rk3588-usb2phy-grf")
+            {
+                out[0] = p;
+            }
+            if node.compatibles().any(|c| c == "rockchip,rk3588-usb2phy") {
+                out[1] = p;
+            }
+            if p == ph {
+                out[2] = p;
+                return (node.name().to_string(), out);
+            }
+        }
+    }
+
+    panic!("no phy2 node found");
 }
 
 fn fdt_iter_find<'a>(

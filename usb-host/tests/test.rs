@@ -17,6 +17,7 @@ mod tests {
         mem::{iomap, page_size},
         platform::fdt::GetPciIrqConfig,
         println,
+        time::spin_delay,
     };
     use core::{
         hint::spin_loop,
@@ -170,12 +171,16 @@ mod tests {
 
     struct KernelImpl;
     impl_trait! {
-        impl Kernel for KernelImpl {
-            fn page_size() -> usize {
-                page_size()
-            }
-        }
+           impl Kernel for KernelImpl {
+               fn page_size() -> usize {
+                   page_size()
+               }
+    fn delay(duration: Duration){
+                   spin_delay(duration);
     }
+
+           }
+       }
 
     struct XhciInfo {
         usb: USBHost<Xhci>,

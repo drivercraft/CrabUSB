@@ -1,123 +1,286 @@
-//! RK3588 USB2 PHY 最小化驱动
+//! RK3588 USB2 PHY 驱动
 //!
-//! 这个模块提供 USB2 PHY 的最小化初始化，只用于启动时钟输出。
-//! USB2 PHY 输出 480MHz 时钟给 DWC3 控制器，这是 PHY 寄存器可访问的必要条件。
+//! 这个模块提供 USB2 PHY 的完整初始化功能，包括 RK3588 特定的 PHY 调优。
+//! 参照 U-Boot 的 `drivers/phy/phy-rockchip-inno-usb2.c` 实现。
 
-use crate::Mmio;
+use core::time::Duration;
 
-/// RK3588 USB2 PHY 寄存器偏移
-#[allow(dead_code)]
-#[repr(u32)]
-enum RegOffset {
-    /// 主机/设备配置寄存器
-    Usb2PhyCfg = 0x00,
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::sync::Arc;
+
+use crate::{
+    Mmio,
+    backend::dwc::{
+        CruOp,
+        consts::genmask,
+        udphy::{config::UdphyGrfReg, regmap::Regmap},
+    },
+    err::Result,
+};
+
+/// USB2PHY 寄存器偏移
+pub mod reg_offset {
+
+    /// HS DC 电压电平调整
+    pub const HS_DC_LEVEL: u32 = 0x0004;
+    /// 时钟控制和预加重配置
+    pub const CLK_CONTROL: u32 = 0x0008;
+    /// 挂起控制
+    pub const SUSPEND_CONTROL: u32 = 0x000c;
 }
 
-/// USB2 PHY 最小化驱动
+/// USB2PHY GRF 寄存器配置（复用 UdphyGrfReg）
+///
+/// 对应 U-Boot 的 `struct usb2phy_reg`
+pub type Usb2PhyGrfReg = UdphyGrfReg;
+
+#[derive(Debug, Clone, Copy)]
+#[repr(usize)]
+pub enum Usb2PhyPortId {
+    Otg,
+    Host,
+    Ports,
+}
+
+impl Usb2PhyPortId {
+    pub fn from_node_name(name: &str) -> Option<Self> {
+        match name {
+            "otg-port" => Some(Usb2PhyPortId::Otg),
+            "host-port" => Some(Usb2PhyPortId::Host),
+            _ => None,
+        }
+    }
+}
+
+/// USB2PHY 端口配置
+///
+/// 对应 U-Boot 的 `struct rockchip_usb2phy_port_cfg`
+#[derive(Clone)]
+pub struct Usb2PhyPortCfg {
+    /// PHY 挂起控制
+    pub phy_sus: Usb2PhyGrfReg,
+    /// UTMI 线路状态
+    pub utmi_ls: Usb2PhyGrfReg,
+    /// UTMI IDDIG 状态（OTG 模式，HOST 模式为 None）
+    pub utmi_iddig: Usb2PhyGrfReg,
+}
+
+impl Usb2PhyPortCfg {
+    pub const fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+/// USB2PHY 配置
+///
+/// 对应 U-Boot 的 `struct rockchip_usb2phy_cfg`
+#[derive(Clone)]
+pub struct Usb2PhyCfg {
+    pub reg: usize,
+    pub clkout_ctl: Usb2PhyGrfReg,
+    /// 端口配置
+    pub port_cfg: [Usb2PhyPortCfg; Usb2PhyPortId::Ports as usize],
+    /// PHY 调优函数指针（可选，针对特定 SoC）
+    pub phy_tuning: fn(&Usb2Phy) -> Result<()>,
+}
+
+/// USB2PHY 初始化参数
+///
+/// 对应从设备树解析的信息
+pub struct Usb2PhyParam<'a> {
+    pub reg: usize,
+    pub port_kind: Usb2PhyPortId,
+    pub usb_grf: Mmio,
+    /// 复位列表
+    pub rst_list: &'a [(&'a str, u64)],
+}
+
+/// RK3588 USB2 PHY 驱动
 pub struct Usb2Phy {
-    base: usize,
+    grf: Regmap,
+    port_kind: Usb2PhyPortId,
+    /// 配置数据（共享引用）
+    cfg: &'static Usb2PhyCfg,
+    /// CRU 接口（用于复位控制）
+    cru: Arc<dyn CruOp>,
+    /// 复位信号映射表
+    rsts: BTreeMap<String, u64>,
 }
 
 impl Usb2Phy {
-    /// 创建新的 USB2 PHY 实例
+    /// 创建新的 USB2 PHY 实例（完整初始化）
     ///
-    /// # Safety
+    /// # Arguments
     ///
-    /// 调用者必须确保 `mmio_base` 指向有效的内存映射寄存器区域
-    pub unsafe fn new(mmio_base: Mmio) -> Self {
-        Self {
-            base: mmio_base.as_ptr() as usize,
+    /// * `base` - PHY 寄存器基址
+    /// * `cru` - CRU 接口
+    /// * `param` - 初始化参数
+    pub fn new(cru: Arc<dyn CruOp>, param: Usb2PhyParam<'_>) -> Self {
+        // 根据 ID 选择对应的配置
+        let cfg = find_usb2phy_cfg(param.reg);
+        // 构建复位映射表
+        let mut rsts = BTreeMap::new();
+        for &(name, id) in param.rst_list.iter() {
+            rsts.insert(String::from(name), id);
+        }
+
+        Usb2Phy {
+            grf: Regmap::new(param.usb_grf),
+            cfg,
+            cru,
+            rsts,
+            port_kind: param.port_kind,
         }
     }
 
-    /// 最小化初始化（仅用于启动时钟）
+    fn write_reg(&self, offset: u32, value: u32) {
+        self.grf.reg_write(offset, value);
+    }
+
+    fn read_reg(&self, offset: u32) -> u32 {
+        self.grf.reg_read(offset)
+    }
+
+    /// 完整初始化 USB2 PHY
     ///
-    /// USB2 PHY 需要输出 480MHz 时钟给 DWC3 控制器。
-    ///
-    /// 注意：这是一个最小化实现，只做最基本的事情来启动时钟。
-    /// 完整的 USB2 功能需要完整的 PHY 初始化。
-    ///
-    /// ## UTMI 时钟验证
-    ///
-    /// 参考 u-boot 初始化流程，USB2 PHY 初始化后应该输出 UTMI 480MHz 时钟。
-    /// 这里检查 PHY 的基本状态以验证时钟可能正在运行。
-    pub fn init_minimal(&self) {
-        log::info!("USB2PHY@{:x}: Minimal initialization (clock enable only)", self.base);
+    /// 对应 U-Boot 的 `rockchip_usb2phy_init()`，执行完整的 PHY 初始化流程：
+    /// 1. PHY 特定调优（RK3588 电压校准、预加重等）
+    /// 2. 退出 PHY 挂起模式
+    /// 3. 等待 UTMI 时钟稳定
+    pub async fn setup(&mut self) -> Result<()> {
+        info!("USB2PHY: Starting initialization");
 
-        // 读取当前配置
-        let cfg_reg = unsafe { (self.base + RegOffset::Usb2PhyCfg as usize) as *const u32 };
-        let cfg_val = unsafe { cfg_reg.read_volatile() };
+        // Step 1: 执行 PHY 调优（如果配置了）
+        (self.cfg.phy_tuning)(self)?;
 
-        log::debug!("USB2PHY@{:x}: CFG before: {:#08x}", self.base, cfg_val);
+        self.init();
 
-        // RK3588 USB2 PHY 在复位后应该自动启动时钟输出
-        // 我们不需要做任何特殊配置，只需确保 PHY 不在低功耗模式
+        self.power_on();
+        Ok(())
+    }
 
-        // 检查 PHY 是否处于低功耗模式
-        // bit[15] = PHY_SUSPEND
-        let phy_suspend = (cfg_val >> 15) & 0x1;
-
-        if phy_suspend != 0 {
-            log::warn!("USB2PHY@{:x}: PHY is in suspend mode, attempting to wake", self.base);
-
-            // 写入 0 来退出 suspend 模式
-            // 注意：具体实现可能需要更复杂的操作
-            unsafe {
-                let reg = (self.base + RegOffset::Usb2PhyCfg as usize) as *mut u32;
-                reg.write_volatile(cfg_val & !(1 << 15));
+    fn init(&self) {
+        info!("USB2PHY: init with port kind {:?}", self.port_kind);
+        let port_cfg = match self.port_kind {
+            Usb2PhyPortId::Otg => &self.cfg.port_cfg[Usb2PhyPortId::Otg as usize],
+            Usb2PhyPortId::Host => &self.cfg.port_cfg[Usb2PhyPortId::Host as usize],
+            Usb2PhyPortId::Ports => {
+                unreachable!()
             }
+        };
 
-            log::info!("USB2PHY@{:x}: Woke from suspend mode", self.base);
-        } else {
-            log::info!("USB2PHY@{:x}: PHY is active (not suspended)", self.base);
-        }
+        self.property_enable(&port_cfg.phy_sus, false);
 
-        // 读取配置后的值
-        let cfg_after = unsafe { cfg_reg.read_volatile() };
-        log::debug!("USB2PHY@{:x}: CFG after: {:#08x}", self.base, cfg_after);
+        // Step 3: 等待 UTMI 时钟稳定（U-Boot 中等待 2ms）
+        info!("USB2PHY: Waiting for UTMI clock to stabilize",);
+        crate::osal::kernel::delay(core::time::Duration::from_micros(2000));
+    }
 
-        // ⚠️ 新增：验证 UTMI 时钟状态
-        // USB2 PHY 初始化后应该输出 480MHz UTMI 时钟
-        // 检查 PHY 的关键位以验证时钟可能正在运行：
-        // - bit[15]: PHY_SUSPEND (应该为 0)
-        // - bit[1]: PORT_ENABLE (可能被 GRF 控制)
-        // - bit[0]: PORT_SUSPEND (可能被 GRF 控制)
-        let suspend_after = (cfg_after >> 15) & 0x1;
-        let port_enable = (cfg_after >> 1) & 0x1;
-        let port_suspend = cfg_after & 0x1;
+    fn property_enable(&self, reg: &Usb2PhyGrfReg, en: bool) {
+        let mut tmp = if en { reg.enable } else { reg.disable };
+        let mask = genmask(reg.bitend, reg.bitstart) as u32;
+        let val = (tmp << reg.bitstart) | (mask << 16);
+        self.write_reg(reg.offset, val);
+    }
 
-        log::info!("USB2PHY@{:x}: PHY status check:", self.base);
-        log::info!("  - PHY_SUSPEND (bit[15]): {} (0=active, 1=suspend)", suspend_after);
-        log::info!("  - PORT_ENABLE (bit[1]):  {}", port_enable);
-        log::info!("  - PORT_SUSPEND (bit[0]): {}", port_suspend);
+    /// 执行 PHY 复位
+    ///
+    /// 复位时序：assert 20μs → deassert 100μs
+    fn reset(&self) {
+        // Assert reset
+        if let Some(&rst_id) = self.rsts.get("phy") {
+            self.cru.reset_assert(rst_id);
+            crate::osal::kernel::delay(core::time::Duration::from_micros(20));
 
-        // 如果 PHY 不在挂起模式，UTMI 时钟应该正在运行
-        if suspend_after == 0 {
-            log::info!("✓ USB2PHY@{:x}: PHY is active - UTMI 480MHz clock should be running", self.base);
-            log::info!("✓ USB2PHY@{:x}: Minimal init complete (480MHz clock should be running)", self.base);
-        } else {
-            log::warn!("⚠ USB2PHY@{:x}: PHY is still in suspend mode - UTMI clock may not be running!", self.base);
+            // Deassert reset
+            self.cru.reset_deassert(rst_id);
+            crate::osal::kernel::delay(core::time::Duration::from_micros(100));
         }
     }
 
-    /// 验证 UTMI 时钟状态
-    ///
-    /// 检查 USB2 PHY 是否正在运行，这间接表明 UTMI 480MHz 时钟可能正在输出。
-    ///
-    /// 注意：这是一个简化的检查。完整的验证需要检查 USB2PHY GRF 的端口使能状态。
-    pub fn verify_utmi_clock(&self) -> bool {
-        let cfg_reg = unsafe { (self.base + RegOffset::Usb2PhyCfg as usize) as *const u32 };
-        let cfg_val = unsafe { cfg_reg.read_volatile() };
-
-        // PHY 不在挂起模式表示时钟可能在运行
-        let phy_suspend = (cfg_val >> 15) & 0x1;
-
-        if phy_suspend == 0 {
-            log::debug!("USB2PHY@{:x}: UTMI clock verification passed - PHY is active", self.base);
-            true
-        } else {
-            log::warn!("USB2PHY@{:x}: UTMI clock verification failed - PHY is suspended", self.base);
-            false
-        }
-    }
+    fn power_on(&self) {}
 }
+
+/// RK3588 USB2PHY 调优函数
+///
+/// 对应 U-Boot 的 `rk3588_usb2phy_tuning()`，执行 RK3588 特定的 PHY 调优：
+/// 1. 退出 IDDQ 模式（低功耗）
+/// 2. 执行复位序列
+/// 3. HS DC 电压校准（+5.89%）
+/// 4. 预加重设置（2x）
+fn rk3588_usb2phy_tuning(phy: &Usb2Phy) -> Result<()> {
+    info!("USB2PHY: Applying RK3588-specific tuning");
+
+    // Step 1: 退出 IDDQ 模式
+    // U-Boot: regmap_write(base, 0x0008, GENMASK(29, 29) | 0x0000)
+    // Bit[29:29] = IDDQ
+    phy.write_reg(
+        reg_offset::CLK_CONTROL,
+        genmask(29, 29) as u32 | 0x0000, // mask=bit29, value=0
+    );
+
+    // Step 2: 执行复位
+    phy.reset();
+
+    // Step 3: HS DC 电压校准
+    // U-Boot: regmap_write(base, 0x0004, GENMASK(27, 24) | 0x0900)
+    // Bit[27:24] = HS_DC_LEVEL, 设置为 0b1001 (+5.89%)
+    phy.write_reg(
+        reg_offset::HS_DC_LEVEL,
+        genmask(27, 24) as u32 | 0x0900, // mask=bits[27:24], value=0x0900
+    );
+
+    // Step 4: 预加重设置
+    // U-Boot: regmap_write(base, 0x0008, GENMASK(20, 19) | 0x0010)
+    // Bit[20:19] = HS_TX_PREEMP, 设置为 0b10 (2x)
+    phy.write_reg(
+        reg_offset::CLK_CONTROL,
+        genmask(20, 19) as u32 | 0x0010, // mask=bits[20:19], value=0x0010
+    );
+    info!("USB2PHY: HS transmitter pre-emphasis set to 2x",);
+
+    Ok(())
+}
+
+fn find_usb2phy_cfg(reg: usize) -> &'static Usb2PhyCfg {
+    for c in RK3588_PHY_CFGS.iter() {
+        if c.reg == reg {
+            return c;
+        } else {
+            continue;
+        }
+    }
+    unreachable!("unsupported USB2PHY reg: {:#x}", reg)
+}
+
+const RK3588_PHY_CFGS: &[Usb2PhyCfg] = &[
+    Usb2PhyCfg {
+        reg: 0x0,
+        clkout_ctl: Usb2PhyGrfReg::new(0x0000, 0, 0, 1, 0),
+        port_cfg: [
+            // OTG 端口配置
+            Usb2PhyPortCfg {
+                phy_sus: Usb2PhyGrfReg::new(0x000c, 11, 11, 0, 1),
+                utmi_ls: Usb2PhyGrfReg::new(0x00c0, 10, 9, 0, 1),
+                utmi_iddig: Usb2PhyGrfReg::new(0x00c0, 5, 5, 0, 1),
+            },
+            Usb2PhyPortCfg::default(),
+        ],
+        phy_tuning: rk3588_usb2phy_tuning,
+    },
+    Usb2PhyCfg {
+        reg: 0x4000,
+        clkout_ctl: Usb2PhyGrfReg::new(0x0000, 0, 0, 1, 0),
+        port_cfg: [
+            // OTG 端口配置
+            Usb2PhyPortCfg {
+                phy_sus: Usb2PhyGrfReg::new(0x000c, 11, 11, 0, 0),
+                utmi_ls: Usb2PhyGrfReg::new(0x00c0, 10, 9, 0, 1),
+                utmi_iddig: Usb2PhyGrfReg::default(),
+            },
+            Usb2PhyPortCfg::default(),
+        ],
+        phy_tuning: rk3588_usb2phy_tuning,
+    },
+];

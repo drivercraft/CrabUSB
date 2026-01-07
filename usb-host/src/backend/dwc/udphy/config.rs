@@ -8,6 +8,28 @@ pub struct UdphyGrfReg {
     pub enable: u32,
 }
 
+impl UdphyGrfReg {
+    pub const fn new(offset: u32, bitend: u32, bitstart: u32, disable: u32, enable: u32) -> Self {
+        Self {
+            offset,
+            bitend,
+            bitstart,
+            disable,
+            enable,
+        }
+    }
+
+    pub const fn default() -> Self {
+        Self {
+            offset: 0,
+            bitend: 0,
+            bitstart: 0,
+            disable: 0,
+            enable: 0,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct UdphyCfg {
     pub rst_list: &'static [&'static str],
