@@ -227,6 +227,9 @@ impl Udphy {
         self.dplane_enable(dplanes);
         self.dplane_select();
 
+        // 打印寄存器状态以便验证
+        self.dump_registers();
+
         Ok(())
     }
 
@@ -402,6 +405,155 @@ impl Udphy {
             self.cru.reset_deassert(rst_id);
         } else {
             panic!("unsupported reset name: {}", name);
+        }
+    }
+
+    /// 打印 USB3/DP PHY 关键寄存器状态（用于调试）
+    fn dump_registers(&self) {
+        info!("=== USB3/DP PHY Register Dump ===");
+        info!("PHY ID: {}", self.id);
+        info!("PHY Mode: {:?}", self.mode);
+        info!("PHY Base: 0x{:08x}", self.phy_base);
+
+        // 打印 Lane MUX 配置
+        let lane_mux = self.cmn_lane_mux_and_en().extract();
+        info!("CMN_LANE_MUX_AND_EN = 0x{:08x}", lane_mux.get());
+        info!(
+            "  LANE0_MUX = {} ({})",
+            lane_mux.read(CMN_LANE_MUX_EN::LANE0_MUX),
+            self.lane_mux_name(lane_mux.read(CMN_LANE_MUX_EN::LANE0_MUX))
+        );
+        info!(
+            "  LANE1_MUX = {} ({})",
+            lane_mux.read(CMN_LANE_MUX_EN::LANE1_MUX),
+            self.lane_mux_name(lane_mux.read(CMN_LANE_MUX_EN::LANE1_MUX))
+        );
+        info!(
+            "  LANE2_MUX = {} ({})",
+            lane_mux.read(CMN_LANE_MUX_EN::LANE2_MUX),
+            self.lane_mux_name(lane_mux.read(CMN_LANE_MUX_EN::LANE2_MUX))
+        );
+        info!(
+            "  LANE3_MUX = {} ({})",
+            lane_mux.read(CMN_LANE_MUX_EN::LANE3_MUX),
+            self.lane_mux_name(lane_mux.read(CMN_LANE_MUX_EN::LANE3_MUX))
+        );
+        info!(
+            "  LANE0_EN = {}",
+            if lane_mux.read(CMN_LANE_MUX_EN::LANE0_EN) == 0 {
+                "Disabled"
+            } else {
+                "Enabled ✅"
+            }
+        );
+        info!(
+            "  LANE1_EN = {}",
+            if lane_mux.read(CMN_LANE_MUX_EN::LANE1_EN) == 0 {
+                "Disabled"
+            } else {
+                "Enabled ✅"
+            }
+        );
+        info!(
+            "  LANE2_EN = {}",
+            if lane_mux.read(CMN_LANE_MUX_EN::LANE2_EN) == 0 {
+                "Disabled"
+            } else {
+                "Enabled ✅"
+            }
+        );
+        info!(
+            "  LANE3_EN = {}",
+            if lane_mux.read(CMN_LANE_MUX_EN::LANE3_EN) == 0 {
+                "Disabled"
+            } else {
+                "Enabled ✅"
+            }
+        );
+
+        // 打印 PLL 锁定状态
+        let lcpll = self.cmn_ana_lcpll().extract();
+        info!("CMN_ANA_LCPLL_DONE = 0x{:08x}", lcpll.get());
+        info!(
+            "  AFC_DONE = {}",
+            if lcpll.is_set(CMN_ANA_LCPLL::AFC_DONE) {
+                "Locked ✅"
+            } else {
+                "Not Locked ❌"
+            }
+        );
+        info!(
+            "  LOCK_DONE = {}",
+            if lcpll.is_set(CMN_ANA_LCPLL::LOCK_DONE) {
+                "Locked ✅"
+            } else {
+                "Not Locked ❌"
+            }
+        );
+
+        // 打印 CDR 锁定状态（根据 flip 选择 lane 0 或 lane 2）
+        if self.mode.contains(UdphyMode::USB) {
+            if self.flip {
+                let cdr = self.trsv_ln2_mon_rx_cdr().extract();
+                info!("TRSV_LN2_MON_RX_CDR = 0x{:08x}", cdr.get());
+                info!(
+                    "  LOCK_DONE (Lane 2) = {}",
+                    if cdr.is_set(TRSV_LN2_MON_RX_CDR::LOCK_DONE) {
+                        "Locked ✅"
+                    } else {
+                        "Not Locked ❌"
+                    }
+                );
+            } else {
+                let cdr = self.trsv_ln0_mon_rx_cdr().extract();
+                info!("TRSV_LN0_MON_RX_CDR = 0x{:08x}", cdr.get());
+                info!(
+                    "  LOCK_DONE (Lane 0) = {}",
+                    if cdr.is_set(TRSV_LN0_MON_RX_CDR::LOCK_DONE) {
+                        "Locked ✅"
+                    } else {
+                        "Not Locked ❌"
+                    }
+                );
+            }
+        }
+
+        // 打印 DP Reset 状态
+        let dp_rstn = self.cmn_dp_rstn().extract();
+        info!("CMN_DP_RSTN = 0x{:08x}", dp_rstn.get());
+        info!(
+            "  DP_CMN_RSTN = {}",
+            if dp_rstn.read(CMN_DP_RSTN::DP_CMN_RSTN) == 1 {
+                "Released ✅"
+            } else {
+                "Asserted"
+            }
+        );
+        if self.mode.contains(UdphyMode::DP) {
+            info!(
+                "  DP_INIT_RSTN = {}",
+                if dp_rstn.read(CMN_DP_RSTN::DP_INIT_RSTN) == 1 {
+                    "Released ✅"
+                } else {
+                    "Asserted"
+                }
+            );
+        }
+
+        info!(
+            "  U3 Port Disable = {}",
+            !self.mode.contains(UdphyMode::USB)
+        );
+        info!("================================");
+    }
+
+    fn lane_mux_name(&self, val: u32) -> &'static str {
+        match val {
+            0 => "USB",
+            1 => "DP",
+            2 => "Reserved",
+            3 => "Reserved",
+            _ => "Unknown",
         }
     }
 }

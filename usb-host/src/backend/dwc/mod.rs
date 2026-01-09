@@ -457,19 +457,8 @@ impl Dwc {
             gusb2.modify(GUSB2PHYCFG::U2_FREECLK_EXISTS::No);
         }
 
-        if self.usb2_phyif_utmi_width == 16 {
-            // 清除 PHYIF 和 USBTRDTIM 字段
-            gusb2.modify(
-                GUSB2PHYCFG::PHYIF.val(1) + // UTMI_PHYIF_16_BIT
-                GUSB2PHYCFG::USBTRDTIM.val(5), // USBTRDTIM_UTMI_16_BIT
-            );
-        } else {
-            // 清除 PHYIF 和 USBTRDTIM 字段
-            gusb2.modify(
-                GUSB2PHYCFG::PHYIF.val(0) + // UTMI_PHYIF_8_BIT
-                GUSB2PHYCFG::USBTRDTIM.val(9), // USBTRDTIM_UTMI_8_BIT
-            );
-        }
+        // 注意：PHYIF 和 USBTRDTIM 已在 hsphy_mode_setup() 中配置
+        // 不要重复配置，避免覆盖正确的设置
 
         self.dwc_regs.globals().gusb2phycfg0.set(gusb2.get());
 

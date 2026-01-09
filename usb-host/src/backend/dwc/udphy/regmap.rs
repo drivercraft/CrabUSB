@@ -11,6 +11,10 @@ impl Regmap {
         Self(base.as_ptr() as usize)
     }
 
+    pub fn base(&self) -> usize {
+        self.0
+    }
+
     pub fn grfreg_write(&self, reg: &UdphyGrfReg, en: bool) {
         let mut tmp = if en { reg.enable } else { reg.disable };
         let mask = genmask(reg.bitend, reg.bitstart) as u32;

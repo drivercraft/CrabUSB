@@ -200,6 +200,54 @@ impl Usb2Phy {
     }
 
     fn power_on(&self) {}
+
+    /// 打印 USB2 PHY 关键寄存器状态（用于调试）
+    pub fn dump_registers(&self) {
+        info!("=== USB2 PHY Register Dump ===");
+        info!("PHY Base: 0x{:08x}", self.grf.base());
+
+        // 读取并解析 CLK_CONTROL 寄存器
+        let clk_ctrl = self.read_reg(reg_offset::CLK_CONTROL);
+        info!("CLK_CONTROL (0x0008) = 0x{:08x}", clk_ctrl);
+        info!(
+            "  IDDQ (bit 29)    = {} ({})",
+            (clk_ctrl >> 29) & 0x1,
+            if (clk_ctrl >> 29) & 0x1 == 0 {
+                "正常工作模式 ✅"
+            } else {
+                "IDDQ 低功耗模式 ❌"
+            }
+        );
+        info!(
+            "  HS_TX_PREEMP (bits 20:19) = {} ({})",
+            (clk_ctrl >> 19) & 0x3,
+            match (clk_ctrl >> 19) & 0x3 {
+                0b00 => "0x",
+                0b01 => "1x",
+                0b10 => "2x (推荐) ✅",
+                0b11 => "3x",
+                _ => "未知",
+            }
+        );
+
+        // 读取并解析 HS_DC_LEVEL 寄存器
+        let hs_dc = self.read_reg(reg_offset::HS_DC_LEVEL);
+        info!("HS_DC_LEVEL (0x0004) = 0x{:08x}", hs_dc);
+        info!(
+            "  HS_DC_LEVEL (bits 27:24) = 0x{:x} ({})",
+            (hs_dc >> 24) & 0xf,
+            match (hs_dc >> 24) & 0xf {
+                0x9 => "+5.89% (推荐) ✅",
+                _ => "其他值",
+            }
+        );
+
+        // 读取并解析 SUSPEND_CONTROL 寄存器
+        let suspend = self.read_reg(reg_offset::SUSPEND_CONTROL);
+        info!("SUSPEND_CONTROL (0x000c) = 0x{:08x}", suspend);
+        info!("  PHY_SUSPEND (bit 11) = {}", (suspend >> 11) & 0x1);
+        info!("=========================");
+    }
 }
 
 /// RK3588 USB2PHY 调优函数
@@ -239,6 +287,9 @@ fn rk3588_usb2phy_tuning(phy: &Usb2Phy) -> Result<()> {
         genmask(20, 19) as u32 | 0x0010, // mask=bits[20:19], value=0x0010
     );
     info!("USB2PHY: HS transmitter pre-emphasis set to 2x",);
+
+    // 打印寄存器状态以便验证
+    phy.dump_registers();
 
     Ok(())
 }
