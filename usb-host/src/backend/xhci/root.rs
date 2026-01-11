@@ -279,15 +279,28 @@ impl Root {
         let regs = &mut self.reg;
         let port_len = regs.port_register_set.len();
 
+        // Enable port power for all ports
         for i in 0..port_len {
-            debug!("Port {i} start reset",);
+            let portsc = regs.port_register_set.read_volatile_at(i).portsc;
+            if !portsc.port_power() {
+                regs.port_register_set.update_volatile_at(i, |port| {
+                    port.portsc.set_port_power();
+                });
+                for _ in 0..100000 {
+                    core::hint::spin_loop();
+                }
+            }
+        }
+
+        // Reset all ports
+        for i in 0..port_len {
             regs.port_register_set.update_volatile_at(i, |port| {
                 port.portsc.set_0_port_enabled_disabled();
                 port.portsc.set_port_reset();
             });
         }
 
-        // Wait for port reset completion with proper timing
+        // Wait for port reset completion
         for i in 0..port_len {
             let mut timeout = 0;
             while regs
@@ -298,28 +311,23 @@ impl Root {
             {
                 spin_loop();
                 timeout += 1;
-                // Add timeout protection to avoid infinite loop
                 if timeout > 100000 {
                     debug!("Port {i} reset timeout");
                     break;
                 }
             }
 
-            // After reset completion, wait for device to settle
-            // This is critical for device detection - Linux kernel waits ~50ms
-            // Reference: USB 2.0 spec requires minimum 10ms recovery time
-            // after port reset, but some devices need more time
+            // Wait for device to settle after reset
+            // USB 2.0 spec requires minimum 10ms recovery time
             let mut delay_count = 0;
             while delay_count < 50000 {
-                // ~50ms at typical CPU speeds
                 spin_loop();
                 delay_count += 1;
             }
 
-            debug!("Port {i} reset completed, checking status");
             let portsc = regs.port_register_set.read_volatile_at(i).portsc;
             debug!(
-                "Port {i} status after reset: enabled={}, connected={}, speed={}",
+                "Port {i}: enabled={}, connected={}, speed={}",
                 portsc.port_enabled_disabled(),
                 portsc.current_connect_status(),
                 portsc.port_speed()
