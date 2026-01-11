@@ -507,7 +507,10 @@ mod tests {
             let val: u32 = (0xFFFF << 16) | 0x1100;
             ptr.write_volatile(val);
             let con1 = (usbgrf_base.as_ptr().add(0x0034) as *const u32).read_volatile();
-            info!("USB_GRF USB3OTG1_CON1 set to {:#010x} (USB3 mode, host_num_u3_port=1)", con1);
+            info!(
+                "USB_GRF USB3OTG1_CON1 set to {:#010x} (USB3 mode, host_num_u3_port=1)",
+                con1
+            );
         }
 
         if let Err(e) = init_usb2phy1_full(fdt) {
@@ -554,9 +557,15 @@ mod tests {
         let pma_base_check = iomap(0xfed98000.into(), 0x10000);
         for i in 0..5 {
             spin_delay_ms(100);
-            let lcpll = unsafe { (pma_base_check.as_ptr().add(0x0350) as *const u32).read_volatile() };
+            let lcpll =
+                unsafe { (pma_base_check.as_ptr().add(0x0350) as *const u32).read_volatile() };
             let locked = (lcpll & 0xC0) == 0xC0;
-            info!("  {}ms: LCPLL={:#04x} locked={}", (i + 1) * 100, lcpll, locked);
+            info!(
+                "  {}ms: LCPLL={:#04x} locked={}",
+                (i + 1) * 100,
+                lcpll,
+                locked
+            );
             if !locked {
                 info!("  PHY PLL lost lock during wait!");
             }
@@ -577,12 +586,14 @@ mod tests {
         check_port_status("after warm reset");
         let grf_base2 = iomap(0xfd5d4000.into(), 0x8000);
         unsafe {
-            let read_grf = |off: usize| -> u32 {
-                (grf_base2.as_ptr().add(off) as *const u32).read_volatile()
-            };
+            let read_grf =
+                |off: usize| -> u32 { (grf_base2.as_ptr().add(off) as *const u32).read_volatile() };
             let phy_status0 = read_grf(0x4000 + 0xC0);
             let linestate = (phy_status0 >> 9) & 0x3;
-            info!("USB2PHY1 STATUS0 after wait: {:#010x} (linestate={:02b})", phy_status0, linestate);
+            info!(
+                "USB2PHY1 STATUS0 after wait: {:#010x} (linestate={:02b})",
+                phy_status0, linestate
+            );
         }
 
         info!("=== TRY #2: Port Power Cycle (PP bit toggle) ===");
@@ -594,18 +605,23 @@ mod tests {
             let val: u32 = (0xFFFF << 16) | 0x0188;
             ptr.write_volatile(val);
             let con1 = (usbgrf_base2.as_ptr().add(0x0034) as *const u32).read_volatile();
-            info!("USB_GRF USB3OTG1_CON1 set to {:#010x} (USB2-only mode, host_num_u3_port=0)", con1);
+            info!(
+                "USB_GRF USB3OTG1_CON1 set to {:#010x} (USB2-only mode, host_num_u3_port=0)",
+                con1
+            );
         }
         info!("Waiting 500ms for USB2 detection...");
         spin_delay_ms(500);
         check_port_status("after USB2-only mode switch");
         unsafe {
-            let read_grf = |off: usize| -> u32 {
-                (grf_base2.as_ptr().add(off) as *const u32).read_volatile()
-            };
+            let read_grf =
+                |off: usize| -> u32 { (grf_base2.as_ptr().add(off) as *const u32).read_volatile() };
             let phy_status0 = read_grf(0x4000 + 0xC0);
             let linestate = (phy_status0 >> 9) & 0x3;
-            info!("USB2PHY1 STATUS0 (USB2 mode): {:#010x} (linestate={:02b})", phy_status0, linestate);
+            info!(
+                "USB2PHY1 STATUS0 (USB2 mode): {:#010x} (linestate={:02b})",
+                phy_status0, linestate
+            );
         }
 
         info!("=== Restore USB3 mode ===");
@@ -614,7 +630,10 @@ mod tests {
             let val: u32 = (0xFFFF << 16) | 0x1100;
             ptr.write_volatile(val);
             let con1 = (usbgrf_base2.as_ptr().add(0x0034) as *const u32).read_volatile();
-            info!("USB_GRF USB3OTG1_CON1 restored to {:#010x} (USB3 mode)", con1);
+            info!(
+                "USB_GRF USB3OTG1_CON1 restored to {:#010x} (USB3 mode)",
+                con1
+            );
         }
 
         info!("=== TRY #4: VBUS GPIO Toggle (hardware power cycle) ===");
@@ -623,86 +642,95 @@ mod tests {
 
         dump_usb_debug_registers();
     }
-    
+
     fn try_force_rx_detect() {
         let xhci_base = iomap(USB3_1_BASE.into(), 0x10000);
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
         unsafe {
-            let read_pipe = || -> u32 {
-                (dwc3_base.add(GUSB3PIPECTL) as *const u32).read_volatile()
-            };
+            let read_pipe =
+                || -> u32 { (dwc3_base.add(GUSB3PIPECTL) as *const u32).read_volatile() };
             let write_pipe = |val: u32| {
                 (dwc3_base.add(GUSB3PIPECTL) as *mut u32).write_volatile(val);
             };
-            
+
             let pipe_before = read_pipe();
             info!("GUSB3PIPECTL before RxDet: {:#010x}", pipe_before);
-            
+
             let mut pipe = pipe_before;
             pipe |= GUSB3PIPECTL_STARTRXDETU3RXDET;
             write_pipe(pipe);
             info!("Set StartRxDetU3RxDet=1 (pulse)");
-            
+
             spin_delay_ms(10);
-            
+
             pipe = read_pipe();
             pipe &= !GUSB3PIPECTL_STARTRXDETU3RXDET;
             write_pipe(pipe);
             info!("Cleared StartRxDetU3RxDet");
-            
+
             let pipe_after = read_pipe();
             info!("GUSB3PIPECTL after RxDet: {:#010x}", pipe_after);
         }
     }
-    
+
     fn try_port_power_cycle() {
         let xhci_base = iomap(USB3_1_BASE.into(), 0x10000);
         unsafe {
             let caplength = (xhci_base.as_ptr().add(0x00) as *const u8).read_volatile();
             let op_base = xhci_base.as_ptr().add(caplength as usize);
-            
+
             let portsc_usb2_ptr = op_base.add(0x400) as *mut u32;
             let portsc_usb3_ptr = op_base.add(0x410) as *mut u32;
-            
+
             let portsc_usb2 = portsc_usb2_ptr.read_volatile();
             let portsc_usb3 = portsc_usb3_ptr.read_volatile();
-            info!("Before PP cycle: USB2 PORTSC={:#010x}, USB3 PORTSC={:#010x}", portsc_usb2, portsc_usb3);
-            
+            info!(
+                "Before PP cycle: USB2 PORTSC={:#010x}, USB3 PORTSC={:#010x}",
+                portsc_usb2, portsc_usb3
+            );
+
             let portsc_usb2_pp_off = (portsc_usb2 & PORTSC_RW_MASK) & !PORTSC_PP_BIT;
             let portsc_usb3_pp_off = (portsc_usb3 & PORTSC_RW_MASK) & !PORTSC_PP_BIT;
-            
+
             info!("Powering OFF ports (clearing PP bit)...");
             portsc_usb2_ptr.write_volatile(portsc_usb2_pp_off);
             portsc_usb3_ptr.write_volatile(portsc_usb3_pp_off);
-            
+
             info!("Waiting 500ms with port power OFF...");
             spin_delay_ms(500);
-            
+
             let portsc_usb2_off = portsc_usb2_ptr.read_volatile();
             let portsc_usb3_off = portsc_usb3_ptr.read_volatile();
-            info!("After PP off: USB2 PORTSC={:#010x} (PP={}), USB3 PORTSC={:#010x} (PP={})", 
-                  portsc_usb2_off, (portsc_usb2_off >> 9) & 1, portsc_usb3_off, (portsc_usb3_off >> 9) & 1);
-            
+            info!(
+                "After PP off: USB2 PORTSC={:#010x} (PP={}), USB3 PORTSC={:#010x} (PP={})",
+                portsc_usb2_off,
+                (portsc_usb2_off >> 9) & 1,
+                portsc_usb3_off,
+                (portsc_usb3_off >> 9) & 1
+            );
+
             let portsc_usb2_pp_on = (portsc_usb2_off & PORTSC_RW_MASK) | PORTSC_PP_BIT;
             let portsc_usb3_pp_on = (portsc_usb3_off & PORTSC_RW_MASK) | PORTSC_PP_BIT;
-            
+
             info!("Powering ON ports (setting PP bit)...");
             portsc_usb2_ptr.write_volatile(portsc_usb2_pp_on);
             portsc_usb3_ptr.write_volatile(portsc_usb3_pp_on);
-            
+
             info!("Waiting 500ms for device detection after PP on...");
             spin_delay_ms(500);
-            
+
             let portsc_usb2_on = portsc_usb2_ptr.read_volatile();
             let portsc_usb3_on = portsc_usb3_ptr.read_volatile();
             let ccs_usb2 = portsc_usb2_on & 1;
             let ccs_usb3 = portsc_usb3_on & 1;
             let pls_usb2 = (portsc_usb2_on >> 5) & 0xf;
             let pls_usb3 = (portsc_usb3_on >> 5) & 0xf;
-            
-            info!("After PP on: USB2 PORTSC={:#010x} (CCS={}, PLS={}), USB3 PORTSC={:#010x} (CCS={}, PLS={})", 
-                  portsc_usb2_on, ccs_usb2, pls_usb2, portsc_usb3_on, ccs_usb3, pls_usb3);
-            
+
+            info!(
+                "After PP on: USB2 PORTSC={:#010x} (CCS={}, PLS={}), USB3 PORTSC={:#010x} (CCS={}, PLS={})",
+                portsc_usb2_on, ccs_usb2, pls_usb2, portsc_usb3_on, ccs_usb3, pls_usb3
+            );
+
             if ccs_usb2 == 1 || ccs_usb3 == 1 {
                 info!("SUCCESS: Device detected after port power cycle!");
             } else {
@@ -717,90 +745,124 @@ mod tests {
         let gpio3_base = iomap(GPIO3_BASE.into(), 0x1000);
         unsafe {
             // Read current state
-            let dr_before = (gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *const u32).read_volatile();
-            let ddr_before = (gpio3_base.as_ptr().add(GPIO_SWPORT_DDR_L) as *const u32).read_volatile();
-            info!("GPIO3 before: DR_L={:#010x}, DDR_L={:#010x}", dr_before, ddr_before);
-            info!("  GPIO3_B7 (bit15): value={}, direction={} (1=output)", 
-                  (dr_before >> 15) & 1, (ddr_before >> 15) & 1);
-            
+            let dr_before =
+                (gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *const u32).read_volatile();
+            let ddr_before =
+                (gpio3_base.as_ptr().add(GPIO_SWPORT_DDR_L) as *const u32).read_volatile();
+            info!(
+                "GPIO3 before: DR_L={:#010x}, DDR_L={:#010x}",
+                dr_before, ddr_before
+            );
+            info!(
+                "  GPIO3_B7 (bit15): value={}, direction={} (1=output)",
+                (dr_before >> 15) & 1,
+                (ddr_before >> 15) & 1
+            );
+
             // Ensure GPIO3_B7 is configured as output
             let ddr_ptr = gpio3_base.as_ptr().add(GPIO_SWPORT_DDR_L) as *mut u32;
             ddr_ptr.write_volatile(WRITE_MASK_BIT15 | GPIO3_B7_BIT);
-            
+
             // Turn OFF VBUS (set GPIO3_B7 low - active high regulator)
             info!("Turning OFF VBUS (GPIO3_B7 = 0)...");
             let dr_ptr = gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *mut u32;
-            dr_ptr.write_volatile(WRITE_MASK_BIT15 | 0);  // Clear bit 15
-            
+            dr_ptr.write_volatile(WRITE_MASK_BIT15 | 0); // Clear bit 15
+
             let dr_off = (gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *const u32).read_volatile();
-            info!("GPIO3 DR_L after OFF: {:#010x} (bit15={})", dr_off, (dr_off >> 15) & 1);
-            
+            info!(
+                "GPIO3 DR_L after OFF: {:#010x} (bit15={})",
+                dr_off,
+                (dr_off >> 15) & 1
+            );
+
             // Wait 1 second with VBUS off
             info!("Waiting 1000ms with VBUS OFF...");
             spin_delay_ms(1000);
-            
+
             // Turn ON VBUS (set GPIO3_B7 high)
             info!("Turning ON VBUS (GPIO3_B7 = 1)...");
             dr_ptr.write_volatile(WRITE_MASK_BIT15 | GPIO3_B7_BIT);
-            
+
             let dr_on = (gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *const u32).read_volatile();
-            info!("GPIO3 DR_L after ON: {:#010x} (bit15={})", dr_on, (dr_on >> 15) & 1);
-            
+            info!(
+                "GPIO3 DR_L after ON: {:#010x} (bit15={})",
+                dr_on,
+                (dr_on >> 15) & 1
+            );
+
             // Wait for hub to power up and initialize
             info!("Waiting 500ms for hub to power up...");
             spin_delay_ms(500);
         }
     }
 
-    
     fn try_warm_port_reset() {
         let xhci_base = iomap(USB3_1_BASE.into(), 0x10000);
         unsafe {
             let caplength = (xhci_base.as_ptr().add(0x00) as *const u8).read_volatile();
             let op_base = xhci_base.as_ptr().add(caplength as usize);
             let portsc_ptr = op_base.add(0x400) as *mut u32;
-            
+
             let portsc = portsc_ptr.read_volatile();
             let pls = (portsc >> 5) & 0xf;
             let ccs = portsc & 1;
-            
-            info!("Before warm reset: PORTSC={:#010x}, PLS={}, CCS={}", portsc, pls, ccs);
-            
+
+            info!(
+                "Before warm reset: PORTSC={:#010x}, PLS={}, CCS={}",
+                portsc, pls, ccs
+            );
+
             let pma_base_before = iomap(0xfed98000.into(), 0x10000);
-            let lcpll_before_wpr = (pma_base_before.as_ptr().add(0x0350) as *const u32).read_volatile();
-            info!("PHY PLL before warm reset decision: LCPLL={:#04x} (AFC={}, LOCK={})", 
-                  lcpll_before_wpr, (lcpll_before_wpr >> 6) & 1, (lcpll_before_wpr >> 7) & 1);
-            
+            let lcpll_before_wpr =
+                (pma_base_before.as_ptr().add(0x0350) as *const u32).read_volatile();
+            info!(
+                "PHY PLL before warm reset decision: LCPLL={:#04x} (AFC={}, LOCK={})",
+                lcpll_before_wpr,
+                (lcpll_before_wpr >> 6) & 1,
+                (lcpll_before_wpr >> 7) & 1
+            );
+
             if pls == 4 {
                 info!("Port in Inactive state (PLS=4), attempting warm reset via WPR bit");
                 let new_portsc = (portsc & 0x0e00c3e0) | (1 << 31);
                 portsc_ptr.write_volatile(new_portsc);
-                
+
                 for _ in 0..1000000 {
                     core::hint::spin_loop();
                 }
-                
+
                 let portsc_after = portsc_ptr.read_volatile();
                 let pls_after = (portsc_after >> 5) & 0xf;
-                info!("After WPR: PORTSC={:#010x}, PLS={}", portsc_after, pls_after);
+                info!(
+                    "After WPR: PORTSC={:#010x}, PLS={}",
+                    portsc_after, pls_after
+                );
             } else if pls == 5 {
                 info!("Port in RxDetect state (PLS=5), NOT doing warm reset (would kill PHY PLL)");
             } else {
                 info!("Port in PLS={} state", pls);
             }
-            
+
             let portsc_final = portsc_ptr.read_volatile();
             let pls_final = (portsc_final >> 5) & 0xf;
             let ccs_final = portsc_final & 1;
-            info!("Final: PORTSC={:#010x}, PLS={}, CCS={}", portsc_final, pls_final, ccs_final);
-            
+            info!(
+                "Final: PORTSC={:#010x}, PLS={}, CCS={}",
+                portsc_final, pls_final, ccs_final
+            );
+
             let pma_base_check = iomap(0xfed98000.into(), 0x10000);
-            let lcpll_after_wpr = (pma_base_check.as_ptr().add(0x0350) as *const u32).read_volatile();
-            info!("PHY PLL after warm reset: LCPLL={:#04x} (AFC={}, LOCK={})", 
-                  lcpll_after_wpr, (lcpll_after_wpr >> 6) & 1, (lcpll_after_wpr >> 7) & 1);
+            let lcpll_after_wpr =
+                (pma_base_check.as_ptr().add(0x0350) as *const u32).read_volatile();
+            info!(
+                "PHY PLL after warm reset: LCPLL={:#04x} (AFC={}, LOCK={})",
+                lcpll_after_wpr,
+                (lcpll_after_wpr >> 6) & 1,
+                (lcpll_after_wpr >> 7) & 1
+            );
         }
     }
-    
+
     fn dump_initial_phy_state() {
         let xhci_base = iomap(USB3_1_BASE.into(), 0x10000);
         let pma_base = iomap(USBDPPHY1_PMA_BASE.into(), 0x10000);
@@ -812,35 +874,59 @@ mod tests {
             let cdr_ln0 = (pma_base.as_ptr().add(0x0B84) as *const u32).read_volatile();
             let cdr_ln2 = (pma_base.as_ptr().add(0x1B84) as *const u32).read_volatile();
             let lane_mux = (pma_base.as_ptr().add(0x0288) as *const u32).read_volatile();
-            info!("PHY PMA: LCPLL={:#04x} CDR_LN0={:#04x} CDR_LN2={:#04x} LANE_MUX={:#04x}", 
-                  lcpll, cdr_ln0, cdr_ln2, lane_mux);
-            info!("  LCPLL: AFC={} LOCK={}", (lcpll >> 6) & 1, (lcpll >> 7) & 1);
-            
+            info!(
+                "PHY PMA: LCPLL={:#04x} CDR_LN0={:#04x} CDR_LN2={:#04x} LANE_MUX={:#04x}",
+                lcpll, cdr_ln0, cdr_ln2, lane_mux
+            );
+            info!(
+                "  LCPLL: AFC={} LOCK={}",
+                (lcpll >> 6) & 1,
+                (lcpll >> 7) & 1
+            );
+
             let con0 = (udphygrf_base.as_ptr().add(0x00) as *const u32).read_volatile();
             let con1 = (udphygrf_base.as_ptr().add(0x04) as *const u32).read_volatile();
             info!("USBDPPHY1_GRF: CON0={:#010x} CON1={:#010x}", con0, con1);
-            info!("  CON1: low_pwrn={} rx_lfps={}", (con1 >> 13) & 1, (con1 >> 14) & 1);
-            
+            info!(
+                "  CON1: low_pwrn={} rx_lfps={}",
+                (con1 >> 13) & 1,
+                (con1 >> 14) & 1
+            );
+
             let otg1_con0 = (usbgrf_base.as_ptr().add(0x30) as *const u32).read_volatile();
             let otg1_con1 = (usbgrf_base.as_ptr().add(0x34) as *const u32).read_volatile();
-            info!("USB_GRF: OTG1_CON0={:#010x} OTG1_CON1={:#010x}", otg1_con0, otg1_con1);
-            
+            info!(
+                "USB_GRF: OTG1_CON0={:#010x} OTG1_CON1={:#010x}",
+                otg1_con0, otg1_con1
+            );
+
             let grf_con2 = (u2phygrf_base.as_ptr().add(0x08) as *const u32).read_volatile();
             let grf_con4 = (u2phygrf_base.as_ptr().add(0x10) as *const u32).read_volatile();
-            info!("USB2PHY1_GRF: CON2={:#010x} CON4={:#010x} (bvalid regs)", grf_con2, grf_con4);
-            
+            info!(
+                "USB2PHY1_GRF: CON2={:#010x} CON4={:#010x} (bvalid regs)",
+                grf_con2, grf_con4
+            );
+
             let dwc3_base = xhci_base.as_ptr().add(DWC3_OFFSET);
             let gctl = (dwc3_base.add(0x10) as *const u32).read_volatile();
             let gusb2phycfg = (dwc3_base.add(0x100) as *const u32).read_volatile();
             let gusb3pipectl = (dwc3_base.add(0x1c0) as *const u32).read_volatile();
-            info!("DWC3: GCTL={:#010x} GUSB2PHYCFG={:#010x} GUSB3PIPECTL={:#010x}", gctl, gusb2phycfg, gusb3pipectl);
-            
+            info!(
+                "DWC3: GCTL={:#010x} GUSB2PHYCFG={:#010x} GUSB3PIPECTL={:#010x}",
+                gctl, gusb2phycfg, gusb3pipectl
+            );
+
             let portsc = (xhci_base.as_ptr().add(0x20 + 0x400) as *const u32).read_volatile();
-            info!("xHCI: PORTSC={:#010x} (CCS={} PED={} PLS={})", 
-                  portsc, portsc & 1, (portsc >> 1) & 1, (portsc >> 5) & 0xF);
+            info!(
+                "xHCI: PORTSC={:#010x} (CCS={} PED={} PLS={})",
+                portsc,
+                portsc & 1,
+                (portsc >> 1) & 1,
+                (portsc >> 5) & 0xF
+            );
         }
     }
-    
+
     fn dump_usb_debug_registers() {
         let xhci_base = iomap(USB3_1_BASE.into(), 0x10000);
         let pma_base = iomap(USBDPPHY1_PMA_BASE.into(), 0x10000);
@@ -852,60 +938,88 @@ mod tests {
             // GATE_CON02 contains USBDP_PHY1_IMMORTAL at bit 15
             let gate_con02 = (cru_base.as_ptr().add(0x0808) as *const u32).read_volatile();
             info!("CRU GATE_CON02 (0x0808): {:#010x}", gate_con02);
-            info!("  USBDP_PHY0_IMMORTAL (bit8)={} USBDP_PHY1_IMMORTAL (bit15)={} (0=enabled,1=disabled)",
-                  (gate_con02 >> 8) & 1, (gate_con02 >> 15) & 1);
-            
+            info!(
+                "  USBDP_PHY0_IMMORTAL (bit8)={} USBDP_PHY1_IMMORTAL (bit15)={} (0=enabled,1=disabled)",
+                (gate_con02 >> 8) & 1,
+                (gate_con02 >> 15) & 1
+            );
+
             let gate_con42 = (cru_base.as_ptr().add(0x08a8) as *const u32).read_volatile();
             let gate_con35 = (cru_base.as_ptr().add(0x088c) as *const u32).read_volatile();
             info!("CRU GATE_CON42 (0x08a8): {:#010x}", gate_con42);
-            info!("  aclk_usb_root={} hclk_usb_root={} aclk_usb3otg0={} aclk_usb3otg1={}",
-                  (gate_con42 >> 0) & 1, (gate_con42 >> 1) & 1, 
-                  (gate_con42 >> 4) & 1, (gate_con42 >> 7) & 1);
-            info!("  ref_clk_usb3otg0={} ref_clk_usb3otg1={} suspend_clk_usb3otg1={}",
-                  (gate_con42 >> 6) & 1, (gate_con42 >> 9) & 1, (gate_con42 >> 8) & 1);
+            info!(
+                "  aclk_usb_root={} hclk_usb_root={} aclk_usb3otg0={} aclk_usb3otg1={}",
+                (gate_con42 >> 0) & 1,
+                (gate_con42 >> 1) & 1,
+                (gate_con42 >> 4) & 1,
+                (gate_con42 >> 7) & 1
+            );
+            info!(
+                "  ref_clk_usb3otg0={} ref_clk_usb3otg1={} suspend_clk_usb3otg1={}",
+                (gate_con42 >> 6) & 1,
+                (gate_con42 >> 9) & 1,
+                (gate_con42 >> 8) & 1
+            );
             info!("CRU GATE_CON35 (0x088c): {:#010x}", gate_con35);
-            
+
             // Also check GATE_CON72 for PCLK_USBDPPHY clocks
             let gate_con72 = (cru_base.as_ptr().add(0x0920) as *const u32).read_volatile();
             info!("CRU GATE_CON72 (0x0920): {:#010x}", gate_con72);
-            info!("  PCLK_USBDPPHY0 (bit2)={} PCLK_USBDPPHY1 (bit4)={} (0=enabled,1=disabled)",
-                  (gate_con72 >> 2) & 1, (gate_con72 >> 4) & 1);
+            info!(
+                "  PCLK_USBDPPHY0 (bit2)={} PCLK_USBDPPHY1 (bit4)={} (0=enabled,1=disabled)",
+                (gate_con72 >> 2) & 1,
+                (gate_con72 >> 4) & 1
+            );
         }
         unsafe {
             let caplength = (xhci_base.as_ptr().add(0x00) as *const u8).read_volatile();
             let hcsparams1 = (xhci_base.as_ptr().add(0x04) as *const u32).read_volatile();
             let num_ports = (hcsparams1 >> 24) & 0xFF;
-            info!("xHCI CAPLENGTH: {:#x}, HCSPARAMS1: {:#010x} (ports={})", caplength, hcsparams1, num_ports);
-            
+            info!(
+                "xHCI CAPLENGTH: {:#x}, HCSPARAMS1: {:#010x} (ports={})",
+                caplength, hcsparams1, num_ports
+            );
+
             let op_base = xhci_base.as_ptr().add(caplength as usize);
             let portsc_base = op_base.add(0x400);
-            
+
             for port_idx in 0..4 {
                 let portsc_off = port_idx * 0x10;
                 let portsc = (portsc_base.add(portsc_off) as *const u32).read_volatile();
                 if portsc != 0 || port_idx < 2 {
-                    info!("xHCI PORTSC[{}] (op+0x{:03x}): {:#010x}", port_idx, 0x400 + portsc_off, portsc);
+                    info!(
+                        "xHCI PORTSC[{}] (op+0x{:03x}): {:#010x}",
+                        port_idx,
+                        0x400 + portsc_off,
+                        portsc
+                    );
                     let ccs = (portsc >> 0) & 1;
                     let ped = (portsc >> 1) & 1;
                     let pp = (portsc >> 9) & 1;
                     let pls = (portsc >> 5) & 0xf;
                     let speed = (portsc >> 10) & 0xf;
-                    info!("  Port {}: CCS={} PED={} PP={} PLS={} Speed={}", port_idx, ccs, ped, pp, pls, speed);
+                    info!(
+                        "  Port {}: CCS={} PED={} PP={} PLS={} Speed={}",
+                        port_idx, ccs, ped, pp, pls, speed
+                    );
                 }
             }
-            
+
             let portsc_ss = (xhci_base.as_ptr().add(0x430) as *const u32).read_volatile();
             let portsc_usb2 = (xhci_base.as_ptr().add(0x420) as *const u32).read_volatile();
             info!("xHCI PORTSC (raw 0x430): {:#010x}", portsc_ss);
             info!("xHCI PORTSC (raw 0x420): {:#010x}", portsc_usb2);
-            
+
             let ccs = (portsc_ss >> 0) & 1;
             let ped = (portsc_ss >> 1) & 1;
             let pp = (portsc_ss >> 9) & 1;
             let pls = (portsc_ss >> 5) & 0xf;
             let speed = (portsc_ss >> 10) & 0xf;
-            info!("  SS Port: CCS={} PED={} PP={} PLS={} Speed={}", ccs, ped, pp, pls, speed);
-            
+            info!(
+                "  SS Port: CCS={} PED={} PP={} PLS={} Speed={}",
+                ccs, ped, pp, pls, speed
+            );
+
             let dwc3_base = xhci_base.as_ptr().add(DWC3_OFFSET);
             let gctl = (dwc3_base.add(0x10) as *const u32).read_volatile();
             let gsts = (dwc3_base.add(0x18) as *const u32).read_volatile();
@@ -917,7 +1031,7 @@ mod tests {
             info!("DWC3 GUSB2PHYCFG: {:#010x}", gusb2phycfg);
             info!("DWC3 GUSB3PIPECTL: {:#010x}", gusb3pipectl);
             info!("DWC3 GDBGLTSSM: {:#010x}", gdbgltssm);
-            
+
             // DWC3 GHWPARAMS - hardware configuration registers (CRITICAL for port count!)
             // These are at offsets 0x40-0x5C from DWC3 base (not xHCI base)
             let ghwparams0 = (dwc3_base.add(0x40) as *const u32).read_volatile();
@@ -931,29 +1045,42 @@ mod tests {
             info!("DWC3 GHWPARAMS0: {:#010x}", ghwparams0);
             info!("DWC3 GHWPARAMS1: {:#010x}", ghwparams1);
             info!("DWC3 GHWPARAMS2: {:#010x}", ghwparams2);
-            info!("DWC3 GHWPARAMS3: {:#010x} (SSPHY_IFC[1:0]={}, HSPHY_IFC[3:2]={})", 
-                  ghwparams3, ghwparams3 & 3, (ghwparams3 >> 2) & 3);
+            info!(
+                "DWC3 GHWPARAMS3: {:#010x} (SSPHY_IFC[1:0]={}, HSPHY_IFC[3:2]={})",
+                ghwparams3,
+                ghwparams3 & 3,
+                (ghwparams3 >> 2) & 3
+            );
             info!("DWC3 GHWPARAMS4: {:#010x}", ghwparams4);
             info!("DWC3 GHWPARAMS5: {:#010x}", ghwparams5);
             info!("DWC3 GHWPARAMS6: {:#010x}", ghwparams6);
-            info!("DWC3 GHWPARAMS7: {:#010x} (num_hs_phy_ports[2:0]={}, num_ss_phy_ports[5:3]={})", 
-                  ghwparams7, ghwparams7 & 7, (ghwparams7 >> 3) & 7);
-            
+            info!(
+                "DWC3 GHWPARAMS7: {:#010x} (num_hs_phy_ports[2:0]={}, num_ss_phy_ports[5:3]={})",
+                ghwparams7,
+                ghwparams7 & 7,
+                (ghwparams7 >> 3) & 7
+            );
+
             // Decode GHWPARAMS3 SSPHY interface
             let ssphy_ifc = ghwparams3 & 3;
             let hsphy_ifc = (ghwparams3 >> 2) & 3;
-            info!("  GHWPARAMS3: SSPHY_IFC={} (0=dis,1=ena), HSPHY_IFC={} (0=dis,1=utmi,2=ulpi,3=both)", 
-                  ssphy_ifc, hsphy_ifc);
-            
+            info!(
+                "  GHWPARAMS3: SSPHY_IFC={} (0=dis,1=ena), HSPHY_IFC={} (0=dis,1=utmi,2=ulpi,3=both)",
+                ssphy_ifc, hsphy_ifc
+            );
+
             let ltssm_state = gdbgltssm & 0xF;
             let ltssm_substate = (gdbgltssm >> 4) & 0xF;
             info!("  LTSSM: state={} substate={}", ltssm_state, ltssm_substate);
-            
+
             let curmod = (gsts >> 0) & 0x3;
             let otg_ip = (gsts >> 20) & 1;
             let bus_err = (gsts >> 24) & 1;
-            info!("  GSTS: CurMode={} (0=dev,1=host,2=drd) OTG_IP={} BusErr={}", curmod, otg_ip, bus_err);
-            
+            info!(
+                "  GSTS: CurMode={} (0=dev,1=host,2=drd) OTG_IP={} BusErr={}",
+                curmod, otg_ip, bus_err
+            );
+
             let con0 = (udphygrf_base.as_ptr().add(0x00) as *const u32).read_volatile();
             let con1 = (udphygrf_base.as_ptr().add(0x04) as *const u32).read_volatile();
             let con2 = (udphygrf_base.as_ptr().add(0x08) as *const u32).read_volatile();
@@ -962,37 +1089,50 @@ mod tests {
             info!("USBDPPHY1_GRF CON1: {:#010x}", con1);
             info!("USBDPPHY1_GRF CON2: {:#010x}", con2);
             info!("USBDPPHY1_GRF CON3: {:#010x}", con3);
-            
+
             let low_pwrn = (con1 >> 13) & 1;
             let rx_lfps = (con1 >> 14) & 1;
             info!("  CON1: low_pwrn={} rx_lfps={}", low_pwrn, rx_lfps);
-            
+
             let usb3otg1_con0 = (usbgrf_base.as_ptr().add(0x30) as *const u32).read_volatile();
             let usb3otg1_con1 = (usbgrf_base.as_ptr().add(0x34) as *const u32).read_volatile();
-            info!("USB_GRF USB3OTG1_CON0 (0x0030): {:#010x} (bus_filter_bypass={:#x})", usb3otg1_con0, usb3otg1_con0 & 0xF);
+            info!(
+                "USB_GRF USB3OTG1_CON0 (0x0030): {:#010x} (bus_filter_bypass={:#x})",
+                usb3otg1_con0,
+                usb3otg1_con0 & 0xF
+            );
             info!("USB_GRF USB3OTG1_CON1 (0x0034): {:#010x}", usb3otg1_con1);
-            
+
             let usb3otg1_status0 = (usbgrf_base.as_ptr().add(0x38) as *const u32).read_volatile();
-            info!("USB_GRF USB3OTG1_STATUS0 (0x0038): {:#010x}", usb3otg1_status0);
-            
+            info!(
+                "USB_GRF USB3OTG1_STATUS0 (0x0038): {:#010x}",
+                usb3otg1_status0
+            );
+
             let lcpll_done = (pma_base.as_ptr().add(0x0350) as *const u32).read_volatile();
             let cdr_done_ln0 = (pma_base.as_ptr().add(0x0B84) as *const u32).read_volatile();
             let cdr_done_ln2 = (pma_base.as_ptr().add(0x1B84) as *const u32).read_volatile();
             let lane_mux = (pma_base.as_ptr().add(0x0288) as *const u32).read_volatile();
             info!("USBDP PHY1 PMA LCPLL_DONE (0x0350): {:#010x}", lcpll_done);
-            info!("USBDP PHY1 PMA CDR_DONE LN0 (0x0B84): {:#010x}", cdr_done_ln0);
-            info!("USBDP PHY1 PMA CDR_DONE LN2 (0x1B84): {:#010x}", cdr_done_ln2);
+            info!(
+                "USBDP PHY1 PMA CDR_DONE LN0 (0x0B84): {:#010x}",
+                cdr_done_ln0
+            );
+            info!(
+                "USBDP PHY1 PMA CDR_DONE LN2 (0x1B84): {:#010x}",
+                cdr_done_ln2
+            );
             info!("USBDP PHY1 PMA LANE_MUX (0x0288): {:#010x}", lane_mux);
-            
+
             let afc_done = (lcpll_done >> 6) & 1;
             let lock_done = (lcpll_done >> 7) & 1;
             info!("  LCPLL: AFC_DONE={} LOCK_DONE={}", afc_done, lock_done);
-            
+
             let cr_para_con = (pma_base.as_ptr().add(0x0000) as *const u32).read_volatile();
             let dp_rstn = (pma_base.as_ptr().add(0x038C) as *const u32).read_volatile();
             info!("USBDP PHY1 PMA CR_PARA_CON (0x0000): {:#010x}", cr_para_con);
             info!("USBDP PHY1 PMA DP_RSTN (0x038C): {:#010x}", dp_rstn);
-            
+
             let ln0_mon_0 = (pma_base.as_ptr().add(0x0B00) as *const u32).read_volatile();
             let ln0_mon_1 = (pma_base.as_ptr().add(0x0B04) as *const u32).read_volatile();
             let ln0_mon_2 = (pma_base.as_ptr().add(0x0B80) as *const u32).read_volatile();
@@ -1001,47 +1141,65 @@ mod tests {
             info!("USBDP PHY1 LN0_MON (0x0B04): {:#010x}", ln0_mon_1);
             info!("USBDP PHY1 LN0_MON (0x0B80): {:#010x}", ln0_mon_2);
             info!("USBDP PHY1 LN1_MON (0x1B00): {:#010x}", ln1_mon_0);
-            
+
             let trsv_ln0_00 = (pma_base.as_ptr().add(0x0800) as *const u32).read_volatile();
             let trsv_ln1_00 = (pma_base.as_ptr().add(0x1000) as *const u32).read_volatile();
             info!("USBDP PHY1 TRSV_LN0 (0x0800): {:#010x}", trsv_ln0_00);
             info!("USBDP PHY1 TRSV_LN1 (0x1000): {:#010x}", trsv_ln1_00);
-            
+
             let trsv_ln0_reg0206 = (pma_base.as_ptr().add(0x0818) as *const u32).read_volatile();
             let trsv_ln1_reg0406 = (pma_base.as_ptr().add(0x1018) as *const u32).read_volatile();
             let ln0_tx_drv_en = trsv_ln0_reg0206 & 1;
             let ln1_tx_drv_en = trsv_ln1_reg0406 & 1;
-            info!("USBDP PHY1 TRSV_LN0_REG0206 (0x0818): {:#010x} (tx_drv_idrv_en={})", trsv_ln0_reg0206, ln0_tx_drv_en);
-            info!("USBDP PHY1 TRSV_LN1_REG0406 (0x1018): {:#010x} (tx_drv_idrv_en={})", trsv_ln1_reg0406, ln1_tx_drv_en);
-            
+            info!(
+                "USBDP PHY1 TRSV_LN0_REG0206 (0x0818): {:#010x} (tx_drv_idrv_en={})",
+                trsv_ln0_reg0206, ln0_tx_drv_en
+            );
+            info!(
+                "USBDP PHY1 TRSV_LN1_REG0406 (0x1018): {:#010x} (tx_drv_idrv_en={})",
+                trsv_ln1_reg0406, ln1_tx_drv_en
+            );
+
             let trsv_ln2_reg0606 = (pma_base.as_ptr().add(0x1818) as *const u32).read_volatile();
             let trsv_ln3_reg0806 = (pma_base.as_ptr().add(0x2018) as *const u32).read_volatile();
-            info!("USBDP PHY1 TRSV_LN2_REG0606 (0x1818): {:#010x}", trsv_ln2_reg0606);
-            info!("USBDP PHY1 TRSV_LN3_REG0806 (0x2018): {:#010x}", trsv_ln3_reg0806);
-            
+            info!(
+                "USBDP PHY1 TRSV_LN2_REG0606 (0x1818): {:#010x}",
+                trsv_ln2_reg0606
+            );
+            info!(
+                "USBDP PHY1 TRSV_LN3_REG0806 (0x2018): {:#010x}",
+                trsv_ln3_reg0806
+            );
+
             let trsv_ln0_reg0000 = (pma_base.as_ptr().add(0x0800) as *const u32).read_volatile();
             let trsv_ln0_reg0002 = (pma_base.as_ptr().add(0x0808) as *const u32).read_volatile();
             let trsv_ln0_reg0003 = (pma_base.as_ptr().add(0x080C) as *const u32).read_volatile();
-            info!("USBDP PHY1 TRSV_LN0 (0x0800,0x0808,0x080C): {:#010x} {:#010x} {:#010x}", 
-                  trsv_ln0_reg0000, trsv_ln0_reg0002, trsv_ln0_reg0003);
-            
+            info!(
+                "USBDP PHY1 TRSV_LN0 (0x0800,0x0808,0x080C): {:#010x} {:#010x} {:#010x}",
+                trsv_ln0_reg0000, trsv_ln0_reg0002, trsv_ln0_reg0003
+            );
+
             let trsv_ln1_reg0200 = (pma_base.as_ptr().add(0x1000) as *const u32).read_volatile();
             let trsv_ln1_reg0202 = (pma_base.as_ptr().add(0x1008) as *const u32).read_volatile();
             let trsv_ln1_reg0203 = (pma_base.as_ptr().add(0x100C) as *const u32).read_volatile();
-            info!("USBDP PHY1 TRSV_LN1 (0x1000,0x1008,0x100C): {:#010x} {:#010x} {:#010x}", 
-                  trsv_ln1_reg0200, trsv_ln1_reg0202, trsv_ln1_reg0203);
-            
+            info!(
+                "USBDP PHY1 TRSV_LN1 (0x1000,0x1008,0x100C): {:#010x} {:#010x} {:#010x}",
+                trsv_ln1_reg0200, trsv_ln1_reg0202, trsv_ln1_reg0203
+            );
+
             let cmn_reg0060 = (pma_base.as_ptr().add(0x0180) as *const u32).read_volatile();
             let cmn_reg0063 = (pma_base.as_ptr().add(0x018C) as *const u32).read_volatile();
             let cmn_reg0064 = (pma_base.as_ptr().add(0x0190) as *const u32).read_volatile();
-            info!("USBDP PHY1 CMN (0x0180,0x018C,0x0190): {:#010x} {:#010x} {:#010x}", 
-                  cmn_reg0060, cmn_reg0063, cmn_reg0064);
-            
+            info!(
+                "USBDP PHY1 CMN (0x0180,0x018C,0x0190): {:#010x} {:#010x} {:#010x}",
+                cmn_reg0060, cmn_reg0063, cmn_reg0064
+            );
+
             let ln0_rx_ctle = (pma_base.as_ptr().add(0x0A00) as *const u32).read_volatile();
             let ln2_rx_ctle = (pma_base.as_ptr().add(0x1A00) as *const u32).read_volatile();
             info!("USBDP PHY1 LN0_RX_CTLE (0x0A00): {:#010x}", ln0_rx_ctle);
             info!("USBDP PHY1 LN2_RX_CTLE (0x1A00): {:#010x}", ln2_rx_ctle);
-            
+
             let pipe_phy_status = (pma_base.as_ptr().add(0x0004) as *const u32).read_volatile();
             let pipe_power_present = (pma_base.as_ptr().add(0x0008) as *const u32).read_volatile();
             info!("USBDP PHY1 PMA (0x0004): {:#010x}", pipe_phy_status);
@@ -1055,22 +1213,24 @@ mod tests {
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
 
         unsafe {
-            let read_dwc3 = |off: usize| -> u32 {
-                (dwc3_base.add(off) as *const u32).read_volatile()
-            };
+            let read_dwc3 =
+                |off: usize| -> u32 { (dwc3_base.add(off) as *const u32).read_volatile() };
             let write_dwc3 = |off: usize, val: u32| {
                 (dwc3_base.add(off) as *mut u32).write_volatile(val);
             };
-            
+
             info!("DWC3 GCTL before host mode: {:#010x}", read_dwc3(GCTL));
             info!("DWC3 GUSB2PHYCFG before: {:#010x}", read_dwc3(GUSB2PHYCFG));
-            info!("DWC3 GUSB3PIPECTL before: {:#010x}", read_dwc3(GUSB3PIPECTL));
-            
+            info!(
+                "DWC3 GUSB3PIPECTL before: {:#010x}",
+                read_dwc3(GUSB3PIPECTL)
+            );
+
             let mut gctl = read_dwc3(GCTL);
             gctl &= !GCTL_PRTCAPDIR_MASK;
             gctl |= GCTL_PRTCAPDIR_HOST;
             write_dwc3(GCTL, gctl);
-            
+
             let mut phycfg = read_dwc3(GUSB2PHYCFG);
             phycfg &= !(GUSB2PHYCFG_PHYIF | GUSB2PHYCFG_USBTRDTIM_MASK);
             phycfg |= GUSB2PHYCFG_PHYIF | GUSB2PHYCFG_USBTRDTIM_16BIT;
@@ -1078,33 +1238,41 @@ mod tests {
             phycfg &= !GUSB2PHYCFG_U2_FREECLK_EXISTS;
             phycfg |= GUSB2PHYCFG_SUSPHY;
             write_dwc3(GUSB2PHYCFG, phycfg);
-            
+
             let mut pipe = read_dwc3(GUSB3PIPECTL);
             pipe &= !GUSB3PIPECTL_DEPOCHANGE;
             pipe |= GUSB3PIPECTL_SUSPHY;
             write_dwc3(GUSB3PIPECTL, pipe);
-            
+
             info!("DWC3 GCTL after host mode: {:#010x}", read_dwc3(GCTL));
             info!("DWC3 GUSB2PHYCFG after: {:#010x}", read_dwc3(GUSB2PHYCFG));
             info!("DWC3 GUSB3PIPECTL after: {:#010x}", read_dwc3(GUSB3PIPECTL));
         }
     }
-    
+
     fn init_dwc3_no_phy_reset() {
         let xhci_base = iomap(USB3_1_BASE.into(), 0x10000);
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
 
         unsafe {
-            let read_dwc3 = |off: usize| -> u32 {
-                (dwc3_base.add(off) as *const u32).read_volatile()
-            };
+            let read_dwc3 =
+                |off: usize| -> u32 { (dwc3_base.add(off) as *const u32).read_volatile() };
             let write_dwc3 = |off: usize, val: u32| {
                 (dwc3_base.add(off) as *mut u32).write_volatile(val);
             };
 
-            info!("DWC3 init (no reset): GCTL before = {:#010x}", read_dwc3(GCTL));
-            info!("DWC3 init (no reset): GUSB2PHYCFG before = {:#010x}", read_dwc3(GUSB2PHYCFG));
-            info!("DWC3 init (no reset): GUSB3PIPECTL before = {:#010x}", read_dwc3(GUSB3PIPECTL));
+            info!(
+                "DWC3 init (no reset): GCTL before = {:#010x}",
+                read_dwc3(GCTL)
+            );
+            info!(
+                "DWC3 init (no reset): GUSB2PHYCFG before = {:#010x}",
+                read_dwc3(GUSB2PHYCFG)
+            );
+            info!(
+                "DWC3 init (no reset): GUSB3PIPECTL before = {:#010x}",
+                read_dwc3(GUSB3PIPECTL)
+            );
 
             let mut pipe = read_dwc3(GUSB3PIPECTL);
             pipe &= !GUSB3PIPECTL_DEPOCHANGE;
@@ -1124,9 +1292,18 @@ mod tests {
             gctl |= GCTL_PRTCAPDIR_HOST;
             write_dwc3(GCTL, gctl);
 
-            info!("DWC3 init (no reset): GCTL after = {:#010x}", read_dwc3(GCTL));
-            info!("DWC3 init (no reset): GUSB2PHYCFG after = {:#010x}", read_dwc3(GUSB2PHYCFG));
-            info!("DWC3 init (no reset): GUSB3PIPECTL after = {:#010x}", read_dwc3(GUSB3PIPECTL));
+            info!(
+                "DWC3 init (no reset): GCTL after = {:#010x}",
+                read_dwc3(GCTL)
+            );
+            info!(
+                "DWC3 init (no reset): GUSB2PHYCFG after = {:#010x}",
+                read_dwc3(GUSB2PHYCFG)
+            );
+            info!(
+                "DWC3 init (no reset): GUSB3PIPECTL after = {:#010x}",
+                read_dwc3(GUSB3PIPECTL)
+            );
         }
         info!("DWC3 init (no reset) complete");
     }
@@ -1136,16 +1313,24 @@ mod tests {
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
 
         unsafe {
-            let read_dwc3 = |off: usize| -> u32 {
-                (dwc3_base.add(off) as *const u32).read_volatile()
-            };
+            let read_dwc3 =
+                |off: usize| -> u32 { (dwc3_base.add(off) as *const u32).read_volatile() };
             let write_dwc3 = |off: usize, val: u32| {
                 (dwc3_base.add(off) as *mut u32).write_volatile(val);
             };
 
-            info!("DWC3 soft reset init: GCTL before = {:#010x}", read_dwc3(GCTL));
-            info!("DWC3 soft reset init: GUSB2PHYCFG before = {:#010x}", read_dwc3(GUSB2PHYCFG));
-            info!("DWC3 soft reset init: GUSB3PIPECTL before = {:#010x}", read_dwc3(GUSB3PIPECTL));
+            info!(
+                "DWC3 soft reset init: GCTL before = {:#010x}",
+                read_dwc3(GCTL)
+            );
+            info!(
+                "DWC3 soft reset init: GUSB2PHYCFG before = {:#010x}",
+                read_dwc3(GUSB2PHYCFG)
+            );
+            info!(
+                "DWC3 soft reset init: GUSB3PIPECTL before = {:#010x}",
+                read_dwc3(GUSB3PIPECTL)
+            );
 
             let mut gctl = read_dwc3(GCTL);
             gctl |= GCTL_CORESOFTRESET;
@@ -1179,7 +1364,7 @@ mod tests {
 
             pipe = read_dwc3(GUSB3PIPECTL);
             pipe &= !GUSB3PIPECTL_DEPOCHANGE;
-            pipe &= !GUSB3PIPECTL_SUSPHY;  // Disable SUSPHY to prevent PHY lock loss
+            pipe &= !GUSB3PIPECTL_SUSPHY; // Disable SUSPHY to prevent PHY lock loss
             write_dwc3(GUSB3PIPECTL, pipe);
 
             phycfg = read_dwc3(GUSB2PHYCFG);
@@ -1187,7 +1372,7 @@ mod tests {
             phycfg |= GUSB2PHYCFG_PHYIF | GUSB2PHYCFG_USBTRDTIM_16BIT;
             phycfg &= !GUSB2PHYCFG_ENBLSLPM;
             phycfg &= !GUSB2PHYCFG_U2_FREECLK_EXISTS;
-            phycfg &= !GUSB2PHYCFG_SUSPHY;  // Disable SUSPHY to prevent PHY lock loss
+            phycfg &= !GUSB2PHYCFG_SUSPHY; // Disable SUSPHY to prevent PHY lock loss
             write_dwc3(GUSB2PHYCFG, phycfg);
 
             gctl = read_dwc3(GCTL);
@@ -1195,9 +1380,18 @@ mod tests {
             gctl |= GCTL_PRTCAPDIR_HOST;
             write_dwc3(GCTL, gctl);
 
-            info!("DWC3 soft reset init: GCTL after = {:#010x}", read_dwc3(GCTL));
-            info!("DWC3 soft reset init: GUSB2PHYCFG after = {:#010x}", read_dwc3(GUSB2PHYCFG));
-            info!("DWC3 soft reset init: GUSB3PIPECTL after = {:#010x}", read_dwc3(GUSB3PIPECTL));
+            info!(
+                "DWC3 soft reset init: GCTL after = {:#010x}",
+                read_dwc3(GCTL)
+            );
+            info!(
+                "DWC3 soft reset init: GUSB2PHYCFG after = {:#010x}",
+                read_dwc3(GUSB2PHYCFG)
+            );
+            info!(
+                "DWC3 soft reset init: GUSB3PIPECTL after = {:#010x}",
+                read_dwc3(GUSB3PIPECTL)
+            );
         }
         info!("DWC3 soft reset init complete");
     }
@@ -1212,26 +1406,33 @@ mod tests {
             let ped = (portsc >> 1) & 1;
             let pls = (portsc >> 5) & 0xf;
             let speed = (portsc >> 10) & 0xf;
-            info!("Port status {}: PORTSC={:#010x} CCS={} PED={} PLS={} Speed={}", 
-                  label, portsc, ccs, ped, pls, speed);
+            info!(
+                "Port status {}: PORTSC={:#010x} CCS={} PED={} PLS={} Speed={}",
+                label, portsc, ccs, ped, pls, speed
+            );
         }
     }
-    
+
     fn init_dwc3_host_mode_simple() {
         let xhci_base = iomap(USB3_1_BASE.into(), 0x10000);
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
 
         unsafe {
-            let read_dwc3 = |off: usize| -> u32 {
-                (dwc3_base.add(off) as *const u32).read_volatile()
-            };
+            let read_dwc3 =
+                |off: usize| -> u32 { (dwc3_base.add(off) as *const u32).read_volatile() };
             let write_dwc3 = |off: usize, val: u32| {
                 (dwc3_base.add(off) as *mut u32).write_volatile(val);
             };
 
             info!("DWC3 simple init: GCTL before = {:#010x}", read_dwc3(GCTL));
-            info!("DWC3 simple init: GUSB2PHYCFG before = {:#010x}", read_dwc3(GUSB2PHYCFG));
-            info!("DWC3 simple init: GUSB3PIPECTL before = {:#010x}", read_dwc3(GUSB3PIPECTL));
+            info!(
+                "DWC3 simple init: GUSB2PHYCFG before = {:#010x}",
+                read_dwc3(GUSB2PHYCFG)
+            );
+            info!(
+                "DWC3 simple init: GUSB3PIPECTL before = {:#010x}",
+                read_dwc3(GUSB3PIPECTL)
+            );
 
             let mut pipe = read_dwc3(GUSB3PIPECTL);
             pipe &= !GUSB3PIPECTL_DEPOCHANGE;
@@ -1252,8 +1453,14 @@ mod tests {
             write_dwc3(GCTL, gctl);
 
             info!("DWC3 simple init: GCTL after = {:#010x}", read_dwc3(GCTL));
-            info!("DWC3 simple init: GUSB2PHYCFG after = {:#010x}", read_dwc3(GUSB2PHYCFG));
-            info!("DWC3 simple init: GUSB3PIPECTL after = {:#010x}", read_dwc3(GUSB3PIPECTL));
+            info!(
+                "DWC3 simple init: GUSB2PHYCFG after = {:#010x}",
+                read_dwc3(GUSB2PHYCFG)
+            );
+            info!(
+                "DWC3 simple init: GUSB3PIPECTL after = {:#010x}",
+                read_dwc3(GUSB3PIPECTL)
+            );
         }
         info!("DWC3 simple init complete (no soft reset)");
     }
@@ -1265,11 +1472,14 @@ mod tests {
             let cdr_done = (pma_base.as_ptr().add(0x0B84) as *const u32).read_volatile();
             let afc_done = (lcpll_done >> 6) & 1;
             let lock_done = (lcpll_done >> 7) & 1;
-            
+
             info!("PHY lock status after DWC3 soft reset:");
-            info!("  LCPLL_DONE = {:#04x} (AFC_DONE={}, LOCK_DONE={})", lcpll_done, afc_done, lock_done);
+            info!(
+                "  LCPLL_DONE = {:#04x} (AFC_DONE={}, LOCK_DONE={})",
+                lcpll_done, afc_done, lock_done
+            );
             info!("  CDR_DONE = {:#04x}", cdr_done);
-            
+
             if afc_done == 0 || lock_done == 0 {
                 warn!("PHY PLL NOT LOCKED after soft reset!");
             }
@@ -1295,15 +1505,17 @@ mod tests {
             let cdr_done = (pma_base.as_ptr().add(0x0B84) as *const u32).read_volatile();
             let afc_done = (lcpll_done >> 6) & 1;
             let lock_done = (lcpll_done >> 7) & 1;
-            
-            info!("PHY lock check: LCPLL_DONE={:#04x} (AFC={}, LOCK={}), CDR_DONE={:#04x}", 
-                  lcpll_done, afc_done, lock_done, cdr_done);
-            
+
+            info!(
+                "PHY lock check: LCPLL_DONE={:#04x} (AFC={}, LOCK={}), CDR_DONE={:#04x}",
+                lcpll_done, afc_done, lock_done, cdr_done
+            );
+
             if afc_done == 1 && lock_done == 1 && cdr_done == 0x0f {
                 info!("PHY PLL locked successfully");
                 return true;
             }
-            
+
             warn!("PHY PLL not locked, waiting more...");
             for retry in 0..10 {
                 spin_delay_ms(100);
@@ -1317,7 +1529,7 @@ mod tests {
                     return true;
                 }
             }
-            
+
             false
         }
     }
@@ -1327,9 +1539,8 @@ mod tests {
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
 
         unsafe {
-            let read_dwc3 = |off: usize| -> u32 {
-                (dwc3_base.add(off) as *const u32).read_volatile()
-            };
+            let read_dwc3 =
+                |off: usize| -> u32 { (dwc3_base.add(off) as *const u32).read_volatile() };
             let write_dwc3 = |off: usize, val: u32| {
                 (dwc3_base.add(off) as *mut u32).write_volatile(val);
             };
@@ -1408,16 +1619,18 @@ mod tests {
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
 
         unsafe {
-            let read_dwc3 = |off: usize| -> u32 {
-                (dwc3_base.add(off) as *const u32).read_volatile()
-            };
+            let read_dwc3 =
+                |off: usize| -> u32 { (dwc3_base.add(off) as *const u32).read_volatile() };
             let write_dwc3 = |off: usize, val: u32| {
                 (dwc3_base.add(off) as *mut u32).write_volatile(val);
             };
 
             let gctl_before = read_dwc3(GCTL);
             let prtcap_before = (gctl_before >> 12) & 0x3;
-            info!("DWC3 early host mode: GCTL={:#010x} PRTCAPDIR={}", gctl_before, prtcap_before);
+            info!(
+                "DWC3 early host mode: GCTL={:#010x} PRTCAPDIR={}",
+                gctl_before, prtcap_before
+            );
 
             let mut gctl = gctl_before;
             gctl &= !GCTL_PRTCAPDIR_MASK;
@@ -1426,7 +1639,10 @@ mod tests {
 
             let gctl_after = read_dwc3(GCTL);
             let prtcap_after = (gctl_after >> 12) & 0x3;
-            info!("DWC3 early host mode: GCTL={:#010x} PRTCAPDIR={}", gctl_after, prtcap_after);
+            info!(
+                "DWC3 early host mode: GCTL={:#010x} PRTCAPDIR={}",
+                gctl_after, prtcap_after
+            );
         }
     }
 
@@ -1435,9 +1651,8 @@ mod tests {
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
 
         unsafe {
-            let read_dwc3 = |off: usize| -> u32 {
-                (dwc3_base.add(off) as *const u32).read_volatile()
-            };
+            let read_dwc3 =
+                |off: usize| -> u32 { (dwc3_base.add(off) as *const u32).read_volatile() };
             let write_dwc3 = |off: usize, val: u32| {
                 (dwc3_base.add(off) as *mut u32).write_volatile(val);
             };
@@ -1447,14 +1662,17 @@ mod tests {
             info!("GUSB2PHYCFG before: {:#010x}", read_dwc3(GUSB2PHYCFG));
             info!("GUSB3PIPECTL before: {:#010x}", read_dwc3(GUSB3PIPECTL));
             info!("DCTL before: {:#010x}", read_dwc3(DCTL));
-            
+
             info!("Step 0: Device soft reset (DCTL.CSFTRST)...");
             write_dwc3(DCTL, DCTL_CSFTRST);
             let mut timeout = 5000u32;
             loop {
                 let dctl = read_dwc3(DCTL);
                 if (dctl & DCTL_CSFTRST) == 0 {
-                    info!("Device soft reset complete after {} iterations", 5000 - timeout);
+                    info!(
+                        "Device soft reset complete after {} iterations",
+                        5000 - timeout
+                    );
                     break;
                 }
                 timeout -= 1;
@@ -1471,7 +1689,7 @@ mod tests {
             // U-Boot SETS SUSPHY for DWC3 > 1.94a (RK3588 doesn't have dis_u3_susphy_quirk)
             pipe |= GUSB3PIPECTL_SUSPHY;
             write_dwc3(GUSB3PIPECTL, pipe);
-            
+
             info!("Step 2: Configure GUSB2PHYCFG...");
             let mut phycfg = read_dwc3(GUSB2PHYCFG);
             phycfg |= GUSB2PHYCFG_PHYIF;
@@ -1502,9 +1720,8 @@ mod tests {
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
 
         unsafe {
-            let read_dwc3 = |off: usize| -> u32 {
-                (dwc3_base.add(off) as *const u32).read_volatile()
-            };
+            let read_dwc3 =
+                |off: usize| -> u32 { (dwc3_base.add(off) as *const u32).read_volatile() };
             let write_dwc3 = |off: usize, val: u32| {
                 (dwc3_base.add(off) as *mut u32).write_volatile(val);
             };
@@ -1547,24 +1764,27 @@ mod tests {
         const CMD_RUN: u32 = 1 << 0;
         const CMD_RESET: u32 = 1 << 1;
         const STS_HALT: u32 = 1 << 0;
-        const STS_CNR: u32 = 1 << 11;  // Controller Not Ready
+        const STS_CNR: u32 = 1 << 11; // Controller Not Ready
         unsafe {
             let caplength = (xhci_base.as_ptr().add(0x00) as *const u8).read_volatile();
             let op_base = xhci_base.as_ptr().add(caplength as usize);
-            
+
             let usbcmd_ptr = op_base.add(0x00) as *mut u32;
             let usbsts_ptr = op_base.add(0x04) as *const u32;
-            
+
             let usbcmd = usbcmd_ptr.read_volatile();
             let usbsts = usbsts_ptr.read_volatile();
-            info!("Before reset: USBCMD={:#010x}, USBSTS={:#010x}", usbcmd, usbsts);
-            
+            info!(
+                "Before reset: USBCMD={:#010x}, USBSTS={:#010x}",
+                usbcmd, usbsts
+            );
+
             // Step 1: Halt the controller if not already halted
             if (usbsts & STS_HALT) == 0 {
                 info!("Halting xHCI controller...");
                 let cmd = usbcmd & !CMD_RUN;
                 usbcmd_ptr.write_volatile(cmd);
-                
+
                 // Wait for halt
                 for _ in 0..1000 {
                     let sts = usbsts_ptr.read_volatile();
@@ -1577,12 +1797,12 @@ mod tests {
                     }
                 }
             }
-            
+
             // Step 2: Reset the controller (like U-Boot xhci_reset)
             info!("Resetting xHCI controller (CMD_RESET)...");
             let cmd = usbcmd_ptr.read_volatile();
             usbcmd_ptr.write_volatile(cmd | CMD_RESET);
-            
+
             // Wait for reset to complete (CMD_RESET bit clears)
             for i in 0..1000 {
                 let cmd = usbcmd_ptr.read_volatile();
@@ -1594,7 +1814,7 @@ mod tests {
                     core::hint::spin_loop();
                 }
             }
-            
+
             // Step 3: Wait for Controller Not Ready to clear
             for i in 0..1000 {
                 let sts = usbsts_ptr.read_volatile();
@@ -1606,50 +1826,69 @@ mod tests {
                     core::hint::spin_loop();
                 }
             }
-            
+
             let usbcmd_after_reset = usbcmd_ptr.read_volatile();
             let usbsts_after_reset = usbsts_ptr.read_volatile();
-            info!("After reset: USBCMD={:#010x}, USBSTS={:#010x}", usbcmd_after_reset, usbsts_after_reset);
-            
+            info!(
+                "After reset: USBCMD={:#010x}, USBSTS={:#010x}",
+                usbcmd_after_reset, usbsts_after_reset
+            );
+
             // Check PHY PLL lock immediately after xHCI reset
             let pma_base_check = iomap(0xfed98000.into(), 0x10000);
-            let lcpll_after_reset = (pma_base_check.as_ptr().add(0x0350) as *const u32).read_volatile();
-            let cdr_after_reset = (pma_base_check.as_ptr().add(0x0B84) as *const u32).read_volatile();
-            info!("PHY PLL after xHCI reset: LCPLL={:#04x} CDR={:#04x} (AFC={}, LOCK={})", 
-                  lcpll_after_reset, cdr_after_reset,
-                  (lcpll_after_reset >> 6) & 1, (lcpll_after_reset >> 7) & 1);
-            
+            let lcpll_after_reset =
+                (pma_base_check.as_ptr().add(0x0350) as *const u32).read_volatile();
+            let cdr_after_reset =
+                (pma_base_check.as_ptr().add(0x0B84) as *const u32).read_volatile();
+            info!(
+                "PHY PLL after xHCI reset: LCPLL={:#04x} CDR={:#04x} (AFC={}, LOCK={})",
+                lcpll_after_reset,
+                cdr_after_reset,
+                (lcpll_after_reset >> 6) & 1,
+                (lcpll_after_reset >> 7) & 1
+            );
+
             let hcsparams1 = (xhci_base.as_ptr().add(0x04) as *const u32).read_volatile();
             let max_ports = ((hcsparams1 >> 24) & 0xff) as usize;
             info!("xHCI has {} ports, powering on all ports...", max_ports);
-            
+
             const PORT_POWER: u32 = 1 << 9;
             for i in 0..max_ports {
                 let portsc_offset = 0x400 + i * 0x10;
                 let portsc_ptr = op_base.add(portsc_offset) as *mut u32;
                 let portsc = portsc_ptr.read_volatile();
-                info!("Port {} PORTSC before power: {:#010x} (PP={})", i, portsc, (portsc >> 9) & 1);
-                
+                info!(
+                    "Port {} PORTSC before power: {:#010x} (PP={})",
+                    i,
+                    portsc,
+                    (portsc >> 9) & 1
+                );
+
                 if (portsc & PORT_POWER) == 0 {
                     let new_portsc = portsc | PORT_POWER;
                     portsc_ptr.write_volatile(new_portsc);
                     info!("Port {} power enabled", i);
                 }
             }
-            
+
             spin_delay_ms(20);
-            
+
             for i in 0..max_ports {
                 let portsc_offset = 0x400 + i * 0x10;
                 let portsc_ptr = op_base.add(portsc_offset) as *const u32;
                 let portsc = portsc_ptr.read_volatile();
-                info!("Port {} PORTSC after power: {:#010x} (PP={})", i, portsc, (portsc >> 9) & 1);
+                info!(
+                    "Port {} PORTSC after power: {:#010x} (PP={})",
+                    i,
+                    portsc,
+                    (portsc >> 9) & 1
+                );
             }
-            
+
             info!("Starting xHCI controller (CMD_RUN)...");
             let cmd = usbcmd_ptr.read_volatile();
             usbcmd_ptr.write_volatile(cmd | CMD_RUN);
-            
+
             // Wait for STS_HALT to clear
             for i in 0..100 {
                 let sts = usbsts_ptr.read_volatile();
@@ -1661,10 +1900,13 @@ mod tests {
                     core::hint::spin_loop();
                 }
             }
-            
+
             let usbcmd_after = usbcmd_ptr.read_volatile();
             let usbsts_after = usbsts_ptr.read_volatile();
-            info!("After start: USBCMD={:#010x}, USBSTS={:#010x}", usbcmd_after, usbsts_after);
+            info!(
+                "After start: USBCMD={:#010x}, USBSTS={:#010x}",
+                usbcmd_after, usbsts_after
+            );
         }
     }
 
@@ -1673,16 +1915,21 @@ mod tests {
         let dwc3_base = unsafe { xhci_base.as_ptr().add(DWC3_OFFSET) };
 
         unsafe {
-            let read_dwc3 = |off: usize| -> u32 {
-                (dwc3_base.add(off) as *const u32).read_volatile()
-            };
+            let read_dwc3 =
+                |off: usize| -> u32 { (dwc3_base.add(off) as *const u32).read_volatile() };
             let write_dwc3 = |off: usize, val: u32| {
                 (dwc3_base.add(off) as *mut u32).write_volatile(val);
             };
 
             info!("DWC3 init: GCTL before = {:#010x}", read_dwc3(GCTL));
-            info!("DWC3 init: GUSB2PHYCFG before = {:#010x}", read_dwc3(GUSB2PHYCFG));
-            info!("DWC3 init: GUSB3PIPECTL before = {:#010x}", read_dwc3(GUSB3PIPECTL));
+            info!(
+                "DWC3 init: GUSB2PHYCFG before = {:#010x}",
+                read_dwc3(GUSB2PHYCFG)
+            );
+            info!(
+                "DWC3 init: GUSB3PIPECTL before = {:#010x}",
+                read_dwc3(GUSB3PIPECTL)
+            );
 
             let mut gctl = read_dwc3(GCTL);
             gctl |= GCTL_CORESOFTRESET;
@@ -1727,8 +1974,14 @@ mod tests {
             write_dwc3(GCTL, gctl);
 
             info!("DWC3 init: GCTL after = {:#010x}", read_dwc3(GCTL));
-            info!("DWC3 init: GUSB2PHYCFG after = {:#010x}", read_dwc3(GUSB2PHYCFG));
-            info!("DWC3 init: GUSB3PIPECTL after = {:#010x}", read_dwc3(GUSB3PIPECTL));
+            info!(
+                "DWC3 init: GUSB2PHYCFG after = {:#010x}",
+                read_dwc3(GUSB2PHYCFG)
+            );
+            info!(
+                "DWC3 init: GUSB3PIPECTL after = {:#010x}",
+                read_dwc3(GUSB3PIPECTL)
+            );
         }
         info!("DWC3 full init complete");
     }
@@ -1858,7 +2111,8 @@ mod tests {
         const USB2PHY1_GRF_SIZE: usize = 0x8000;
 
         let grf_base = iomap(USB2PHY1_GRF_SYSCON_BASE.into(), USB2PHY1_GRF_SIZE);
-        let phy_base = unsafe { core::ptr::NonNull::new_unchecked(grf_base.as_ptr().add(USB2PHY1_OFFSET)) };
+        let phy_base =
+            unsafe { core::ptr::NonNull::new_unchecked(grf_base.as_ptr().add(USB2PHY1_OFFSET)) };
         let cru_base = iomap(CRU_BASE.into(), 0x10000);
 
         unsafe {
@@ -1907,13 +2161,25 @@ mod tests {
             };
 
             // Read PHY registers (at offset 0x4000)
-            info!("USB2PHY1 (phy): reg 0x0008 = {:#010x}", read_phy_reg(0x0008));
-            info!("USB2PHY1 (phy): reg 0x000c = {:#010x}", read_phy_reg(0x000c));
-            
+            info!(
+                "USB2PHY1 (phy): reg 0x0008 = {:#010x}",
+                read_phy_reg(0x0008)
+            );
+            info!(
+                "USB2PHY1 (phy): reg 0x000c = {:#010x}",
+                read_phy_reg(0x000c)
+            );
+
             // Read GRF syscon registers (at base, for bvalid)
-            info!("USB2PHY1 (grf): reg 0x0008 = {:#010x}", read_grf_reg(0x0008));
-            info!("USB2PHY1 (grf): reg 0x0010 = {:#010x}", read_grf_reg(0x0010));
-            
+            info!(
+                "USB2PHY1 (grf): reg 0x0008 = {:#010x}",
+                read_grf_reg(0x0008)
+            );
+            info!(
+                "USB2PHY1 (grf): reg 0x0010 = {:#010x}",
+                read_grf_reg(0x0010)
+            );
+
             let siddq = read_phy_reg(0x0008);
             if (siddq & (1 << 13)) != 0 {
                 info!("USB2PHY1: SIDDQ set, clearing to power on analog block");
@@ -1934,16 +2200,24 @@ mod tests {
             }
 
             let sus_before = read_phy_reg(0x000c);
-            info!("USB2PHY1: phy_sus (0x000c) before = {:#010x}, bit11 = {}", sus_before, (sus_before >> 11) & 1);
-            
+            info!(
+                "USB2PHY1: phy_sus (0x000c) before = {:#010x}, bit11 = {}",
+                sus_before,
+                (sus_before >> 11) & 1
+            );
+
             write_phy_reg(0x000c, 1 << 11, 0);
-            
+
             for _ in 0..200000 {
                 core::hint::spin_loop();
             }
-            
+
             let sus_after = read_phy_reg(0x000c);
-            info!("USB2PHY1: phy_sus (0x000c) after = {:#010x}, bit11 = {}", sus_after, (sus_after >> 11) & 1);
+            info!(
+                "USB2PHY1: phy_sus (0x000c) after = {:#010x}, bit11 = {}",
+                sus_after,
+                (sus_after >> 11) & 1
+            );
 
             // Enable bvalid via software control in GRF syscon (NOT PHY regs!)
             // This is CRITICAL for device detection in USBDP combo PHY!
@@ -1955,41 +2229,51 @@ mod tests {
             //   0x3 = use external VBUS valid indicator and assert it
             // CON4 bits 3-2: sft_vbus_sel (bit 3) + sft_vbus (bit 2)
             //   0x3 = use software VBUS control and assert VBUS valid
-            
+
             info!("USB2PHY1: Enabling bvalid via software control in GRF...");
-            
+
             // GRF CON2 (0x0008): Set vbusvldextsel=1, vbusvldext=1 (bits 1:0 = 0x3)
             let con2_before = read_grf_reg(0x0008);
             write_grf_reg(0x0008, 0x3, 0x3);
             let con2_after = read_grf_reg(0x0008);
-            info!("USB2PHY1 GRF CON2 (0x0008) bvalid: {:#010x} -> {:#010x}", con2_before, con2_after);
-            
+            info!(
+                "USB2PHY1 GRF CON2 (0x0008) bvalid: {:#010x} -> {:#010x}",
+                con2_before, con2_after
+            );
+
             // GRF CON4 (0x0010): Set sft_vbus_sel=1, sft_vbus=1 (bits 3:2 = 0xC)
             let con4_before = read_grf_reg(0x0010);
             write_grf_reg(0x0010, 0xC, 0xC);
             let con4_after = read_grf_reg(0x0010);
-            info!("USB2PHY1 GRF CON4 (0x0010) bvalid: {:#010x} -> {:#010x}", con4_before, con4_after);
-            
+            info!(
+                "USB2PHY1 GRF CON4 (0x0010) bvalid: {:#010x} -> {:#010x}",
+                con4_before, con4_after
+            );
+
             // Wait for UTMI clock to stabilize after bvalid assertion
             for _ in 0..200000 {
                 core::hint::spin_loop();
             }
-            
+
             // Read STATUS0 to check actual PHY status
             let status0 = read_grf_reg(0x00C0);
             let utmi_bvalid = (status0 >> 6) & 1;
             let utmi_linestate = (status0 >> 9) & 0x3;
             let utmi_vbusvalid = (status0 >> 8) & 1;
-            info!("USB2PHY1 STATUS0 (grf base): {:#010x} (bvalid={}, linestate={:02b}, vbusvalid={})", 
-                  status0, utmi_bvalid, utmi_linestate, utmi_vbusvalid);
-            
+            info!(
+                "USB2PHY1 STATUS0 (grf base): {:#010x} (bvalid={}, linestate={:02b}, vbusvalid={})",
+                status0, utmi_bvalid, utmi_linestate, utmi_vbusvalid
+            );
+
             // Also read STATUS0 at PHY offset (0x4000 + 0xC0)
             let phy_status0 = read_phy_reg(0x00C0);
             let phy_bvalid = (phy_status0 >> 6) & 1;
             let phy_linestate = (phy_status0 >> 9) & 0x3;
             let phy_vbusvalid = (phy_status0 >> 8) & 1;
-            info!("USB2PHY1 STATUS0 (phy offset): {:#010x} (bvalid={}, linestate={:02b}, vbusvalid={})", 
-                  phy_status0, phy_bvalid, phy_linestate, phy_vbusvalid);
+            info!(
+                "USB2PHY1 STATUS0 (phy offset): {:#010x} (bvalid={}, linestate={:02b}, vbusvalid={})",
+                phy_status0, phy_bvalid, phy_linestate, phy_vbusvalid
+            );
         }
 
         info!("usb2phy1 fully initialized with bvalid enabled");
@@ -2019,7 +2303,6 @@ mod tests {
     fn init_usbdp_phy1_full(_fdt: &Fdt<'static>) -> Result<(), PhyError> {
         info!("=== Starting full USBDP PHY1 initialization ===");
 
-
         let pma_base = iomap(USBDPPHY1_PMA_BASE.into(), 0x10000);
         let udphygrf_base = iomap(USBDPPHY1_GRF_BASE.into(), 0x4000);
         let usbgrf_base = iomap(USB_GRF_BASE.into(), 0x1000);
@@ -2033,28 +2316,37 @@ mod tests {
             let lcpll = (pma_base.as_ptr().add(0x0350) as *const u32).read_volatile();
             let cdr = (pma_base.as_ptr().add(0x0B84) as *const u32).read_volatile();
             let locked = (lcpll & 0xC0) == 0xC0 && (cdr & 0x0F) != 0;
-            info!("PHY lock check: LCPLL={:#04x} CDR={:#04x} already_init={}", lcpll, cdr, locked);
+            info!(
+                "PHY lock check: LCPLL={:#04x} CDR={:#04x} already_init={}",
+                lcpll, cdr, locked
+            );
             locked
         };
         if phy_already_initialized {
             info!("PHY already initialized by bootloader, skipping full PHY init");
             info!("Only configuring USB_GRF to enable USB3 port...");
-            
+
             unsafe {
                 let con1_ptr = usbgrf_base.as_ptr().add(0x34) as *mut u32;
                 let old_con1 = (usbgrf_base.as_ptr().add(0x34) as *const u32).read_volatile();
                 // Write 0x1100 to enable USB3: host_num_u3_port=1, host_num_u2_port=1
                 con1_ptr.write_volatile((0xFFFF << 16) | 0x1100);
                 let new_con1 = (usbgrf_base.as_ptr().add(0x34) as *const u32).read_volatile();
-                info!("USB3OTG1_CON1: {:#010x} -> {:#010x} (USB3 port enabled)", old_con1, new_con1);
-                
+                info!(
+                    "USB3OTG1_CON1: {:#010x} -> {:#010x} (USB3 port enabled)",
+                    old_con1, new_con1
+                );
+
                 let grf_con1_ptr = udphygrf_base.as_ptr().add(0x04) as *mut u32;
                 let old_grf = (udphygrf_base.as_ptr().add(0x04) as *const u32).read_volatile();
                 grf_con1_ptr.write_volatile(old_grf | (0x3 << 29) | (0x3 << 13));
                 let new_grf = (udphygrf_base.as_ptr().add(0x04) as *const u32).read_volatile();
-                info!("USBDPPHY1_GRF CON1: {:#010x} -> {:#010x} (rx_lfps, low_pwrn enabled)", old_grf, new_grf);
+                info!(
+                    "USBDPPHY1_GRF CON1: {:#010x} -> {:#010x} (rx_lfps, low_pwrn enabled)",
+                    old_grf, new_grf
+                );
             }
-            
+
             info!("=== USBDP PHY1 quick config complete (bootloader-init path) ===");
             return Ok(());
         }
@@ -2085,39 +2377,53 @@ mod tests {
             let softrst_con02 = (cru_base.as_ptr().add(0xa08) as *const u32).read_volatile();
             let softrst_con03 = (cru_base.as_ptr().add(0xa0c) as *const u32).read_volatile();
             let softrst_con72 = (cru_base.as_ptr().add(0xb20) as *const u32).read_volatile();
-            info!("CRU reset state: CON02={:#010x} CON03={:#010x} CON72={:#010x}", 
-                  softrst_con02, softrst_con03, softrst_con72);
-            
+            info!(
+                "CRU reset state: CON02={:#010x} CON03={:#010x} CON72={:#010x}",
+                softrst_con02, softrst_con03, softrst_con72
+            );
+
             let init_reset = (softrst_con02 >> 15) & 1;
             let cmn_reset = (softrst_con03 >> 0) & 1;
             let lane_reset = (softrst_con03 >> 1) & 1;
             let pcs_reset = (softrst_con03 >> 2) & 1;
             let pma_apb_reset = (softrst_con72 >> 4) & 1;
-            info!("PHY1 reset bits: init={} cmn={} lane={} pcs={} pma_apb={}", 
-                  init_reset, cmn_reset, lane_reset, pcs_reset, pma_apb_reset);
-            
+            info!(
+                "PHY1 reset bits: init={} cmn={} lane={} pcs={} pma_apb={}",
+                init_reset, cmn_reset, lane_reset, pcs_reset, pma_apb_reset
+            );
+
             let gate_con02 = (cru_base.as_ptr().add(0x0808) as *const u32).read_volatile();
             let gate_con72 = (cru_base.as_ptr().add(0x0920) as *const u32).read_volatile();
-            info!("Clock gates: GATE_CON02={:#010x} (IMMORTAL1 bit15={}) GATE_CON72={:#010x} (PCLK_PHY1 bit4={})", 
-                  gate_con02, (gate_con02 >> 15) & 1, gate_con72, (gate_con72 >> 4) & 1);
-                  
+            info!(
+                "Clock gates: GATE_CON02={:#010x} (IMMORTAL1 bit15={}) GATE_CON72={:#010x} (PCLK_PHY1 bit4={})",
+                gate_con02,
+                (gate_con02 >> 15) & 1,
+                gate_con72,
+                (gate_con72 >> 4) & 1
+            );
+
             let lane_mux = (pma_base.as_ptr().add(0x0288) as *const u32).read_volatile();
             let lcpll = (pma_base.as_ptr().add(0x0350) as *const u32).read_volatile();
             let cdr = (pma_base.as_ptr().add(0x0B84) as *const u32).read_volatile();
-            info!("PHY state before init: LANE_MUX={:#04x} LCPLL={:#04x} CDR={:#04x}", 
-                  lane_mux, lcpll, cdr);
+            info!(
+                "PHY state before init: LANE_MUX={:#04x} LCPLL={:#04x} CDR={:#04x}",
+                lane_mux, lcpll, cdr
+            );
         }
         info!("Enabling PHY clocks: USBDP_PHY1_IMMORTAL, PCLK_USBDPPHY1");
         unsafe {
             let gate_con02_ptr = cru_base.as_ptr().add(0x0808) as *mut u32;
             gate_con02_ptr.write_volatile((1u32 << 31) | (0u32 << 15));
-            
+
             let gate_con72_ptr = cru_base.as_ptr().add(0x0920) as *mut u32;
             gate_con72_ptr.write_volatile((1u32 << 20) | (0u32 << 4));
-            
+
             let gate_con02_after = (cru_base.as_ptr().add(0x0808) as *const u32).read_volatile();
             let gate_con72_after = (cru_base.as_ptr().add(0x0920) as *const u32).read_volatile();
-            info!("After clock enable: GATE_CON02={:#010x} GATE_CON72={:#010x}", gate_con02_after, gate_con72_after);
+            info!(
+                "After clock enable: GATE_CON02={:#010x} GATE_CON72={:#010x}",
+                gate_con02_after, gate_con72_after
+            );
         }
         // CRITICAL: Disable USB3 port BEFORE PHY init (like U-Boot/Linux)
         // This ensures the port doesn't try to use the PHY until it's fully initialized
@@ -2128,13 +2434,16 @@ mod tests {
             let old_con1 = (usbgrf_base.as_ptr().add(0x34) as *const u32).read_volatile();
             con1_ptr.write_volatile((0xFFFF << 16) | 0x0188);
             let new_con1 = (usbgrf_base.as_ptr().add(0x34) as *const u32).read_volatile();
-            info!("USB3OTG1_CON1: {:#010x} -> {:#010x} (USB3 port DISABLED for PHY init)", old_con1, new_con1);
+            info!(
+                "USB3OTG1_CON1: {:#010x} -> {:#010x} (USB3 port DISABLED for PHY init)",
+                old_con1, new_con1
+            );
         }
         info!("Step 0b: Asserting ALL PHY resets");
-        assert_phy_reset(cru_base, 47);   // init
-        assert_phy_reset(cru_base, 48);   // cmn
-        assert_phy_reset(cru_base, 49);   // lane
-        assert_phy_reset(cru_base, 50);   // pcs_apb
+        assert_phy_reset(cru_base, 47); // init
+        assert_phy_reset(cru_base, 48); // cmn
+        assert_phy_reset(cru_base, 49); // lane
+        assert_phy_reset(cru_base, 50); // pcs_apb
         assert_phy_reset(cru_base, 1156); // pma_apb
         for _ in 0..10000 {
             core::hint::spin_loop();
@@ -2143,8 +2452,10 @@ mod tests {
             let softrst_con02 = (cru_base.as_ptr().add(0xa08) as *const u32).read_volatile();
             let softrst_con03 = (cru_base.as_ptr().add(0xa0c) as *const u32).read_volatile();
             let softrst_con72 = (cru_base.as_ptr().add(0xb20) as *const u32).read_volatile();
-            info!("After assert: CON02={:#010x} CON03={:#010x} CON72={:#010x}", 
-                  softrst_con02, softrst_con03, softrst_con72);
+            info!(
+                "After assert: CON02={:#010x} CON03={:#010x} CON72={:#010x}",
+                softrst_con02, softrst_con03, softrst_con72
+            );
         }
 
         info!("Step 1: Enable rx_lfps for USB mode");
@@ -2168,38 +2479,70 @@ mod tests {
         // Step 4: Write init sequence to PMA
         // From U-Boot rk3588_udphy_init_sequence
         const INIT_SEQUENCE: &[(u16, u8)] = &[
-            (0x0104, 0x44), (0x0234, 0xE8),
-            (0x0248, 0x44), (0x028C, 0x18),
-            (0x081C, 0xE5), (0x0878, 0x00),
-            (0x0994, 0x1C), (0x0AF0, 0x00),
-            (0x181C, 0xE5), (0x1878, 0x00),
-            (0x1994, 0x1C), (0x1AF0, 0x00),
-            (0x0428, 0x60), (0x0D58, 0x33),
-            (0x1D58, 0x33), (0x0990, 0x74),
-            (0x0D64, 0x17), (0x08C8, 0x13),
-            (0x1990, 0x74), (0x1D64, 0x17),
-            (0x18C8, 0x13), (0x0D90, 0x40),
-            (0x0DA8, 0x40), (0x0DC0, 0x40),
-            (0x0DD8, 0x40), (0x1D90, 0x40),
-            (0x1DA8, 0x40), (0x1DC0, 0x40),
-            (0x1DD8, 0x40), (0x03C0, 0x30),
-            (0x03C4, 0x06), (0x0E10, 0x00),
-            (0x1E10, 0x00), (0x043C, 0x0F),
-            (0x0D2C, 0xFF), (0x1D2C, 0xFF),
-            (0x0D34, 0x0F), (0x1D34, 0x0F),
-            (0x08FC, 0x2A), (0x0914, 0x28),
-            (0x0A30, 0x03), (0x0E38, 0x05),
-            (0x0ECC, 0x27), (0x0ED0, 0x22),
-            (0x0ED4, 0x26), (0x18FC, 0x2A),
-            (0x1914, 0x28), (0x1A30, 0x03),
-            (0x1E38, 0x05), (0x1ECC, 0x27),
-            (0x1ED0, 0x22), (0x1ED4, 0x26),
-            (0x0048, 0x0F), (0x0060, 0x3C),
-            (0x0064, 0xF7), (0x006C, 0x20),
-            (0x0070, 0x7D), (0x0074, 0x68),
-            (0x0AF4, 0x1A), (0x1AF4, 0x1A),
-            (0x0440, 0x3F), (0x10D4, 0x08),
-            (0x20D4, 0x08), (0x00D4, 0x30),
+            (0x0104, 0x44),
+            (0x0234, 0xE8),
+            (0x0248, 0x44),
+            (0x028C, 0x18),
+            (0x081C, 0xE5),
+            (0x0878, 0x00),
+            (0x0994, 0x1C),
+            (0x0AF0, 0x00),
+            (0x181C, 0xE5),
+            (0x1878, 0x00),
+            (0x1994, 0x1C),
+            (0x1AF0, 0x00),
+            (0x0428, 0x60),
+            (0x0D58, 0x33),
+            (0x1D58, 0x33),
+            (0x0990, 0x74),
+            (0x0D64, 0x17),
+            (0x08C8, 0x13),
+            (0x1990, 0x74),
+            (0x1D64, 0x17),
+            (0x18C8, 0x13),
+            (0x0D90, 0x40),
+            (0x0DA8, 0x40),
+            (0x0DC0, 0x40),
+            (0x0DD8, 0x40),
+            (0x1D90, 0x40),
+            (0x1DA8, 0x40),
+            (0x1DC0, 0x40),
+            (0x1DD8, 0x40),
+            (0x03C0, 0x30),
+            (0x03C4, 0x06),
+            (0x0E10, 0x00),
+            (0x1E10, 0x00),
+            (0x043C, 0x0F),
+            (0x0D2C, 0xFF),
+            (0x1D2C, 0xFF),
+            (0x0D34, 0x0F),
+            (0x1D34, 0x0F),
+            (0x08FC, 0x2A),
+            (0x0914, 0x28),
+            (0x0A30, 0x03),
+            (0x0E38, 0x05),
+            (0x0ECC, 0x27),
+            (0x0ED0, 0x22),
+            (0x0ED4, 0x26),
+            (0x18FC, 0x2A),
+            (0x1914, 0x28),
+            (0x1A30, 0x03),
+            (0x1E38, 0x05),
+            (0x1ECC, 0x27),
+            (0x1ED0, 0x22),
+            (0x1ED4, 0x26),
+            (0x0048, 0x0F),
+            (0x0060, 0x3C),
+            (0x0064, 0xF7),
+            (0x006C, 0x20),
+            (0x0070, 0x7D),
+            (0x0074, 0x68),
+            (0x0AF4, 0x1A),
+            (0x1AF4, 0x1A),
+            (0x0440, 0x3F),
+            (0x10D4, 0x08),
+            (0x20D4, 0x08),
+            (0x00D4, 0x30),
             (0x0024, 0x6e),
         ];
 
@@ -2209,46 +2552,85 @@ mod tests {
                 ptr.write_volatile(value as u32);
             }
         }
-        info!("Step 4: Init sequence written ({} registers)", INIT_SEQUENCE.len());
+        info!(
+            "Step 4: Init sequence written ({} registers)",
+            INIT_SEQUENCE.len()
+        );
 
         // Step 5: Write 24MHz reference clock configuration
         const REFCLK_CFG: &[(u16, u8)] = &[
-            (0x0090, 0x68), (0x0094, 0x68),
-            (0x0128, 0x24), (0x012c, 0x44),
-            (0x0130, 0x3f), (0x0134, 0x44),
-            (0x015c, 0xa9), (0x0160, 0x71),
-            (0x0164, 0x71), (0x0168, 0xa9),
-            (0x0174, 0xa9), (0x0178, 0x71),
-            (0x017c, 0x71), (0x0180, 0xa9),
-            (0x018c, 0x41), (0x0190, 0x00),
-            (0x0194, 0x05), (0x01ac, 0x2a),
-            (0x01b0, 0x17), (0x01b4, 0x17),
-            (0x01b8, 0x2a), (0x01c8, 0x04),
-            (0x01cc, 0x08), (0x01d0, 0x08),
-            (0x01d4, 0x04), (0x01d8, 0x20),
-            (0x01dc, 0x01), (0x01e0, 0x09),
-            (0x01e4, 0x03), (0x01f0, 0x29),
-            (0x01f4, 0x02), (0x01f8, 0x02),
-            (0x01fc, 0x29), (0x0208, 0x2a),
-            (0x020c, 0x17), (0x0210, 0x17),
-            (0x0214, 0x2a), (0x0224, 0x20),
-            (0x03f0, 0x0d), (0x03f4, 0x09),
-            (0x03f8, 0x09), (0x03fc, 0x0d),
-            (0x0404, 0x0e), (0x0408, 0x14),
-            (0x040c, 0x14), (0x0410, 0x3b),
-            (0x0ce0, 0x68), (0x0ce8, 0xd0),
-            (0x0cf0, 0x87), (0x0cf8, 0x70),
-            (0x0d00, 0x70), (0x0d08, 0xa9),
-            (0x1ce0, 0x68), (0x1ce8, 0xd0),
-            (0x1cf0, 0x87), (0x1cf8, 0x70),
-            (0x1d00, 0x70), (0x1d08, 0xa9),
-            (0x0a3c, 0xd0), (0x0a44, 0xd0),
-            (0x0a48, 0x01), (0x0a4c, 0x0d),
-            (0x0a54, 0xe0), (0x0a5c, 0xe0),
-            (0x0a64, 0xa8), (0x1a3c, 0xd0),
-            (0x1a44, 0xd0), (0x1a48, 0x01),
-            (0x1a4c, 0x0d), (0x1a54, 0xe0),
-            (0x1a5c, 0xe0), (0x1a64, 0xa8),
+            (0x0090, 0x68),
+            (0x0094, 0x68),
+            (0x0128, 0x24),
+            (0x012c, 0x44),
+            (0x0130, 0x3f),
+            (0x0134, 0x44),
+            (0x015c, 0xa9),
+            (0x0160, 0x71),
+            (0x0164, 0x71),
+            (0x0168, 0xa9),
+            (0x0174, 0xa9),
+            (0x0178, 0x71),
+            (0x017c, 0x71),
+            (0x0180, 0xa9),
+            (0x018c, 0x41),
+            (0x0190, 0x00),
+            (0x0194, 0x05),
+            (0x01ac, 0x2a),
+            (0x01b0, 0x17),
+            (0x01b4, 0x17),
+            (0x01b8, 0x2a),
+            (0x01c8, 0x04),
+            (0x01cc, 0x08),
+            (0x01d0, 0x08),
+            (0x01d4, 0x04),
+            (0x01d8, 0x20),
+            (0x01dc, 0x01),
+            (0x01e0, 0x09),
+            (0x01e4, 0x03),
+            (0x01f0, 0x29),
+            (0x01f4, 0x02),
+            (0x01f8, 0x02),
+            (0x01fc, 0x29),
+            (0x0208, 0x2a),
+            (0x020c, 0x17),
+            (0x0210, 0x17),
+            (0x0214, 0x2a),
+            (0x0224, 0x20),
+            (0x03f0, 0x0d),
+            (0x03f4, 0x09),
+            (0x03f8, 0x09),
+            (0x03fc, 0x0d),
+            (0x0404, 0x0e),
+            (0x0408, 0x14),
+            (0x040c, 0x14),
+            (0x0410, 0x3b),
+            (0x0ce0, 0x68),
+            (0x0ce8, 0xd0),
+            (0x0cf0, 0x87),
+            (0x0cf8, 0x70),
+            (0x0d00, 0x70),
+            (0x0d08, 0xa9),
+            (0x1ce0, 0x68),
+            (0x1ce8, 0xd0),
+            (0x1cf0, 0x87),
+            (0x1cf8, 0x70),
+            (0x1d00, 0x70),
+            (0x1d08, 0xa9),
+            (0x0a3c, 0xd0),
+            (0x0a44, 0xd0),
+            (0x0a48, 0x01),
+            (0x0a4c, 0x0d),
+            (0x0a54, 0xe0),
+            (0x0a5c, 0xe0),
+            (0x0a64, 0xa8),
+            (0x1a3c, 0xd0),
+            (0x1a44, 0xd0),
+            (0x1a48, 0x01),
+            (0x1a4c, 0x0d),
+            (0x1a54, 0xe0),
+            (0x1a5c, 0xe0),
+            (0x1a64, 0xa8),
         ];
 
         unsafe {
@@ -2257,7 +2639,10 @@ mod tests {
                 ptr.write_volatile(value as u32);
             }
         }
-        info!("Step 5: Refclk config written ({} registers)", REFCLK_CFG.len());
+        info!(
+            "Step 5: Refclk config written ({} registers)",
+            REFCLK_CFG.len()
+        );
 
         // Step 6: Configure lane mux - ALL lanes USB mode (matching U-Boot working config)
         // Note: DTS has rockchip,dp-lane-mux = <2 3> but U-Boot's usb start uses 0x00 (all USB)
@@ -2270,7 +2655,10 @@ mod tests {
             let value: u32 = 0x00;
             let new_val = (current & !mask) | (value & mask);
             ptr.write_volatile(new_val);
-            info!("Lane mux: current=0x{:02x}, new=0x{:02x} (all USB)", current, new_val);
+            info!(
+                "Lane mux: current=0x{:02x}, new=0x{:02x} (all USB)",
+                current, new_val
+            );
         }
 
         info!("Step 7: Deassert init reset (USB mode)");
@@ -2298,7 +2686,10 @@ mod tests {
             }
             timeout -= 1;
             if timeout == 0 {
-                warn!("LCPLL lock timeout! val=0x{:02x} (AFC={}, LOCK={})", val, afc_done, lock_done);
+                warn!(
+                    "LCPLL lock timeout! val=0x{:02x} (AFC={}, LOCK={})",
+                    val, afc_done, lock_done
+                );
                 break;
             }
             for _ in 0..10000 {
@@ -2333,7 +2724,11 @@ mod tests {
         unsafe {
             let ptr = usbgrf_base.as_ptr().add(0x0030) as *const u32;
             let con0 = ptr.read_volatile();
-            info!("Step 10: USB3OTG1_CON0: {:#010x} (bus_filter_bypass={:#x}) - NOT modifying", con0, con0 & 0xF);
+            info!(
+                "Step 10: USB3OTG1_CON0: {:#010x} (bus_filter_bypass={:#x}) - NOT modifying",
+                con0,
+                con0 & 0xF
+            );
         }
 
         // Step 11: ALWAYS enable USB3 after PHY init completes
@@ -2344,7 +2739,10 @@ mod tests {
             let val: u32 = (0xFFFF << 16) | 0x1100;
             ptr.write_volatile(val);
             let con1_after = (usbgrf_base.as_ptr().add(0x0034) as *const u32).read_volatile();
-            info!("Step 11: ENABLE USB3 port (CON1: {:#010x} -> {:#010x})", current_con1, con1_after);
+            info!(
+                "Step 11: ENABLE USB3 port (CON1: {:#010x} -> {:#010x})",
+                current_con1, con1_after
+            );
         }
 
         info!("=== USBDP PHY1 initialization complete ===");
@@ -2353,7 +2751,6 @@ mod tests {
 
     fn reinit_usbdp_phy1_after_reset(_fdt: &Fdt<'static>) -> Result<(), PhyError> {
         info!("=== Re-initializing USBDP PHY1 after DWC3 soft reset ===");
-
 
         let pma_base = iomap(USBDPPHY1_PMA_BASE.into(), 0x10000);
         let udphygrf_base = iomap(USBDPPHY1_GRF_BASE.into(), 0x4000);
@@ -2510,27 +2907,26 @@ mod tests {
             // Ensure GPIO3_B7 is configured as output
             let ddr_ptr = gpio3_base.as_ptr().add(GPIO_SWPORT_DDR_L) as *mut u32;
             ddr_ptr.write_volatile(WRITE_MASK_BIT15 | GPIO3_B7_BIT);
-            
+
             // Turn OFF VBUS
             let dr_ptr = gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *mut u32;
             dr_ptr.write_volatile(WRITE_MASK_BIT15 | 0);
-            
+
             spin_delay_ms(off_ms);
-            
+
             // Turn ON VBUS
             dr_ptr.write_volatile(WRITE_MASK_BIT15 | GPIO3_B7_BIT);
-            
+
             spin_delay_ms(on_wait_ms);
-            
+
             // Check if device connected
             let caplength = (xhci_base.as_ptr().add(0x00) as *const u8).read_volatile();
             let op_base = xhci_base.as_ptr().add(caplength as usize);
-            let portsc = (op_base.add(0x410) as *const u32).read_volatile();  // Port 1 (USB3)
+            let portsc = (op_base.add(0x410) as *const u32).read_volatile(); // Port 1 (USB3)
             let ccs = portsc & 1;
             ccs == 1
         }
     }
-
 }
 
 trait Align {

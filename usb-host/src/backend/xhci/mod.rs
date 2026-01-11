@@ -54,12 +54,12 @@ impl usb_if::host::Controller for Xhci {
             root_hub.init()?;
             self.root = Some(root_hub);
             self.root()?.wait_for_running().await;
-            
+
             // GL3523 hub workaround: Toggle VBUS after xHCI is running
             // This resets the hub so it sees immediate host activity when it powers up.
             // Without this, the hub enters standby mode and doesn't respond to Rx.Detect.
             self.toggle_vbus_if_rk3588().await;
-            
+
             self.root()?.lock().enable_irq();
             self.root()?.lock().reset_ports();
             sleep(Duration::from_millis(100)).await;
@@ -134,9 +134,9 @@ impl Xhci {
             debug!("Detected DWC3-based XHCI controller");
         }
     }
-    
+
     /// Toggle VBUS power if this is an RK3588 USB3_1 controller
-    /// 
+    ///
     /// This is a workaround for the GL3523 USB hub cold-start issue on Orange Pi 5 Plus.
     /// The hub enters a non-responsive standby state if VBUS is present but no USB host
     /// activity occurs within ~1-2 seconds. By toggling VBUS after the xHCI controller
@@ -144,21 +144,18 @@ impl Xhci {
     #[cfg(feature = "aggressive_usb_reset")]
     async fn toggle_vbus_if_rk3588(&self) {
         let base_addr = self.mmio_base.as_ptr() as usize;
-        
+
         if rk3588_phy::is_rk3588_usb3_port1(base_addr) {
             debug!("RK3588 USB3_1: Applying GL3523 hub VBUS toggle workaround");
-            
+
             unsafe {
-                rk3588_phy::toggle_vbus_port1(
-                    rk3588_phy::VBUS_OFF_MS,
-                    rk3588_phy::VBUS_ON_WAIT_MS,
-                );
+                rk3588_phy::toggle_vbus_port1(rk3588_phy::VBUS_OFF_MS, rk3588_phy::VBUS_ON_WAIT_MS);
             }
-            
+
             sleep(Duration::from_millis(200)).await;
         }
     }
-    
+
     /// No-op variant when aggressive_usb_reset feature is disabled
     #[cfg(not(feature = "aggressive_usb_reset"))]
     async fn toggle_vbus_if_rk3588(&self) {
@@ -167,7 +164,7 @@ impl Xhci {
 
     async fn chip_hardware_reset(&mut self) -> Result {
         debug!("Reset begin ...");
-        
+
         self.reg.operational.usbcmd.update_volatile(|c| {
             c.clear_run_stop();
         });
