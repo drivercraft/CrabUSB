@@ -1,12 +1,13 @@
 use core::{any::type_name_of_val, fmt::Debug};
 
-use crate::backend::ty::{DeviceInfoOp, DeviceOp, HostOp};
+use crate::backend::BackendOp;
+use crate::backend::ty::{DeviceInfoOp, DeviceOp};
 
-pub struct DeviceInfo<B: HostOp> {
+pub struct DeviceInfo<B: BackendOp> {
     pub(crate) inner: B::DeviceInfo,
 }
 
-impl<B: HostOp> DeviceInfo<B> {
+impl<B: BackendOp> DeviceInfo<B> {
     pub fn descriptor(&self) -> &crate::DeviceDescriptor {
         self.inner.descriptor()
     }
@@ -16,7 +17,7 @@ impl<B: HostOp> DeviceInfo<B> {
     }
 }
 
-impl<B: HostOp> Debug for DeviceInfo<B> {
+impl<B: BackendOp> Debug for DeviceInfo<B> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("DeviceInfo")
             .field("backend", &type_name_of_val(&self.inner))
@@ -26,13 +27,13 @@ impl<B: HostOp> Debug for DeviceInfo<B> {
     }
 }
 
-pub struct Device<B: HostOp> {
+pub struct Device<B: BackendOp> {
     pub(crate) inner: <B::DeviceInfo as DeviceInfoOp>::Device,
 }
 
 impl<B> Debug for Device<B>
 where
-    B: HostOp,
+    B: BackendOp,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Device")
@@ -43,7 +44,7 @@ where
     }
 }
 
-impl<B: HostOp> Device<B> {
+impl<B: BackendOp> Device<B> {
     pub fn claim_interface(
         &mut self,
         interface: u8,

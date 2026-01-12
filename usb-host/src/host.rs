@@ -6,6 +6,7 @@ use crate::device::*;
 use crate::err::Result;
 
 pub use crate::backend::{
+    BackendOp,
     dwc::{
         CruOp, Dwc, DwcNewParams, DwcParams, UdphyParam, Usb2PhyParam, Usb2PhyPortId,
         UsbPhyInterfaceMode,
@@ -30,7 +31,7 @@ impl USBHost<Dwc> {
     }
 }
 
-impl<B: HostOp> USBHost<B> {
+impl<B: BackendOp> USBHost<B> {
     /// 创建新的 USB 主机控制器
     pub(crate) fn new(backend: B) -> Self {
         Self { backend }
@@ -61,11 +62,11 @@ impl<B: HostOp> USBHost<B> {
     }
 }
 
-pub struct EventHandler<B: HostOp> {
+pub struct EventHandler<B: BackendOp> {
     handler: B::EventHandler,
 }
 
-impl<B: HostOp> EventHandler<B> {
+impl<B: BackendOp> EventHandler<B> {
     /// 处理事件
     pub fn handle_event(&self) -> Event {
         self.handler.handle_event()

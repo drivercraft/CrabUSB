@@ -3,10 +3,10 @@
 //! DWC3 是一个 USB3 DRD (Dual Role Device) 控制器，支持 Host 和 Device 模式。
 //! 本模块实现 Host 模式驱动，基于 xHCI 规范。
 
-use core::{ops::{Deref, DerefMut}};
+use core::ops::{Deref, DerefMut};
 
-use alloc::format;
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -18,12 +18,12 @@ pub use usb_if::DrMode;
 use crate::{
     Mmio, Xhci,
     backend::{
+        BackendOp,
         dwc::{
             event::EventBuffer,
             reg::{GCTL, GHWPARAMS0, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1},
             udphy::Udphy,
         },
-        ty::HostOp,
     },
     err::{Result, USBError},
     osal::kernel::page_size,
@@ -589,7 +589,7 @@ impl Dwc {
     }
 }
 
-impl HostOp for Dwc {
+impl BackendOp for Dwc {
     type DeviceInfo = DeviceInfo;
     type EventHandler = EventHandler;
 

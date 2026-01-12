@@ -15,7 +15,7 @@ use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
 use crate::{
     Mmio,
-    backend::{ty::HostOp, xhci::transfer::TransferResultHandler},
+    backend::{BackendOp, xhci::transfer::TransferResultHandler},
     err::Result,
 };
 use crate::{backend::PortId, osal::SpinWhile};
@@ -83,7 +83,7 @@ impl Xhci {
     }
 }
 
-impl HostOp for Xhci {
+impl BackendOp for Xhci {
     type DeviceInfo = DeviceInfo;
     type EventHandler = EventHandler;
 
@@ -167,7 +167,7 @@ impl Xhci {
 
         for cap in self.extended_capabilities() {
             if let ExtendedCapability::UsbLegacySupport(usb_legacy_support) = cap {
-                // self.legacy_init(usb_legacy_support).await?;
+                self.legacy_init(usb_legacy_support).await?;
             }
         }
 
