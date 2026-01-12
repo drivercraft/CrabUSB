@@ -1,17 +1,13 @@
-use core::fmt::Debug;
-use core::future::Future;
-use core::pin::Pin;
+use core::{fmt::Debug, future::Future};
 
 use usb_if::{
     descriptor::{ConfigurationDescriptor, DeviceDescriptor},
     err::TransferError,
+    host::ControlSetup,
 };
 
 use crate::{
-    backend::ty::{
-        ep::{EndpointControl, EndpointOp},
-        transfer::{Transfer, TransferKind},
-    },
+    backend::ty::ep::{EndpointControl, EndpointOp},
     err::USBError,
 };
 
@@ -53,6 +49,22 @@ pub trait DeviceOp: Send + 'static {
         &mut self,
         configuration_value: u8,
     ) -> impl Future<Output = Result<(), USBError>> + Send;
+
+    async fn control_in(
+        &mut self,
+        param: ControlSetup,
+        buff: &mut [u8],
+    ) -> core::result::Result<usize, TransferError> {
+        self.ep_ctrl().control_in(param, buff).await
+    }
+
+    async fn control_out(
+        &mut self,
+        param: ControlSetup,
+        buff: &[u8],
+    ) -> core::result::Result<usize, TransferError> {
+        self.ep_ctrl().control_out(param, buff).await
+    }
 
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, USBError>;
 }

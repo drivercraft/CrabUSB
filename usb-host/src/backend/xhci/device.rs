@@ -4,8 +4,6 @@ use alloc::vec::Vec;
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
-use usb_if::err::TransferError;
-use usb_if::host::ControlSetup;
 use xhci::ring::trb::command;
 
 use crate::backend::Dci;
@@ -240,22 +238,6 @@ impl Device {
         debug!("Address slot ok {result:x?}");
 
         Ok(())
-    }
-
-    pub async fn control_in(
-        &mut self,
-        param: ControlSetup,
-        buff: &mut [u8],
-    ) -> core::result::Result<usize, TransferError> {
-        self.ep_ctrl().control_in(param, buff).await
-    }
-
-    pub async fn control_out(
-        &mut self,
-        param: ControlSetup,
-        buff: &[u8],
-    ) -> core::result::Result<usize, TransferError> {
-        self.ep_ctrl().control_out(param, buff).await
     }
 
     async fn read_descriptor(&mut self) -> Result<()> {

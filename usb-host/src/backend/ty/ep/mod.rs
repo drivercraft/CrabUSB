@@ -1,9 +1,9 @@
-use core::future::Future;
-use core::ops::{Deref, DerefMut};
-use core::pin::Pin;
-use core::task::{Context, Poll};
-
-use crate::backend::ty::transfer::TransferKind;
+use core::{
+    future::Future,
+    ops::{Deref, DerefMut},
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use super::transfer::Transfer;
 use usb_if::err::TransferError;
@@ -46,7 +46,6 @@ impl<T: EndpointOp> DerefMut for EndpointBase<T> {
         &mut self.raw
     }
 }
-
 
 pub trait EndpointOp: Send + 'static {
     fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle<'_>, TransferError>;
