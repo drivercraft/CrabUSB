@@ -279,15 +279,28 @@ impl Root {
         let regs = &mut self.reg;
         let port_len = regs.port_register_set.len();
 
+        // Enable port power for all ports
         for i in 0..port_len {
-            debug!("Port {i} start reset",);
+            let portsc = regs.port_register_set.read_volatile_at(i).portsc;
+            if !portsc.port_power() {
+                regs.port_register_set.update_volatile_at(i, |port| {
+                    port.portsc.set_port_power();
+                });
+                for _ in 0..100000 {
+                    core::hint::spin_loop();
+                }
+            }
+        }
+
+        // Reset all ports
+        for i in 0..port_len {
             regs.port_register_set.update_volatile_at(i, |port| {
                 port.portsc.set_0_port_enabled_disabled();
                 port.portsc.set_port_reset();
             });
         }
 
-        // Wait for port reset completion with proper timing
+        // Wait for port reset completion
         for i in 0..port_len {
             let mut timeout = 0;
             while regs
@@ -298,28 +311,23 @@ impl Root {
             {
                 spin_loop();
                 timeout += 1;
-                // Add timeout protection to avoid infinite loop
                 if timeout > 100000 {
                     debug!("Port {i} reset timeout");
                     break;
                 }
             }
 
-            // After reset completion, wait for device to settle
-            // This is critical for device detection - Linux kernel waits ~50ms
-            // Reference: USB 2.0 spec requires minimum 10ms recovery time
-            // after port reset, but some devices need more time
+            // Wait for device to settle after reset
+            // USB 2.0 spec requires minimum 10ms recovery time
             let mut delay_count = 0;
             while delay_count < 50000 {
-                // ~50ms at typical CPU speeds
                 spin_loop();
                 delay_count += 1;
             }
 
-            debug!("Port {i} reset completed, checking status");
             let portsc = regs.port_register_set.read_volatile_at(i).portsc;
             debug!(
-                "Port {i} status after reset: enabled={}, connected={}, speed={}",
+                "Port {i}: enabled={}, connected={}, speed={}",
                 portsc.port_enabled_disabled(),
                 portsc.current_connect_status(),
                 portsc.port_speed()
@@ -354,81 +362,6 @@ impl Root {
             .portsc
             .port_speed()
     }
-
-    /// 解析端口速度 ID 为实际速度 (Mbps)
-    #[allow(dead_code)]
-    pub fn parse_port_speed_to_mbps(&self, port: PortId) -> Option<u32> {
-        let speed_id = self.port_speed(port);
-        if speed_id == 0 {
-            return None; // PSIV 值 0 是保留的
-        }
-
-        // TODO: 从 xHCI Extended Capabilities 中查找对应的 PSI
-        // 现在先返回常见速度的硬编码值
-        match speed_id {
-            1 => Some(12),    // USB 1.x Full Speed (12 Mbps)
-            2 => Some(480),   // USB 2.0 High Speed (480 Mbps)
-            3 => Some(5000),  // USB 3.0 SuperSpeed (5 Gbps = 5000 Mbps)
-            4 => Some(10000), // USB 3.1 SuperSpeedPlus (10 Gbps)
-            5 => Some(20000), // USB 3.2 SuperSpeedPlus (20 Gbps)
-            _ => None,
-        }
-    }
-
-    /// 获取端口速度的描述字符串
-    #[allow(dead_code)]
-    pub fn port_speed_description(&self, port: PortId) -> &'static str {
-        let speed_id = self.port_speed(port);
-        match speed_id {
-            0 => "Unknown",
-            1 => "Full Speed (12 Mbps)",
-            2 => "High Speed (480 Mbps)",
-            3 => "SuperSpeed (5 Gbps)",
-            4 => "SuperSpeedPlus (10 Gbps)",
-            5 => "SuperSpeedPlus (20 Gbps)",
-            _ => "Reserved/Unknown",
-        }
-    }
-
-    /// 根据端口速度计算默认控制端点的最大包大小
-    /// 基于 USB 规范和 xHCI 规范 4.3.3 Address Assignment
-    #[allow(dead_code)]
-    pub fn calculate_default_max_packet_size(&self, port: PortId) -> u16 {
-        let speed_id = self.port_speed(port);
-        match speed_id {
-            0 => 8,  // Unknown/Reserved - 使用最小值
-            1 => 64, // Full Speed (USB 1.1): 8, 16, 32, 或 64 字节
-            // 规范建议初始化时使用 64，后续通过设备描述符确认实际值
-            2 => 64,  // High Speed (USB 2.0): 固定 64 字节
-            3 => 512, // SuperSpeed (USB 3.0): 固定 512 字节
-            4 => 512, // SuperSpeedPlus (USB 3.1): 固定 512 字节
-            5 => 512, // SuperSpeedPlus (USB 3.2): 固定 512 字节
-            _ => 8,   // 其他/未知速度 - 使用最保守的值
-        }
-    }
-
-    /// 获取特定速度的详细包大小信息
-    #[allow(dead_code)]
-    pub fn get_packet_size_info(&self, port: PortId) -> (u16, &'static str) {
-        let speed_id = self.port_speed(port);
-        match speed_id {
-            0 => (8, "Unknown speed, using minimum"),
-            1 => (64, "Full Speed: 8/16/32/64 bytes possible, using 64"),
-            2 => (64, "High Speed: fixed 64 bytes"),
-            3 => (512, "SuperSpeed: fixed 512 bytes"),
-            4 => (512, "SuperSpeedPlus 10G: fixed 512 bytes"),
-            5 => (512, "SuperSpeedPlus 20G: fixed 512 bytes"),
-            _ => (8, "Reserved/Unknown speed, using minimum"),
-        }
-    }
-
-    // pub fn is_64_byte(&self) -> bool {
-    //     self.reg
-    //         .capability
-    //         .hccparams1
-    //         .read_volatile()
-    //         .addressing_capability()
-    // }
 }
 
 #[derive(Clone)]

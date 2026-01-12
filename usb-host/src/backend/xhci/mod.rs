@@ -10,12 +10,15 @@ use xhci::{
 
 mod context;
 mod def;
+mod delay;
 mod device;
+pub mod dwc3;
 mod endpoint;
 mod event;
 mod interface;
 mod reg;
 mod ring;
+pub mod rk3588_phy;
 mod root;
 
 use crate::{
@@ -26,6 +29,7 @@ use crate::{
 use def::*;
 
 pub struct Xhci {
+    mmio_base: NonNull<u8>,
     reg: XhciRegisters,
     root: Option<RootHub>,
     port_wake: AtomicWaker,
@@ -39,28 +43,26 @@ impl usb_if::host::Controller for Xhci {
         &'_ mut self,
     ) -> futures::future::LocalBoxFuture<'_, core::result::Result<(), usb_if::host::USBError>> {
         async {
-            // 4.2 Host Controller Initialization
+            self.init_dwc3_if_needed();
             self.init_ext_caps().await?;
-            // After Chip Hardware Reset6 wait until the Controller Not Ready (CNR) flag
-            // in the USBSTS is ‘0’ before writing any xHC Operational or Runtime
-            // registers.
             self.chip_hardware_reset().await?;
-            // Program the Max Device Slots Enabled (MaxSlotsEn) field in the CONFIG
-            // register (5.4.7) to enable the device slots that system software is going to
-            // use.
+
+            self.reg = XhciRegisters::new(self.mmio_base);
+
             let max_slots = self.setup_max_device_slots();
             let root_hub = RootHub::new(max_slots as _, self.reg.clone(), self.dma_mask)?;
             root_hub.init()?;
             self.root = Some(root_hub);
-            // trace!("Root hub initialized with max slots: {max_slots}");
             self.root()?.wait_for_running().await;
+
+            // GL3523 hub workaround: Toggle VBUS after xHCI is running
+            // This resets the hub so it sees immediate host activity when it powers up.
+            // Without this, the hub enters standby mode and doesn't respond to Rx.Detect.
+            self.toggle_vbus_if_rk3588().await;
+
             self.root()?.lock().enable_irq();
             self.root()?.lock().reset_ports();
-
-            // Additional delay after port reset for device detection stability
-            // Linux kernel typically waits for device connection stabilization
             sleep(Duration::from_millis(100)).await;
-
             Ok(())
         }
         .boxed_local()
@@ -119,6 +121,7 @@ impl usb_if::host::Controller for Xhci {
 impl Xhci {
     pub fn new(mmio_base: NonNull<u8>, dma_mask: usize) -> Box<Self> {
         Box::new(Self {
+            mmio_base,
             reg: XhciRegisters::new(mmio_base),
             root: None,
             port_wake: AtomicWaker::new(),
@@ -126,8 +129,42 @@ impl Xhci {
         })
     }
 
+    fn init_dwc3_if_needed(&self) {
+        if unsafe { dwc3::is_dwc3_xhci(self.mmio_base) } {
+            debug!("Detected DWC3-based XHCI controller");
+        }
+    }
+
+    /// Toggle VBUS power if this is an RK3588 USB3_1 controller
+    ///
+    /// This is a workaround for the GL3523 USB hub cold-start issue on Orange Pi 5 Plus.
+    /// The hub enters a non-responsive standby state if VBUS is present but no USB host
+    /// activity occurs within ~1-2 seconds. By toggling VBUS after the xHCI controller
+    /// is running, we reset the hub so it sees immediate host activity when it powers up.
+    #[cfg(feature = "aggressive_usb_reset")]
+    async fn toggle_vbus_if_rk3588(&self) {
+        let base_addr = self.mmio_base.as_ptr() as usize;
+
+        if rk3588_phy::is_rk3588_usb3_port1(base_addr) {
+            debug!("RK3588 USB3_1: Applying GL3523 hub VBUS toggle workaround");
+
+            unsafe {
+                rk3588_phy::toggle_vbus_port1(rk3588_phy::VBUS_OFF_MS, rk3588_phy::VBUS_ON_WAIT_MS);
+            }
+
+            sleep(Duration::from_millis(200)).await;
+        }
+    }
+
+    /// No-op variant when aggressive_usb_reset feature is disabled
+    #[cfg(not(feature = "aggressive_usb_reset"))]
+    async fn toggle_vbus_if_rk3588(&self) {
+        // VBUS toggle disabled - feature flag not set
+    }
+
     async fn chip_hardware_reset(&mut self) -> Result {
         debug!("Reset begin ...");
+
         self.reg.operational.usbcmd.update_volatile(|c| {
             c.clear_run_stop();
         });
@@ -156,7 +193,6 @@ impl Xhci {
         }
         debug!("Reset finish");
 
-        // debug!("Is 64 bit {}", self.is_64_byte());
         Ok(())
     }
 
