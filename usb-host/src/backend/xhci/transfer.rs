@@ -7,7 +7,7 @@ use xhci::ring::trb::event::TransferEvent;
 use crate::{
     BusAddr,
     backend::{
-        ty::TransferOp,
+        ty::{TransferOp, transfer::TransferKind},
         xhci::{reg::XhciRegistersShared, ring::SendRing, sync::IrqLock},
     },
     queue::Finished,
@@ -26,11 +26,7 @@ pub struct Transfer {
     pub(crate) bus_addr: BusAddr,
 }
 
-#[derive(Clone)]
-pub enum TransferKind {
-    Control(ControlSetup),
-    // Other kinds can be added here
-}
+
 
 impl Transfer {
     pub fn new_in(kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {

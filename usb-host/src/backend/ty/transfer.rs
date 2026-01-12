@@ -7,8 +7,14 @@ use usb_if::host::ControlSetup;
 use crate::BusAddr;
 
 #[derive(Clone)]
+pub enum TransferKind {
+    Control(ControlSetup),
+    // Other kinds can be added here
+}
+
+#[derive(Clone)]
 pub struct Transfer2 {
-    pub kind: TransferKind2,
+    pub kind: TransferKind,
     pub(crate) info: TransferInfo,
 }
 
@@ -27,7 +33,7 @@ impl DerefMut for Transfer2 {
 }
 
 impl Transfer2 {
-    pub fn new_in(kind: TransferKind2, buff: Pin<&mut [u8]>) -> Self {
+    pub fn new_in(kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {
         let buffer_addr = buff.as_ptr() as usize;
         let buffer_len = buff.len();
         trace!(
@@ -47,7 +53,7 @@ impl Transfer2 {
         }
     }
 
-    pub fn new_out(kind: TransferKind2, buff: Pin<&[u8]>) -> Self {
+    pub fn new_out(kind: TransferKind, buff: Pin<&[u8]>) -> Self {
         let buffer_addr = buff.as_ptr() as usize;
         let buffer_len = buff.len();
         trace!(
@@ -84,12 +90,6 @@ impl TransferInfo {
     pub fn in_slice(&self) -> &[u8] {
         unsafe { core::slice::from_raw_parts(self.buffer_addr as *const u8, self.transfer_len) }
     }
-}
-
-#[derive(Clone)]
-pub enum TransferKind2 {
-    Control(ControlSetup),
-    // Other kinds can be added here
 }
 
 fn dma_from_usize<'a>(addr: usize, len: usize) -> dma_api::DSlice<'a, u8> {
