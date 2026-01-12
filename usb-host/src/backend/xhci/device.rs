@@ -5,8 +5,7 @@ use mbarrier::mb;
 use spin::Mutex;
 use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
 use usb_if::err::TransferError;
-use usb_if::host::{ControlSetup, USBError};
-use usb_if::transfer::{Recipient, Request, RequestType};
+use usb_if::host::ControlSetup;
 use xhci::ring::trb::command;
 
 use crate::backend::Dci;
@@ -142,7 +141,7 @@ impl Device {
         self.read_descriptor().await?;
 
         for i in 0..self.desc.num_configurations {
-            let config_desc = self.read_configuration_descriptor(i).await?;
+            let config_desc = self.ep_ctrl().get_configuration_descriptor(i).await?;
             self.config_desc.push(config_desc);
         }
 
@@ -248,7 +247,7 @@ impl Device {
         param: ControlSetup,
         buff: &mut [u8],
     ) -> core::result::Result<usize, TransferError> {
-        self.ctrl_ep.as_mut().unwrap().control_in(param, buff).await
+        self.ep_ctrl().control_in(param, buff).await
     }
 
     pub async fn control_out(
@@ -256,15 +255,11 @@ impl Device {
         param: ControlSetup,
         buff: &[u8],
     ) -> core::result::Result<usize, TransferError> {
-        self.ctrl_ep
-            .as_mut()
-            .unwrap()
-            .control_out(param, buff)
-            .await
+        self.ep_ctrl().control_out(param, buff).await
     }
 
     async fn read_descriptor(&mut self) -> Result<()> {
-        self.desc = self.ctrl().get_device_descriptor().await?;
+        self.desc = self.ep_ctrl().get_device_descriptor().await?;
         Ok(())
     }
 
@@ -273,7 +268,7 @@ impl Device {
 
         let mut data = alloc::vec![0u8; 8];
 
-        self.ctrl()
+        self.ep_ctrl()
             .get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
             .await?;
 
@@ -291,45 +286,14 @@ impl Device {
     }
 
     async fn get_configuration(&mut self) -> Result<u8> {
-        let val = self.ctrl().get_configuration().await?;
+        let val = self.ep_ctrl().get_configuration().await?;
         self.current_config_value = Some(val);
         Ok(val)
-    }
-
-    async fn read_configuration_descriptor(
-        &mut self,
-        index: u8,
-    ) -> Result<ConfigurationDescriptor> {
-        let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN]; // 配置描述符头部固定为9字节
-        self.ctrl()
-            .get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut header)
-            .await?;
-
-        let total_length = u16::from_le_bytes(header[2..4].try_into().unwrap()) as usize;
-        // 获取完整的配置描述符（包括接口和端点描述符）
-        let mut full_data = alloc::vec![0u8; total_length];
-        debug!("Reading configuration descriptor for index {index}, total length: {total_length}");
-        self.ctrl()
-            .get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut full_data)
-            .await?;
-
-        let parsed_config = ConfigurationDescriptor::parse(&full_data)
-            .ok_or(USBError::Other("config descriptor parse err".into()))?;
-
-        Ok(parsed_config)
-    }
-
-    fn ctrl(&mut self) -> &mut EndpointControl<Endpoint> {
-        self.ctrl_ep.as_mut().unwrap()
     }
 }
 
 impl DeviceOp for Device {
     type Ep = Endpoint;
-
-    fn ep_ctrl(&mut self) -> &mut Self::Ep {
-        &mut self.ctrl_ep.as_mut().unwrap().raw
-    }
 
     async fn claim_interface(&mut self, interface: u8, alternate: u8) -> Result {
         todo!()
@@ -340,7 +304,9 @@ impl DeviceOp for Device {
     }
 
     async fn set_configuration(&mut self, configuration_value: u8) -> Result {
-        self.ctrl().set_configuration(configuration_value).await?;
+        self.ep_ctrl()
+            .set_configuration(configuration_value)
+            .await?;
 
         self.current_config_value = Some(configuration_value);
 
@@ -351,6 +317,10 @@ impl DeviceOp for Device {
 
         debug!("Device configuration set to {configuration_value}");
         Ok(())
+    }
+
+    fn ep_ctrl(&mut self) -> &mut EndpointControl<Self::Ep> {
+        self.ctrl_ep.as_mut().unwrap()
     }
 
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, usb_if::host::USBError> {

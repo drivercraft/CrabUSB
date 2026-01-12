@@ -9,7 +9,7 @@ use usb_if::{
 
 use crate::{
     backend::ty::{
-        ep::EndpointOp,
+        ep::{EndpointControl, EndpointOp},
         transfer::{Transfer, TransferKind},
     },
     err::USBError,
@@ -47,7 +47,7 @@ pub trait DeviceOp: Send + 'static {
         alternate: u8,
     ) -> impl Future<Output = Result<(), USBError>> + Send;
 
-    fn ep_ctrl(&mut self) -> &mut Self::Ep;
+    fn ep_ctrl(&mut self) -> &mut EndpointControl<Self::Ep>;
 
     fn set_configuration(
         &mut self,

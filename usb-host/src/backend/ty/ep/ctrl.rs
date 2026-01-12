@@ -1,6 +1,6 @@
 use core::pin::Pin;
 
-use usb_if::descriptor::{DescriptorType, DeviceDescriptor};
+use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
 use usb_if::err::TransferError;
 use usb_if::host::{ControlSetup, USBError};
 use usb_if::transfer::{Recipient, Request, RequestType};
@@ -108,5 +108,26 @@ impl<T: EndpointOp> EndpointControl<T> {
         let config_value = buff[0];
 
         Ok(config_value)
+    }
+
+    pub async fn get_configuration_descriptor(
+        &mut self,
+        index: u8,
+    ) -> Result<ConfigurationDescriptor, USBError> {
+        let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN]; // 配置描述符头部固定为9字节
+        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut header)
+            .await?;
+
+        let total_length = u16::from_le_bytes(header[2..4].try_into().unwrap()) as usize;
+        // 获取完整的配置描述符（包括接口和端点描述符）
+        let mut full_data = alloc::vec![0u8; total_length];
+        debug!("Reading configuration descriptor for index {index}, total length: {total_length}");
+        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut full_data)
+            .await?;
+
+        let parsed_config = ConfigurationDescriptor::parse(&full_data)
+            .ok_or(USBError::Other("config descriptor parse err".into()))?;
+
+        Ok(parsed_config)
     }
 }
