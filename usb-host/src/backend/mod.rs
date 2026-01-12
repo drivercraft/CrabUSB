@@ -1,11 +1,8 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 
 use usb_if::host::USBError;
 
-use crate::{
-    Dwc, Xhci,
-    backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp},
-};
+use crate::backend::ty::{DeviceInfoOp, EventHandlerOp};
 
 // #[cfg(feature = "libusb")]
 // pub mod libusb;

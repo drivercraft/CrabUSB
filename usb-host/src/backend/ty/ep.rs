@@ -2,13 +2,13 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use super::transfer::Transfer2;
+use super::transfer::Transfer;
 use usb_if::err::TransferError;
 
 pub trait EndpointOp2: Send + 'static {
-    fn submit(&mut self, transfer: Transfer2) -> Result<TransferHandle2<'_>, TransferError>;
+    fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle2<'_>, TransferError>;
 
-    fn query_transfer(&mut self, id: u64) -> Option<Result<Transfer2, TransferError>>;
+    fn query_transfer(&mut self, id: u64) -> Option<Result<Transfer, TransferError>>;
 
     fn register_cx(&self, id: u64, cx: &mut Context<'_>);
 }
@@ -19,7 +19,7 @@ pub struct TransferHandle2<'a> {
 }
 
 impl<'a> Future for TransferHandle2<'a> {
-    type Output = Result<Transfer2, TransferError>;
+    type Output = Result<Transfer, TransferError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let id = self.id;

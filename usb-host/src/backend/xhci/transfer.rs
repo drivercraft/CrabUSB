@@ -1,83 +1,14 @@
-use core::pin::Pin;
-
 use alloc::{collections::BTreeMap, sync::Arc};
-use usb_if::host::ControlSetup;
 use xhci::ring::trb::event::TransferEvent;
 
 use crate::{
     BusAddr,
-    backend::{
-        ty::{TransferOp, transfer::TransferKind},
-        xhci::{reg::XhciRegistersShared, ring::SendRing, sync::IrqLock},
-    },
+    backend::xhci::{reg::XhciRegistersShared, ring::SendRing, sync::IrqLock},
     queue::Finished,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TransferHandle(pub(crate) BusAddr);
-
-#[derive(Clone)]
-pub struct Transfer {
-    pub kind: TransferKind,
-    pub direction: usb_if::transfer::Direction,
-    pub(crate) buffer_addr: usize,
-    pub(crate) buffer_len: usize,
-    pub(crate) transfer_len: usize,
-    pub(crate) bus_addr: BusAddr,
-}
-
-impl Transfer {
-    pub fn new_in(kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {
-        let buffer_addr = buff.as_ptr() as usize;
-        let buffer_len = buff.len();
-        trace!(
-            "Transfer::new_in: addr={:#x}, len={}",
-            buffer_addr, buffer_len
-        );
-
-        Self {
-            kind,
-            direction: usb_if::transfer::Direction::In,
-            buffer_addr,
-            buffer_len,
-            transfer_len: 0,
-            bus_addr: 0.into(),
-        }
-    }
-
-    pub fn new_out(kind: TransferKind, buff: Pin<&[u8]>) -> Self {
-        let buffer_addr = buff.as_ptr() as usize;
-        let buffer_len = buff.len();
-        trace!(
-            "Transfer::new_out: addr={:#x}, len={}",
-            buffer_addr, buffer_len
-        );
-        Self {
-            kind,
-            direction: usb_if::transfer::Direction::Out,
-            buffer_addr,
-            buffer_len,
-            transfer_len: 0,
-            bus_addr: 0.into(),
-        }
-    }
-
-    
-
-    pub fn in_slice(&self) -> &[u8] {
-        unsafe { core::slice::from_raw_parts(self.buffer_addr as *const u8, self.transfer_len) }
-    }
-}
-
-impl TransferOp for Transfer {
-    fn data_ptr(&self) -> usize {
-        self.buffer_addr
-    }
-
-    fn data_len(&self) -> usize {
-        self.buffer_len
-    }
-}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct TransQueueId {

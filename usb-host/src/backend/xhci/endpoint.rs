@@ -22,13 +22,13 @@ use crate::{
         ty::{
             EndpintOp,
             ep::{EndpointOp2, TransferHandle2},
-            transfer::{Transfer2, TransferKind},
+            transfer::{Transfer, TransferKind},
         },
         xhci::{
             DirectionExt,
             reg::SlotBell,
             ring::SendRing,
-            transfer::{Transfer, TransferHandle},
+            transfer::{ TransferHandle},
         },
     },
     err::ConvertXhciError,
@@ -38,7 +38,7 @@ pub struct Endpoint {
     dci: Dci,
     pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
-    transfers2: BTreeMap<TransferHandle, Transfer2>,
+    transfers2: BTreeMap<TransferHandle, Transfer>,
 }
 
 unsafe impl Send for Endpoint {}
@@ -74,7 +74,7 @@ impl Endpoint {
         &mut self,
         c: &TransferEvent,
         handle: BusAddr,
-    ) -> Result<Transfer2, TransferError> {
+    ) -> Result<Transfer, TransferError> {
         let mut t = self.transfers2.remove(&TransferHandle(handle)).unwrap();
         match c.completion_code() {
             Ok(code) => match code.to_result() {
@@ -94,7 +94,7 @@ impl Endpoint {
         &mut self,
         transfer: Transfer,
     ) -> impl Future<Output = Result<Transfer, TransferError>> {
-        let tr2 = Transfer2 {
+        let tr2 = Transfer {
             direction: transfer.direction,
             buffer_addr: transfer.buffer_addr,
             buffer_len: transfer.buffer_len,
@@ -167,7 +167,7 @@ impl EndpintOp for Endpoint {
 impl EndpointOp2 for Endpoint {
     fn submit(
         &mut self,
-        transfer: crate::backend::ty::transfer::Transfer2,
+        transfer: crate::backend::ty::transfer::Transfer,
     ) -> Result<crate::backend::ty::ep::TransferHandle2<'_>, TransferError> {
         let mut data_bus_addr = 0;
         if transfer.buffer_len > 0 {
@@ -244,7 +244,7 @@ impl EndpointOp2 for Endpoint {
     fn query_transfer(
         &mut self,
         id: u64,
-    ) -> Option<Result<crate::backend::ty::transfer::Transfer2, TransferError>> {
+    ) -> Option<Result<crate::backend::ty::transfer::Transfer, TransferError>> {
         let id = BusAddr(id);
         let c = self.ring.get_finished(id)?;
         let res = self.handle_transfer_completion2(&c, id);

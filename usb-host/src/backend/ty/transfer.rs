@@ -2,7 +2,7 @@ use core::pin::Pin;
 
 use usb_if::host::ControlSetup;
 
-use crate::BusAddr;
+use crate::{BusAddr, backend::ty::TransferOp};
 
 #[derive(Clone)]
 pub enum TransferKind {
@@ -11,7 +11,7 @@ pub enum TransferKind {
 }
 
 #[derive(Clone)]
-pub struct Transfer2 {
+pub struct Transfer {
     pub kind: TransferKind,
     pub direction: usb_if::transfer::Direction,
     pub buffer_addr: usize,
@@ -20,7 +20,7 @@ pub struct Transfer2 {
     pub bus_addr: BusAddr,
 }
 
-impl Transfer2 {
+impl Transfer {
     pub fn new_in(kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {
         let buffer_addr = buff.as_ptr() as usize;
         let buffer_len = buff.len();
@@ -66,6 +66,16 @@ impl Transfer2 {
 }
 
 fn dma_from_usize<'a>(addr: usize, len: usize) -> dma_api::DSlice<'a, u8> {
-    let data_slice = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };
+    let data_slice = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
     dma_api::DSlice::from(data_slice, dma_api::Direction::Bidirectional)
+}
+
+impl TransferOp for Transfer {
+    fn data_ptr(&self) -> usize {
+        self.buffer_addr
+    }
+
+    fn data_len(&self) -> usize {
+        self.buffer_len
+    }
 }
