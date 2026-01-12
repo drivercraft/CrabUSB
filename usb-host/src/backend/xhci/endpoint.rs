@@ -1,12 +1,9 @@
-use core::pin::Pin;
-
 use alloc::{collections::BTreeMap, sync::Arc};
 
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
     err::TransferError,
-    host::ControlSetup,
     transfer::{BmRequestType, Direction},
 };
 use xhci::{
@@ -81,17 +78,6 @@ impl Endpoint {
         }
         t.transfer_len = c.trb_transfer_length() as usize;
         Ok(t)
-    }
-
-    fn request(
-        &mut self,
-        transfer: Transfer,
-    ) -> impl Future<Output = Result<Transfer, TransferError>> {
-        let handle = self.submit(transfer);
-        async move {
-            let handle = handle?;
-            handle.await
-        }
     }
 }
 
