@@ -43,15 +43,14 @@ pcie = "0.2"
 spin_on = "0.1.1"
 rockchip-pm = {workspace = true}
 rockchip-soc = {workspace = true}
-# rk3588-clk = { workspace = true }
 rdrive = "0.18"
 
 [build-dependencies]
 bare-test-macros = "0.2"
 
-# [[test]]
-# harness = false
-# name = "test"
+[[test]]
+harness = false
+name = "test"
 
 [[test]]
 harness = false
