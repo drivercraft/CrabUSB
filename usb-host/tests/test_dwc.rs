@@ -853,10 +853,9 @@ fn set_pinctrl(m: &mut PinManager, pinctrl_node: &str) {
     let dir = m.gpio_direction(pin_conf.id).unwrap();
     let dst_dir = GpioDirection::Output(true);
     info!("GPIO Direction: {:?} -> {dst_dir:?}", dir);
-
-    // uboot setup mux
-    // m.set_config(pin_conf).expect("Failed to get pin config");
-
+    info!("dtb pin config: {:?}", pin_conf);
+    
+    m.set_config(pin_conf).expect("Failed to get pin config");
     m.set_gpio_direction(pin_conf.id, dst_dir).unwrap();
 }
 
