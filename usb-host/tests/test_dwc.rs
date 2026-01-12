@@ -19,6 +19,7 @@ use bare_test::{
     irq::{IrqHandleResult, IrqInfo, IrqParam},
     mem::{iomap, page_size},
     println,
+    time::spin_delay,
 };
 use core::{
     ptr::NonNull,
@@ -30,7 +31,7 @@ use log::info;
 use log::*;
 use pcie::*;
 use rockchip_pm::{PowerDomain, RockchipPM};
-use rockchip_soc::{PinConfig, PinManager, rk3588::Cru};
+use rockchip_soc::{GpioDirection, PinConfig, PinManager, rk3588::Cru};
 use spin::Mutex;
 use usb_if::descriptor::ConfigurationDescriptor;
 
@@ -846,19 +847,102 @@ fn set_pinctrl(m: &mut PinManager, pinctrl_node: &str) {
         NonNull::new(fdt.as_slice().as_ptr() as usize as _).unwrap(),
     );
 
-    info!("PinConfig: {:?}", pin_conf);
+    let act_conf = m.get_config(pin_conf.id).unwrap();
 
-    m.set_config(pin_conf).expect("Failed to get pin config");
+    info!("PinConfig: {:?}", act_conf);
+    let dir = m.gpio_direction(pin_conf.id).unwrap();
+    let dst_dir = GpioDirection::Output(true);
+    info!("GPIO Direction: {:?} -> {dst_dir:?}", dir);
+
+    // uboot setup mux
+    // m.set_config(pin_conf).expect("Failed to get pin config");
+
+    m.set_gpio_direction(pin_conf.id, dst_dir).unwrap();
 }
 
 fn setup_pinctrl() {
     let mut pinctrl = find_pinctrl();
 
-    // set_pinctrl(&mut pinctrl, "/pinctrl/usb/vcc5v0-host-en");
+    set_pinctrl(&mut pinctrl, "/pinctrl/usb/vcc5v0-host-en");
     // set_pinctrl(&mut pinctrl, "/pinctrl/usb-typec/usbc0-int");
-    set_pinctrl(&mut pinctrl, "/pinctrl/usb-typec/typec5v-pwren");
+    // set_pinctrl(&mut pinctrl, "/pinctrl/usb-typec/typec5v-pwren");
+
+    // try_vbus_gpio_toggle();
+    info!("VBUS power toggled via GPIO");
+
+    // set_pinctrl(&mut pinctrl, "/pinctrl/usb/vcc5v0-host-en");
+    // set_pinctrl(&mut pinctrl, "/pinctrl/usb-typec/typec5v-pwren");
 }
 
+/// Toggle VBUS power via GPIO3_B7 (vcc5v0_host regulator enable)
+/// This is a more aggressive reset that cuts power to the GL3523 hub
+fn try_vbus_gpio_toggle() {
+    const USB3_1_BASE: usize = 0xfc400000;
+    const DWC3_OFFSET: usize = 0xC100;
+    const USBDPPHY1_PMA_BASE: usize = 0xfed90000 + 0x8000;
+    const USBDPPHY1_GRF_BASE: usize = 0xfd5cc000;
+    const USB_GRF_BASE: usize = 0xfd5ac000;
+    const USB2PHY1_GRF_BASE: usize = 0xfd5d4000;
+    const CRU_BASE: usize = 0xfd7c0000;
+    const GPIO3_BASE: usize = 0xfec40000;
+    const GPIO_SWPORT_DR_L: usize = 0x0000;
+    const GPIO_SWPORT_DDR_L: usize = 0x0008;
+    const GPIO3_B7_BIT: u32 = 1 << 15;
+    const WRITE_MASK_BIT15: u32 = 1 << 31;
+    const SPIN_LOOP_PER_US: u32 = 10;
+    const SPIN_LOOP_PER_MS: u64 = 10000;
+    let gpio3_base = iomap(GPIO3_BASE.into(), 0x1000);
+    unsafe {
+        // Read current state
+        let dr_before = (gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *const u32).read_volatile();
+        let ddr_before = (gpio3_base.as_ptr().add(GPIO_SWPORT_DDR_L) as *const u32).read_volatile();
+        info!(
+            "GPIO3 before: DR_L={:#010x}, DDR_L={:#010x}",
+            dr_before, ddr_before
+        );
+        info!(
+            "  GPIO3_B7 (bit15): value={}, direction={} (1=output)",
+            (dr_before >> 15) & 1,
+            (ddr_before >> 15) & 1
+        );
+
+        // Ensure GPIO3_B7 is configured as output
+        let ddr_ptr = gpio3_base.as_ptr().add(GPIO_SWPORT_DDR_L) as *mut u32;
+        ddr_ptr.write_volatile(WRITE_MASK_BIT15 | GPIO3_B7_BIT);
+
+        // Turn OFF VBUS (set GPIO3_B7 low - active high regulator)
+        info!("Turning OFF VBUS (GPIO3_B7 = 0)...");
+        let dr_ptr = gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *mut u32;
+        dr_ptr.write_volatile(WRITE_MASK_BIT15 | 0); // Clear bit 15
+
+        let dr_off = (gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *const u32).read_volatile();
+        info!(
+            "GPIO3 DR_L after OFF: {:#010x} (bit15={})",
+            dr_off,
+            (dr_off >> 15) & 1
+        );
+
+        // Wait 1 second with VBUS off
+        info!("Waiting 1000ms with VBUS OFF...");
+        spin_delay(Duration::from_millis(1000));
+
+        // Turn ON VBUS (set GPIO3_B7 high)
+        info!("Turning ON VBUS (GPIO3_B7 = 1)...");
+        dr_ptr.write_volatile(WRITE_MASK_BIT15 | GPIO3_B7_BIT);
+
+        let dr_on = (gpio3_base.as_ptr().add(GPIO_SWPORT_DR_L) as *const u32).read_volatile();
+        info!(
+            "GPIO3 DR_L after ON: {:#010x} (bit15={})",
+            dr_on,
+            (dr_on >> 15) & 1
+        );
+
+        // Wait for hub to power up and initialize
+        info!("Waiting 500ms for hub to power up...");
+
+        spin_delay(Duration::from_millis(500));
+    }
+}
 struct CruOpImpl;
 
 impl CruOp for CruOpImpl {
