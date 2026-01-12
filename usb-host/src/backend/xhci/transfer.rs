@@ -26,8 +26,6 @@ pub struct Transfer {
     pub(crate) bus_addr: BusAddr,
 }
 
-
-
 impl Transfer {
     pub fn new_in(kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {
         let buffer_addr = buff.as_ptr() as usize;
@@ -64,9 +62,7 @@ impl Transfer {
         }
     }
 
-    pub(crate) fn dma_slice<'a>(&'a self) -> dma_api::DSlice<'a, u8> {
-        dma_from_usize(self.buffer_addr, self.buffer_len)
-    }
+    
 
     pub fn in_slice(&self) -> &[u8] {
         unsafe { core::slice::from_raw_parts(self.buffer_addr as *const u8, self.transfer_len) }
@@ -81,11 +77,6 @@ impl TransferOp for Transfer {
     fn data_len(&self) -> usize {
         self.buffer_len
     }
-}
-
-fn dma_from_usize<'a>(addr: usize, len: usize) -> dma_api::DSlice<'a, u8> {
-    let data_slice = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };
-    dma_api::DSlice::from(data_slice, dma_api::Direction::Bidirectional)
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]

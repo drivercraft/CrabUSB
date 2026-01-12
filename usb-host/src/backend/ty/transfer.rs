@@ -1,5 +1,3 @@
-use core::ops::Deref;
-use core::ops::DerefMut;
 use core::pin::Pin;
 
 use usb_if::host::ControlSetup;
@@ -15,21 +13,11 @@ pub enum TransferKind {
 #[derive(Clone)]
 pub struct Transfer2 {
     pub kind: TransferKind,
-    pub(crate) info: TransferInfo,
-}
-
-impl Deref for Transfer2 {
-    type Target = TransferInfo;
-
-    fn deref(&self) -> &Self::Target {
-        &self.info
-    }
-}
-
-impl DerefMut for Transfer2 {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.info
-    }
+    pub direction: usb_if::transfer::Direction,
+    pub buffer_addr: usize,
+    pub buffer_len: usize,
+    pub transfer_len: usize,
+    pub bus_addr: BusAddr,
 }
 
 impl Transfer2 {
@@ -43,13 +31,11 @@ impl Transfer2 {
 
         Self {
             kind,
-            info: TransferInfo {
-                direction: usb_if::transfer::Direction::In,
-                buffer_addr,
-                buffer_len,
-                transfer_len: 0,
-                bus_addr: BusAddr(0),
-            },
+            direction: usb_if::transfer::Direction::In,
+            buffer_addr,
+            buffer_len,
+            transfer_len: 0,
+            bus_addr: BusAddr(0),
         }
     }
 
@@ -62,27 +48,14 @@ impl Transfer2 {
         );
         Self {
             kind,
-            info: TransferInfo {
-                direction: usb_if::transfer::Direction::Out,
-                buffer_addr,
-                buffer_len,
-                transfer_len: 0,
-                bus_addr: BusAddr(0),
-            },
+            direction: usb_if::transfer::Direction::Out,
+            buffer_addr,
+            buffer_len,
+            transfer_len: 0,
+            bus_addr: BusAddr(0),
         }
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct TransferInfo {
-    pub direction: usb_if::transfer::Direction,
-    pub buffer_addr: usize,
-    pub buffer_len: usize,
-    pub transfer_len: usize,
-    pub bus_addr: BusAddr,
-}
-
-impl TransferInfo {
     pub(crate) fn dma_slice<'a>(&'a self) -> dma_api::DSlice<'a, u8> {
         dma_from_usize(self.buffer_addr, self.buffer_len)
     }
