@@ -3,8 +3,9 @@
 //! DWC3 是一个 USB3 DRD (Dual Role Device) 控制器，支持 Host 和 Device 模式。
 //! 本模块实现 Host 模式驱动，基于 xHCI 规范。
 
-use core::ops::{Deref, DerefMut};
+use core::{ops::{Deref, DerefMut}};
 
+use alloc::format;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;

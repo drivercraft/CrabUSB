@@ -1,6 +1,7 @@
 #![cfg_attr(not(feature = "libusb"), no_std)]
 #![feature(iterator_try_collect)]
 
+#[macro_use]
 extern crate alloc;
 #[macro_use]
 extern crate log;
