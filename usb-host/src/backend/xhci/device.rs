@@ -10,7 +10,8 @@ use usb_if::transfer::{Recipient, Request, RequestType};
 use xhci::ring::trb::command;
 
 use crate::backend::Dci;
-use crate::backend::xhci::endpoint::{EndpintControl, Endpoint};
+use crate::backend::ty::ep::EndpointControl;
+use crate::backend::xhci::endpoint::Endpoint;
 use crate::backend::xhci::reg::SlotBell;
 use crate::backend::xhci::transfer::TransferResultHandler;
 use crate::backend::xhci::{
@@ -72,7 +73,7 @@ pub struct Device {
     port_id: PortId,
     ctx: ContextData,
     desc: DeviceDescriptor,
-    ctrl_ep: Option<EndpintControl>,
+    ctrl_ep: Option<EndpointControl<Endpoint>>,
     transfer_result_handler: TransferResultHandler,
     bell: Arc<Mutex<SlotBell>>,
     dma_mask: usize,
@@ -132,7 +133,7 @@ impl Device {
 
     pub(crate) async fn init(&mut self, host: &mut Xhci) -> Result {
         let ep = self.new_ep(Dci::CTRL)?;
-        self.ctrl_ep = Some(EndpintControl::new(ep));
+        self.ctrl_ep = Some(EndpointControl::new(ep));
         self.address(host).await?;
         // self.dump_device_out();
         let max_packet_size = self.control_max_packet_size().await?;
@@ -155,7 +156,7 @@ impl Device {
 
         let route_string = append_port_to_route_string(0, 0);
 
-        let ctrl_ring_addr = self.ctrl_ep.as_ref().unwrap().bus_addr();
+        let ctrl_ring_addr = self.ctrl_ep.as_ref().unwrap().raw.bus_addr();
         // ctrl dci
         let dci = 1;
         trace!(
@@ -263,34 +264,7 @@ impl Device {
     }
 
     async fn read_descriptor(&mut self) -> Result<()> {
-        let mut buff = alloc::vec![0u8; DeviceDescriptor::LEN];
-        self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut buff)
-            .await?;
-        trace!("data: {buff:?}");
-        let desc = DeviceDescriptor::parse(&buff)
-            .ok_or(USBError::Other("device descriptor parse err".into()))?;
-        self.desc = desc;
-        Ok(())
-    }
-
-    async fn get_descriptor(
-        &mut self,
-        desc_type: DescriptorType,
-        desc_index: u8,
-        language_id: u16,
-        buff: &mut [u8],
-    ) -> Result<()> {
-        self.control_in(
-            ControlSetup {
-                request_type: RequestType::Standard,
-                recipient: Recipient::Device,
-                request: Request::GetDescriptor,
-                value: ((desc_type.0 as u16) << 8) | desc_index as u16,
-                index: language_id,
-            },
-            buff,
-        )
-        .await?;
+        self.desc = self.ctrl().get_device_descriptor().await?;
         Ok(())
     }
 
@@ -299,7 +273,8 @@ impl Device {
 
         let mut data = alloc::vec![0u8; 8];
 
-        self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
+        self.ctrl()
+            .get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
             .await?;
 
         // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
@@ -316,21 +291,9 @@ impl Device {
     }
 
     async fn get_configuration(&mut self) -> Result<u8> {
-        let mut buff = alloc::vec![0u8; 1];
-        self.control_in(
-            ControlSetup {
-                request_type: RequestType::Standard,
-                recipient: Recipient::Device,
-                request: Request::GetConfiguration,
-                value: 0,
-                index: 0,
-            },
-            &mut buff,
-        )
-        .await?;
-        let config_value = buff[0];
-        self.current_config_value = Some(config_value);
-        Ok(buff[0])
+        let val = self.ctrl().get_configuration().await?;
+        self.current_config_value = Some(val);
+        Ok(val)
     }
 
     async fn read_configuration_descriptor(
@@ -338,14 +301,16 @@ impl Device {
         index: u8,
     ) -> Result<ConfigurationDescriptor> {
         let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN]; // 配置描述符头部固定为9字节
-        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut header)
+        self.ctrl()
+            .get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut header)
             .await?;
 
         let total_length = u16::from_le_bytes(header[2..4].try_into().unwrap()) as usize;
         // 获取完整的配置描述符（包括接口和端点描述符）
         let mut full_data = alloc::vec![0u8; total_length];
         debug!("Reading configuration descriptor for index {index}, total length: {total_length}");
-        self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut full_data)
+        self.ctrl()
+            .get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut full_data)
             .await?;
 
         let parsed_config = ConfigurationDescriptor::parse(&full_data)
@@ -353,12 +318,18 @@ impl Device {
 
         Ok(parsed_config)
     }
+
+    fn ctrl(&mut self) -> &mut EndpointControl<Endpoint> {
+        self.ctrl_ep.as_mut().unwrap()
+    }
 }
 
 impl DeviceOp for Device {
     type Ep = Endpoint;
 
-    // type Ep;
+    fn ep_ctrl(&mut self) -> &mut Self::Ep {
+        &mut self.ctrl_ep.as_mut().unwrap().raw
+    }
 
     async fn claim_interface(&mut self, interface: u8, alternate: u8) -> Result {
         todo!()
@@ -369,17 +340,7 @@ impl DeviceOp for Device {
     }
 
     async fn set_configuration(&mut self, configuration_value: u8) -> Result {
-        self.control_out(
-            ControlSetup {
-                request_type: RequestType::Standard,
-                recipient: Recipient::Device,
-                request: Request::SetConfiguration,
-                value: configuration_value as u16,
-                index: 0,
-            },
-            &[],
-        )
-        .await?;
+        self.ctrl().set_configuration(configuration_value).await?;
 
         self.current_config_value = Some(configuration_value);
 

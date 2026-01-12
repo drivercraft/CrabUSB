@@ -2,7 +2,7 @@ use core::pin::Pin;
 
 use usb_if::host::ControlSetup;
 
-use crate::{BusAddr, backend::ty::TransferOp};
+use crate::BusAddr;
 
 #[derive(Clone)]
 pub enum TransferKind {
@@ -60,22 +60,12 @@ impl Transfer {
         dma_from_usize(self.buffer_addr, self.buffer_len)
     }
 
-    pub fn in_slice(&self) -> &[u8] {
-        unsafe { core::slice::from_raw_parts(self.buffer_addr as *const u8, self.transfer_len) }
-    }
+    // pub fn in_slice(&self) -> &[u8] {
+    //     unsafe { core::slice::from_raw_parts(self.buffer_addr as *const u8, self.transfer_len) }
+    // }
 }
 
 fn dma_from_usize<'a>(addr: usize, len: usize) -> dma_api::DSlice<'a, u8> {
     let data_slice = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
     dma_api::DSlice::from(data_slice, dma_api::Direction::Bidirectional)
-}
-
-impl TransferOp for Transfer {
-    fn data_ptr(&self) -> usize {
-        self.buffer_addr
-    }
-
-    fn data_len(&self) -> usize {
-        self.buffer_len
-    }
 }

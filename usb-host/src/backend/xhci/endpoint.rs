@@ -1,7 +1,6 @@
 use core::pin::Pin;
 
-use alloc::collections::BTreeMap;
-use alloc::sync::Arc;
+use alloc::{collections::BTreeMap, sync::Arc};
 
 use mbarrier::mb;
 use spin::Mutex;
@@ -20,16 +19,10 @@ use crate::{
     backend::{
         Dci,
         ty::{
-            EndpintOp,
-            ep::{EndpointOp2, TransferHandle2},
+            ep::{EndpointOp, TransferHandle},
             transfer::{Transfer, TransferKind},
         },
-        xhci::{
-            DirectionExt,
-            reg::SlotBell,
-            ring::SendRing,
-            transfer::{ TransferHandle},
-        },
+        xhci::{DirectionExt, reg::SlotBell, ring::SendRing, transfer::TransferId},
     },
     err::ConvertXhciError,
 };
@@ -38,7 +31,7 @@ pub struct Endpoint {
     dci: Dci,
     pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
-    transfers2: BTreeMap<TransferHandle, Transfer>,
+    transfers: BTreeMap<TransferId, Transfer>,
 }
 
 unsafe impl Send for Endpoint {}
@@ -52,7 +45,7 @@ impl Endpoint {
             dci,
             ring,
             bell,
-            transfers2: BTreeMap::new(),
+            transfers: BTreeMap::new(),
         })
     }
 
@@ -70,12 +63,12 @@ impl Endpoint {
         &self.ring
     }
 
-    fn handle_transfer_completion2(
+    fn handle_transfer_completion(
         &mut self,
         c: &TransferEvent,
         handle: BusAddr,
     ) -> Result<Transfer, TransferError> {
-        let mut t = self.transfers2.remove(&TransferHandle(handle)).unwrap();
+        let mut t = self.transfers.remove(&TransferId(handle)).unwrap();
         match c.completion_code() {
             Ok(code) => match code.to_result() {
                 Ok(_) => Ok(()),
@@ -94,81 +87,19 @@ impl Endpoint {
         &mut self,
         transfer: Transfer,
     ) -> impl Future<Output = Result<Transfer, TransferError>> {
-        let tr2 = Transfer {
-            direction: transfer.direction,
-            buffer_addr: transfer.buffer_addr,
-            buffer_len: transfer.buffer_len,
-            transfer_len: 0,
-            bus_addr: BusAddr(0),
-            kind: transfer.kind,
-        };
-        let kind = tr2.kind.clone();
-        let handle = EndpointOp2::submit(self, tr2).unwrap();
-
+        let handle = self.submit(transfer);
         async move {
-            let res = handle.await?;
-            let t = Transfer {
-                kind,
-                direction: res.direction,
-                buffer_addr: res.buffer_addr,
-                buffer_len: res.buffer_len,
-                transfer_len: res.transfer_len,
-                bus_addr: res.bus_addr,
-            };
-            Ok(t)
+            let handle = handle?;
+            handle.await
         }
-
-        // let handle = self.submit(transfer);
-        // self.async_query(handle)
     }
 }
 
-pub struct EndpintControl {
-    raw: Endpoint,
-}
-
-impl EndpintControl {
-    pub fn new(raw: Endpoint) -> Self {
-        Self { raw }
-    }
-
-    pub async fn control_in(
-        &mut self,
-        param: ControlSetup,
-        buff: &mut [u8],
-    ) -> Result<usize, TransferError> {
-        let transfer = Transfer::new_in(TransferKind::Control(param), Pin::new(buff));
-        let t = self.raw.request(transfer).await?;
-        let n = t.transfer_len;
-
-        Ok(n)
-    }
-
-    pub async fn control_out(
-        &mut self,
-        param: ControlSetup,
-        buff: &[u8],
-    ) -> Result<usize, TransferError> {
-        let transfer = Transfer::new_out(TransferKind::Control(param), Pin::new(buff));
-        let t = self.raw.request(transfer).await?;
-        let n = t.transfer_len;
-        Ok(n)
-    }
-
-    pub fn bus_addr(&self) -> BusAddr {
-        self.raw.bus_addr()
-    }
-}
-
-impl EndpintOp for Endpoint {
-    type Transfer = Transfer;
-}
-
-impl EndpointOp2 for Endpoint {
+impl EndpointOp for Endpoint {
     fn submit(
         &mut self,
         transfer: crate::backend::ty::transfer::Transfer,
-    ) -> Result<crate::backend::ty::ep::TransferHandle2<'_>, TransferError> {
+    ) -> Result<crate::backend::ty::ep::TransferHandle<'_>, TransferError> {
         let mut data_bus_addr = 0;
         if transfer.buffer_len > 0 {
             let data_slice = transfer.dma_slice();
@@ -181,7 +112,7 @@ impl EndpointOp2 for Endpoint {
         let data_len = transfer.buffer_len;
         let dir = transfer.direction;
 
-        let mut handle = TransferHandle(BusAddr(0));
+        let mut handle = TransferId(BusAddr(0));
 
         match &transfer.kind {
             TransferKind::Control(t) => {
@@ -231,11 +162,11 @@ impl EndpointOp2 for Endpoint {
                 handle.0 = self.ring.enque_transfer(status.into());
             }
         }
-        self.transfers2.insert(handle, transfer);
+        self.transfers.insert(handle, transfer);
         mb();
         self.doorbell();
 
-        Ok(TransferHandle2 {
+        Ok(TransferHandle {
             id: handle.0.raw(),
             endpoint: self,
         })
@@ -247,7 +178,7 @@ impl EndpointOp2 for Endpoint {
     ) -> Option<Result<crate::backend::ty::transfer::Transfer, TransferError>> {
         let id = BusAddr(id);
         let c = self.ring.get_finished(id)?;
-        let res = self.handle_transfer_completion2(&c, id);
+        let res = self.handle_transfer_completion(&c, id);
         Some(res)
     }
 

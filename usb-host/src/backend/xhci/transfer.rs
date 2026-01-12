@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TransferHandle(pub(crate) BusAddr);
+pub struct TransferId(pub(crate) BusAddr);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct TransQueueId {
