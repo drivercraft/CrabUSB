@@ -80,6 +80,13 @@ impl<C> Finished<C> {
             finished: self,
         }
     }
+
+    pub fn register_cx(&self, addr: BusAddr, cx: &mut Context<'_>) {
+        let data = unsafe { &mut *self.inner.data.get() };
+        if let Some(slot) = data.get_mut(&addr) {
+            slot.0.register(cx.waker());
+        }
+    }
 }
 
 pub(crate) struct Water<'a, C> {

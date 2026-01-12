@@ -13,6 +13,7 @@ use crate::err::USBError;
 
 // pub mod hub;
 pub mod ep;
+pub mod transfer;
 
 
 

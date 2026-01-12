@@ -4,7 +4,7 @@ use usb_if::host::USBError;
 
 use crate::{
     Dwc, Xhci,
-    backend::ty::{DeviceInfoOp, EventHandlerOp},
+    backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp},
 };
 
 // #[cfg(feature = "libusb")]

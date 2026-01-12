@@ -197,6 +197,10 @@ impl<R> SendRing<R> {
         self.finished.get_finished(addr)
     }
 
+    pub fn register_cx(&self, addr: BusAddr, cx: &mut core::task::Context<'_>) {
+        self.finished.register_cx(addr, cx);
+    }
+
     pub fn bus_addr(&self) -> BusAddr {
         self.ring.bus_addr()
     }
