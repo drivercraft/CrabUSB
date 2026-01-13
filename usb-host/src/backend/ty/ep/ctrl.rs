@@ -14,14 +14,10 @@ pub struct EndpointControl {
 }
 
 impl EndpointControl {
-    pub fn new(raw: impl EndpointOp) -> Self {
+    pub(crate) fn new(raw: impl EndpointOp) -> Self {
         Self {
             raw: EndpointBase::new(raw),
         }
-    }
-
-    pub fn new_from_base(raw: EndpointBase) -> Self {
-        Self { raw }
     }
 
     pub async fn control_in(
@@ -133,5 +129,11 @@ impl EndpointControl {
             .ok_or(USBError::Other("config descriptor parse err".into()))?;
 
         Ok(parsed_config)
+    }
+}
+
+impl From<EndpointBase> for EndpointControl {
+    fn from(raw: EndpointBase) -> Self {
+        Self { raw }
     }
 }

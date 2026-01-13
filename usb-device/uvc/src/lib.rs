@@ -8,7 +8,8 @@ use alloc::{
     vec::Vec,
 };
 use crab_usb::{
-    Class, Device, DeviceInfo, Direction, EndpointType, Interface, Recipient, Request, RequestType,
+    Class, Direction, EndpointType, Recipient, Request, RequestType,
+    device::{Device, DeviceInfo},
     err::USBError,
 };
 use log::{debug, trace};

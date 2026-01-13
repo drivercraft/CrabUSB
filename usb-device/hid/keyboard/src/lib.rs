@@ -4,8 +4,9 @@ extern crate alloc;
 use alloc::{string::ToString, vec::Vec};
 
 use crab_usb::{
-    Class, Device, DeviceInfo, Direction, EndpointInterruptIn, EndpointType, Interface,
-    TransferError, err::USBError,
+    Class, Direction, EndpointType, TransferError,
+    device::{Device, DeviceInfo},
+    err::USBError,
 };
 use keyboard_types::{Key, Modifiers, NamedKey};
 use log::debug;
@@ -117,7 +118,6 @@ fn scancode_to_key(scancode: u8) -> Option<Key> {
 
 pub struct KeyBoard {
     _device: Device,
-    _interface: Interface,
     ep_in: EndpointInterruptIn,
     /// 上一次按键状态，用于检测按键变化
     previous_state: [u8; 8],

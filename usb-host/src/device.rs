@@ -126,12 +126,10 @@ impl Device {
         let ep_desc = self.find_ep_desc(address)?.clone();
         let base = self.inner.get_endpoint(&ep_desc)?;
         match ep_desc.transfer_type {
-            usb_if::descriptor::EndpointType::Control => Ok(EndpointKind::Control(
-                crate::backend::ty::ep::EndpointControl::new_from_base(base),
-            )),
+            usb_if::descriptor::EndpointType::Control => Ok(EndpointKind::Control(base.into())),
             usb_if::descriptor::EndpointType::Isochronous => Ok(EndpointKind::Isochronous),
             usb_if::descriptor::EndpointType::Bulk => Ok(EndpointKind::Bulk),
-            usb_if::descriptor::EndpointType::Interrupt => Ok(EndpointKind::Interrupt),
+            usb_if::descriptor::EndpointType::Interrupt => Ok(EndpointKind::Interrupt(base.into())),
         }
     }
 

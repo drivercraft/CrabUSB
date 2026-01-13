@@ -9,7 +9,10 @@ use usb_if::{
 };
 use xhci::{
     registers::doorbell,
-    ring::trb::{event::TransferEvent, transfer},
+    ring::trb::{
+        event::TransferEvent,
+        transfer::{self, Normal},
+    },
 };
 
 use crate::{
@@ -147,6 +150,17 @@ impl EndpointOp for Endpoint {
                     self.ring.enque_transfer(data.into());
                 }
                 handle.0 = self.ring.enque_transfer(status.into());
+            }
+            TransferKind::Interrupt => {
+                let trb = transfer::Allowed::Normal(
+                    *Normal::new()
+                        .set_data_buffer_pointer(data_bus_addr as _)
+                        .set_trb_transfer_length(data_len as _)
+                        .set_interrupter_target(0)
+                        .set_interrupt_on_short_packet()
+                        .set_interrupt_on_completion(),
+                );
+                handle.0 = self.ring.enque_transfer(trb);
             }
         }
         self.transfers.insert(handle, transfer);

@@ -10,46 +10,48 @@ use super::transfer::Transfer;
 use usb_if::err::TransferError;
 
 mod ctrl;
+mod int;
 
 pub use ctrl::*;
+pub use int::*;
 
 pub enum EndpointKind {
     Control(EndpointControl),
     Isochronous,
     Bulk,
-    Interrupt,
+    Interrupt(EndpointInterrupt),
 }
 
 impl EndpointKind {
-    pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {
-        match self {
-            EndpointKind::Control(ep) => ep.raw.as_raw_mut::<T>(),
-            EndpointKind::Isochronous => {
-                panic!("EndpointType::as_type_mut: Isochronous endpoint not implemented")
-            }
-            EndpointKind::Bulk => {
-                panic!("EndpointType::as_type_mut: Bulk endpoint not implemented")
-            }
-            EndpointKind::Interrupt => {
-                panic!("EndpointType::as_type_mut: Interrupt endpoint not implemented")
-            }
-        }
-    }
+    // pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {
+    //     match self {
+    //         EndpointKind::Control(ep) => ep.raw.as_raw_mut::<T>(),
+    //         EndpointKind::Isochronous => {
+    //             panic!("EndpointType::as_type_mut: Isochronous endpoint not implemented")
+    //         }
+    //         EndpointKind::Bulk => {
+    //             panic!("EndpointType::as_type_mut: Bulk endpoint not implemented")
+    //         }
+    //         EndpointKind::Interrupt => {
+    //             panic!("EndpointType::as_type_mut: Interrupt endpoint not implemented")
+    //         }
+    //     }
+    // }
 
-    pub(crate) fn as_raw_ref<T: EndpointOp>(&self) -> &T {
-        match self {
-            EndpointKind::Control(ep) => ep.raw.as_raw_ref::<T>(),
-            EndpointKind::Isochronous => {
-                panic!("EndpointType::as_type_ref: Isochronous endpoint not implemented")
-            }
-            EndpointKind::Bulk => {
-                panic!("EndpointType::as_type_ref: Bulk endpoint not implemented")
-            }
-            EndpointKind::Interrupt => {
-                panic!("EndpointType::as_type_ref: Interrupt endpoint not implemented")
-            }
-        }
-    }
+    // pub(crate) fn as_raw_ref<T: EndpointOp>(&self) -> &T {
+    //     match self {
+    //         EndpointKind::Control(ep) => ep.raw.as_raw_ref::<T>(),
+    //         EndpointKind::Isochronous => {
+    //             panic!("EndpointType::as_type_ref: Isochronous endpoint not implemented")
+    //         }
+    //         EndpointKind::Bulk => {
+    //             panic!("EndpointType::as_type_ref: Bulk endpoint not implemented")
+    //         }
+    //         EndpointKind::Interrupt => {
+    //             panic!("EndpointType::as_type_ref: Interrupt endpoint not implemented")
+    //         }
+    //     }
+    // }
 }
 
 pub(crate) struct EndpointBase {
@@ -78,11 +80,11 @@ impl EndpointBase {
             .expect("EndpointBase downcast_mut failed")
     }
 
-    pub(crate) fn as_raw_ref<T: EndpointOp>(&self) -> &T {
-        let d = self.raw.as_ref() as &dyn Any;
-        d.downcast_ref::<T>()
-            .expect("EndpointBase downcast_ref failed")
-    }
+    // pub(crate) fn as_raw_ref<T: EndpointOp>(&self) -> &T {
+    //     let d = self.raw.as_ref() as &dyn Any;
+    //     d.downcast_ref::<T>()
+    //         .expect("EndpointBase downcast_ref failed")
+    // }
 }
 
 pub trait EndpointOp: Send + Any + 'static {

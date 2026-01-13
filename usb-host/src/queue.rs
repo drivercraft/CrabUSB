@@ -106,13 +106,6 @@ impl<C> Finished<C> {
         slot
     }
 
-    pub(crate) fn wait_command_finished(&self, addr: BusAddr) -> Waiter<'_, C> {
-        Waiter {
-            addr,
-            finished: self,
-        }
-    }
-
     pub fn register_cx(&self, addr: BusAddr, cx: &mut core::task::Context<'_>) {
         self.waiter(addr).register(cx.waker());
     }
@@ -125,25 +118,6 @@ impl<C> Finished<C> {
         TWaiter {
             finished: data.clone(),
         }
-    }
-}
-
-pub(crate) struct Waiter<'a, C> {
-    addr: BusAddr,
-    finished: &'a Finished<C>,
-}
-
-impl<'a, C> Future for Waiter<'a, C> {
-    type Output = C;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        let data = this.finished.waiter(this.addr);
-        if let Some(res) = data.get_finished() {
-            return Poll::Ready(res);
-        }
-        data.register(cx.waker());
-        Poll::Pending
     }
 }
 

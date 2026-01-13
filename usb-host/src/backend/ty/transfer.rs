@@ -2,11 +2,11 @@ use core::pin::Pin;
 
 use usb_if::host::ControlSetup;
 
-use crate::BusAddr;
-
 #[derive(Clone)]
 pub enum TransferKind {
     Control(ControlSetup),
+    Interrupt,
+    
     // Other kinds can be added here
 }
 
@@ -17,7 +17,6 @@ pub struct Transfer {
     pub buffer_addr: usize,
     pub buffer_len: usize,
     pub transfer_len: usize,
-    pub bus_addr: BusAddr,
 }
 
 impl Transfer {
@@ -35,7 +34,6 @@ impl Transfer {
             buffer_addr,
             buffer_len,
             transfer_len: 0,
-            bus_addr: BusAddr(0),
         }
     }
 
@@ -52,7 +50,6 @@ impl Transfer {
             buffer_addr,
             buffer_len,
             transfer_len: 0,
-            bus_addr: BusAddr(0),
         }
     }
 

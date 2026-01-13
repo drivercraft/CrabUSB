@@ -194,10 +194,6 @@ impl<R> SendRing<R> {
         self.finished.take_waiter(addr)
     }
 
-    pub async fn wait_command_finished(&self, addr: BusAddr) -> R {
-        self.finished.wait_command_finished(addr).await
-    }
-
     pub fn finished_handle(&self) -> Finished<R> {
         self.finished.clone()
     }
