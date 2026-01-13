@@ -1,6 +1,5 @@
 use dma_api::DVec;
 
-use crate::BusAddr;
 
 pub struct EventBuffer {
     pub buffer: DVec<u8>,

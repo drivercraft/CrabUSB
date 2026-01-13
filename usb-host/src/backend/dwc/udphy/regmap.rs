@@ -16,7 +16,7 @@ impl Regmap {
     }
 
     pub fn grfreg_write(&self, reg: &UdphyGrfReg, en: bool) {
-        let mut tmp = if en { reg.enable } else { reg.disable };
+        let tmp = if en { reg.enable } else { reg.disable };
         let mask = genmask(reg.bitend, reg.bitstart) as u32;
         let val = (tmp << reg.bitstart) | (mask << 16);
         self.reg_write(reg.offset, val);

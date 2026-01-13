@@ -3,7 +3,6 @@
 //! 这个模块提供 USB2 PHY 的完整初始化功能，包括 RK3588 特定的 PHY 调优。
 //! 参照 U-Boot 的 `drivers/phy/phy-rockchip-inno-usb2.c` 实现。
 
-use core::time::Duration;
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -178,7 +177,7 @@ impl Usb2Phy {
     }
 
     fn property_enable(&self, reg: &Usb2PhyGrfReg, en: bool) {
-        let mut tmp = if en { reg.enable } else { reg.disable };
+        let tmp = if en { reg.enable } else { reg.disable };
         let mask = genmask(reg.bitend, reg.bitstart) as u32;
         let val = (tmp << reg.bitstart) | (mask << 16);
         self.write_reg(reg.offset, val);
@@ -265,7 +264,7 @@ fn rk3588_usb2phy_tuning(phy: &Usb2Phy) -> Result<()> {
     // Bit[29:29] = IDDQ
     phy.write_reg(
         reg_offset::CLK_CONTROL,
-        genmask(29, 29) as u32 | 0x0000, // mask=bit29, value=0
+        genmask(29, 29) as u32, // mask=bit29, value=0
     );
 
     // Step 2: 执行复位

@@ -6,7 +6,6 @@ use tock_registers::{register_bitfields, register_structs, registers::*};
 
 use crate::osal::SpinWhile;
 
-use super::consts::*;
 
 /// DWC3 全局寄存器基址偏移 (相对于 xHCI 寄存器区域)
 const DWC3_GLOBALS_REGS_START: usize = 0xc100;

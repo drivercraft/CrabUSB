@@ -4,7 +4,6 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 use super::CruOp;
 use crate::{
@@ -307,8 +306,7 @@ impl Udphy {
 
         for (idx, sel) in self.lane_mux_sel.iter().enumerate() {
             if *sel == PHY_LANE_MUX_DP {
-                fv = fv
-                    + match idx {
+                fv += match idx {
                         0 => CMN_LANE_MUX_EN::LANE0_EN::Enable,
                         1 => CMN_LANE_MUX_EN::LANE1_EN::Enable,
                         2 => CMN_LANE_MUX_EN::LANE2_EN::Enable,

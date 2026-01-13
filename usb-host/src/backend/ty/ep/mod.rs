@@ -2,7 +2,6 @@ use alloc::boxed::Box;
 use core::any::Any;
 use core::{
     future::Future,
-    ops::{Deref, DerefMut},
     pin::Pin,
     task::{Context, Poll},
 };

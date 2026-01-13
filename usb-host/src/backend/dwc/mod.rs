@@ -29,9 +29,7 @@ use crate::{
     osal::kernel::page_size,
 };
 
-pub use crate::backend::xhci::*;
 
-use device::DeviceInfo;
 
 use usb2phy::Usb2Phy;
 pub use usb2phy::{Usb2PhyParam, Usb2PhyPortId};
@@ -191,7 +189,7 @@ impl Dwc {
     }
 
     fn event_buffers_setup(&mut self) {
-        use reg::GEVNTSIZ;
+        
 
         info!("DWC3: Setting up event buffers");
 
@@ -631,13 +629,13 @@ impl Dwc {
 }
 
 impl BackendOp for Dwc {
-    fn init(&mut self) -> futures::future::BoxFuture<Result<()>> {
+    fn init(&mut self) -> futures::future::BoxFuture<'_, Result<()>> {
         self.xhci.init()
     }
 
     fn probe_devices(
         &mut self,
-    ) -> futures::future::BoxFuture<Result<Vec<Box<dyn super::ty::DeviceInfoOp>>>> {
+    ) -> futures::future::BoxFuture<'_, Result<Vec<Box<dyn super::ty::DeviceInfoOp>>>> {
         self.xhci.probe_devices()
     }
 

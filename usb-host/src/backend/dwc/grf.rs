@@ -25,7 +25,6 @@
 //! Offset 0x0034: USB3OTG1_CFG - USB3 OTG1 配置
 //! ```
 
-use core::ptr::NonNull;
 
 use tock_registers::interfaces::*;
 use tock_registers::registers::*;
@@ -358,7 +357,7 @@ impl Grf {
         };
 
         // 直接使用指针写入（绕过 tock-registers，使用 GRF 格式）
-        let addr = (base as usize + offset) as *mut u32;
+        let addr = (base + offset) as *mut u32;
         unsafe {
             addr.write_volatile(GRF_VALUE);
         }
@@ -466,7 +465,7 @@ impl Grf {
 
         // Bit[1] = 1 (Enable), Bit[17] = 1 (Write Enable)
         // Bit[0] = 0 (No Suspend), Bit[16] = 1 (Write Enable)
-        const VALUE: u32 = (1 << 1) | (1 << 17) | (0 << 0) | (1 << 16);
+        const VALUE: u32 = ((1 << 1) | (1 << 17)) | (1 << 16);
 
         self.usb2phy_regs_mut().CON.set(VALUE);
 
