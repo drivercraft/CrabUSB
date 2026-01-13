@@ -1,9 +1,9 @@
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cell::UnsafeCell;
 use futures::{FutureExt, future::LocalBoxFuture};
-use spin::{Mutex, RwLock};
+use spin::RwLock;
 
-use mbarrier::{mb, wmb};
+use mbarrier::mb;
 use usb_if::{err::TransferError, host::USBError};
 use xhci::{
     ExtendedCapability,
@@ -14,37 +14,31 @@ use xhci::{
 
 use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
+use crate::backend::{
+    ty::{Event, EventHandlerOp},
+    xhci::{
+        SlotId,
+        context::{DeviceContextList, ScratchpadBufferArray},
+        device::DeviceInfo,
+        event::{EventRing, EventRingInfo},
+    },
+};
 use crate::{
     Mmio,
     backend::{
         BackendOp,
         ty::{DeviceInfoOp, DeviceOp},
-        xhci::transfer::TransferResultHandler,
+        xhci::{cmd::CommandRing, transfer::TransferResultHandler},
     },
     err::Result,
 };
 use crate::{backend::PortId, osal::SpinWhile};
 use crate::{backend::xhci::reg::SlotBell, queue::Finished};
-use crate::{
-    backend::{
-        ty::{Event, EventHandlerOp},
-        xhci::{
-            SlotId,
-            context::{DeviceContextList, ScratchpadBufferArray},
-            device::DeviceInfo,
-            event::{EventRing, EventRingInfo},
-            ring::SendRing,
-        },
-    },
-    err::ConvertXhciError,
-};
-
-pub(crate) type CmdRing = Arc<Mutex<SendRing<CommandCompletion>>>;
 
 pub struct Xhci {
     pub(crate) reg: Arc<RwLock<XhciRegisters>>,
     pub(crate) dma_mask: usize,
-    pub(crate) cmd: CmdRing,
+    pub(crate) cmd: CommandRing,
     dev_ctx: Option<DeviceContextList>,
     event_handler: Option<EventHandler>,
     event_ring_info: EventRingInfo,
@@ -59,21 +53,24 @@ unsafe impl Sync for Xhci {}
 
 impl Xhci {
     pub fn new(mmio: Mmio, dma_mask: usize) -> Result<Self> {
-        let cmd: SendRing<CommandCompletion> =
-            SendRing::new(dma_api::Direction::Bidirectional, dma_mask as _)?;
+        let reg = XhciRegisters::new(mmio);
+        let reg_shared = Arc::new(RwLock::new(reg.clone()));
+
+        let cmd = CommandRing::new(
+            dma_api::Direction::Bidirectional,
+            dma_mask as _,
+            reg_shared.clone(),
+        )?;
         let cmd_finished = cmd.finished_handle();
         let event_ring = EventRing::new(dma_mask)?;
-        let reg = XhciRegisters::new(mmio);
         let event_ring_info = event_ring.info();
-
-        let reg_shared = Arc::new(RwLock::new(reg.clone()));
 
         let transfer_result_handler = TransferResultHandler::new(reg_shared.clone());
 
         Ok(Xhci {
             reg: reg_shared,
             dma_mask,
-            cmd: Arc::new(Mutex::new(cmd)),
+            cmd,
             dev_ctx: None,
             transfer_result_handler: transfer_result_handler.clone(),
             event_handler: Some(EventHandler::new(
@@ -368,14 +365,8 @@ impl Xhci {
     }
 
     fn set_cmd_ring(&mut self) -> Result {
-        let crcr;
-        let cycle;
-
-        {
-            let cmd = self.cmd.lock();
-            crcr = cmd.bus_addr();
-            cycle = cmd.cycle();
-        }
+        let crcr = self.cmd.bus_addr();
+        let cycle = self.cmd.cycle();
 
         debug!("CRCR: {crcr:?}");
         self.reg.write().operational.crcr.update_volatile(|r| {
@@ -535,26 +526,11 @@ impl Xhci {
         })
     }
 
-    pub(crate) async fn cmd_request(
+    pub(crate) fn cmd_request(
         &mut self,
         trb: command::Allowed,
-    ) -> core::result::Result<CommandCompletion, TransferError> {
-        let trb_addr = self.cmd.lock().enque_command(trb);
-
-        wmb();
-        self.reg
-            .write()
-            .doorbell
-            .write_volatile_at(0, doorbell::Register::default());
-
-        let res = self.cmd.lock().take_finished_future(trb_addr).await;
-
-        match res.completion_code() {
-            Ok(code) => code.to_result()?,
-            Err(e) => Err(TransferError::Other(format!("Command failed: {e:?}")))?,
-        }
-
-        Ok(res)
+    ) -> impl Future<Output = core::result::Result<CommandCompletion, TransferError>> {
+        self.cmd.cmd_request(trb)
     }
 
     pub(crate) fn is_64bit_ctx(&self) -> bool {

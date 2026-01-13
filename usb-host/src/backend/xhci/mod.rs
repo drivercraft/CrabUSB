@@ -1,3 +1,4 @@
+pub(crate) mod cmd;
 mod context;
 mod def;
 pub(crate) mod device;

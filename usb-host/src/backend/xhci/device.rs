@@ -14,7 +14,7 @@ use usb_if::{
 };
 use xhci::ring::trb::command;
 
-use crate::backend::xhci::host::CmdRing;
+use crate::backend::xhci::cmd::CommandRing;
 use crate::{
     Xhci,
     backend::{
@@ -87,7 +87,7 @@ pub struct Device {
     config_desc: Vec<ConfigurationDescriptor>,
     port_speed: u8,
     eps: BTreeMap<Dci, EndpointBase>,
-    cmd: CmdRing,
+    cmd: CommandRing,
 }
 
 impl Device {
@@ -398,15 +398,14 @@ impl Device {
         });
         mb();
 
-        todo!("configure endpoint");
-        // let _result = self
-        //     .root
-        //     .post_cmd(command::Allowed::ConfigureEndpoint(
-        //         *command::ConfigureEndpoint::default()
-        //             .set_slot_id(self.id.into())
-        //             .set_input_context_pointer(self.ctx().input_bus_addr()),
-        //     ))
-        //     .await?;
+        let _result = self
+            .cmd
+            .cmd_request(command::Allowed::ConfigureEndpoint(
+                *command::ConfigureEndpoint::default()
+                    .set_slot_id(self.id.into())
+                    .set_input_context_pointer(self.ctx.input_bus_addr()),
+            ))
+            .await?;
 
         Ok(())
     }
