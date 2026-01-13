@@ -1,5 +1,3 @@
-use alloc::sync::Arc;
-
 use dma_api::DVec;
 pub use dma_api::Direction;
 use xhci::ring::trb::{Link, command, transfer};

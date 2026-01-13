@@ -276,7 +276,10 @@ mod tests {
                     if let Some(ref i) = irq {
                         // 检查是否需要修正
                         if i.cfgs[0].irq != 0xdd.into() {
-                            warn!("⚠ WORKAROUND: Detected wrong IRQ {:?}, forcing to 0xdd (221)", i.cfgs[0].irq);
+                            warn!(
+                                "⚠ WORKAROUND: Detected wrong IRQ {:?}, forcing to 0xdd (221)",
+                                i.cfgs[0].irq
+                            );
                             // 由于 IrqInfo 没有 Copy trait，我们需要创建修改后的版本
                             // 这里先记录，实际修改在 register_irq 中处理
                         }
