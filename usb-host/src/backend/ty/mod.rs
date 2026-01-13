@@ -28,6 +28,7 @@ pub trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
 /// USB 设备特征（高层抽象）
 pub trait DeviceOp: Send + Any + 'static {
     fn descriptor(&self) -> &DeviceDescriptor;
+    fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
 
     fn claim_interface<'a>(
         &'a mut self,

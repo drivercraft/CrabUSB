@@ -1,11 +1,8 @@
 use alloc::boxed::Box;
 use core::{any::type_name_of_val, fmt::Debug};
-use usb_if::err::TransferError;
-use usb_if::host::ControlSetup;
+use usb_if::{err::TransferError, host::ControlSetup};
 
-use crate::backend::BackendOp;
-use crate::backend::ty::ep::EndpointControl;
-use crate::backend::ty::{DeviceInfoOp, DeviceOp};
+use crate::backend::ty::{DeviceInfoOp, DeviceOp, ep::EndpointControl};
 
 pub struct DeviceInfo {
     pub(crate) inner: Box<dyn DeviceInfoOp>,
@@ -59,7 +56,7 @@ impl Device {
     }
 
     pub fn configurations(&self) -> &[crate::ConfigurationDescriptor] {
-        todo!()
+        self.inner.configuration_descriptors()
     }
 
     pub async fn set_configuration(&mut self, configuration_value: u8) -> crate::err::Result {

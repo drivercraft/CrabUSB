@@ -1,29 +1,23 @@
-use alloc::sync::Arc;
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
-use futures::FutureExt;
-use futures::future::BoxFuture;
+use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
 use xhci::ring::trb::command;
 
-use crate::backend::Dci;
-use crate::backend::ty::ep::EndpointControl;
-use crate::backend::xhci::endpoint::Endpoint;
-use crate::backend::xhci::reg::SlotBell;
-use crate::backend::xhci::transfer::TransferResultHandler;
-use crate::backend::xhci::{
-    append_port_to_route_string, parse_default_max_packet_size_from_port_speed,
-};
-use crate::err::Result;
 use crate::{
     Xhci,
     backend::{
-        PortId,
-        ty::{DeviceInfoOp, DeviceOp},
-        xhci::{SlotId, context::ContextData},
+        Dci, PortId,
+        ty::{DeviceInfoOp, DeviceOp, ep::EndpointControl},
+        xhci::{
+            SlotId, append_port_to_route_string, context::ContextData, endpoint::Endpoint,
+            parse_default_max_packet_size_from_port_speed, reg::SlotBell,
+            transfer::TransferResultHandler,
+        },
     },
+    err::Result,
 };
 
 #[derive(Debug, Clone)]
@@ -307,6 +301,10 @@ impl DeviceOp for Device {
 
     fn ep_ctrl(&mut self) -> &mut EndpointControl {
         self.ctrl_ep.as_mut().unwrap()
+    }
+
+    fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
+        &self.config_desc
     }
 
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, usb_if::host::USBError> {

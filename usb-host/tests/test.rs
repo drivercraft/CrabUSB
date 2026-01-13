@@ -105,7 +105,7 @@ mod tests {
                     .unwrap();
                 info!("set configuration ok");
 
-                //     // let config_value = device.current_configuration_descriptor().await.unwrap();
+                // let config_value = device.current_configuration_descriptor().await.unwrap();
                 //     // info!("get configuration: {config_value:?}");
 
                 //     let mut interface = device
