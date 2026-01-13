@@ -1,8 +1,15 @@
+use alloc::sync::Arc;
+
 use dma_api::DVec;
 pub use dma_api::Direction;
 use xhci::ring::trb::{Link, command, transfer};
 
-use crate::{BusAddr, err::*, osal::kernel::page_size, queue::Finished};
+use crate::{
+    BusAddr,
+    err::*,
+    osal::kernel::page_size,
+    queue::{Finished, TWaiter},
+};
 
 const TRB_LEN: usize = 4;
 const TRB_SIZE: usize = size_of::<TrbData>();
@@ -185,8 +192,12 @@ impl<R> SendRing<R> {
         addr
     }
 
+    pub fn take_finished_future(&self, addr: BusAddr) -> TWaiter<R> {
+        self.finished.take_waiter(addr)
+    }
+
     pub async fn wait_command_finished(&self, addr: BusAddr) -> R {
-        self.finished.wait_for_finished(addr).await
+        self.finished.wait_command_finished(addr).await
     }
 
     pub fn finished_handle(&self) -> Finished<R> {

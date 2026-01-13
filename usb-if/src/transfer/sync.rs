@@ -32,6 +32,10 @@ impl<T> RwLock<T> {
         }
     }
 
+    /// # Safety
+    /// This function allows mutable access to the inner data without any synchronization.
+    /// The caller must ensure that no other references (mutable or immutable) to the data exist
+    /// while this mutable reference is in use.
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn force_use(&self) -> &mut T {
         unsafe { &mut *self.data.get() }

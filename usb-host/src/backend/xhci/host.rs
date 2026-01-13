@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cell::UnsafeCell;
 use futures::{FutureExt, future::LocalBoxFuture};
-use spin::RwLock;
+use spin::{Mutex, RwLock};
 
 use mbarrier::{mb, wmb};
 use usb_if::{err::TransferError, host::USBError};
@@ -39,10 +39,12 @@ use crate::{
     err::ConvertXhciError,
 };
 
+pub(crate) type CmdRing = Arc<Mutex<SendRing<CommandCompletion>>>;
+
 pub struct Xhci {
     pub(crate) reg: Arc<RwLock<XhciRegisters>>,
     pub(crate) dma_mask: usize,
-    cmd: SendRing<CommandCompletion>,
+    pub(crate) cmd: CmdRing,
     dev_ctx: Option<DeviceContextList>,
     event_handler: Option<EventHandler>,
     event_ring_info: EventRingInfo,
@@ -71,7 +73,7 @@ impl Xhci {
         Ok(Xhci {
             reg: reg_shared,
             dma_mask,
-            cmd,
+            cmd: Arc::new(Mutex::new(cmd)),
             dev_ctx: None,
             transfer_result_handler: transfer_result_handler.clone(),
             event_handler: Some(EventHandler::new(
@@ -366,8 +368,14 @@ impl Xhci {
     }
 
     fn set_cmd_ring(&mut self) -> Result {
-        let crcr = self.cmd.bus_addr();
-        let cycle = self.cmd.cycle();
+        let crcr;
+        let cycle;
+
+        {
+            let cmd = self.cmd.lock();
+            crcr = cmd.bus_addr();
+            cycle = cmd.cycle();
+        }
 
         debug!("CRCR: {crcr:?}");
         self.reg.write().operational.crcr.update_volatile(|r| {
@@ -531,7 +539,7 @@ impl Xhci {
         &mut self,
         trb: command::Allowed,
     ) -> core::result::Result<CommandCompletion, TransferError> {
-        let trb_addr = self.cmd.enque_command(trb);
+        let trb_addr = self.cmd.lock().enque_command(trb);
 
         wmb();
         self.reg
@@ -539,7 +547,7 @@ impl Xhci {
             .doorbell
             .write_volatile_at(0, doorbell::Register::default());
 
-        let res = self.cmd.wait_command_finished(trb_addr).await;
+        let res = self.cmd.lock().take_finished_future(trb_addr).await;
 
         match res.completion_code() {
             Ok(code) => code.to_result()?,

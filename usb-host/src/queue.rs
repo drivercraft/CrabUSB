@@ -25,86 +25,154 @@ impl<C> Clone for Finished<C> {
 }
 
 pub struct FinishedInner<C> {
-    finished: BTreeMap<BusAddr, AtomicBool>,
-    data: UnsafeCell<BTreeMap<BusAddr, (AtomicWaker, Option<C>)>>,
+    data: UnsafeCell<BTreeMap<BusAddr, Arc<FinishedData<C>>>>,
+}
+
+pub struct FinishedData<C> {
+    taken: AtomicBool,
+    finished: AtomicBool,
+    waker: AtomicWaker,
+    data: UnsafeCell<Option<C>>,
+}
+
+impl<C> FinishedData<C> {
+    fn new() -> Self {
+        Self {
+            finished: AtomicBool::new(false),
+            taken: AtomicBool::new(false),
+            waker: AtomicWaker::new(),
+            data: UnsafeCell::new(None),
+        }
+    }
 }
 
 unsafe impl<C> Send for FinishedInner<C> {}
 unsafe impl<C> Sync for FinishedInner<C> {}
+unsafe impl<C> Send for FinishedData<C> {}
+unsafe impl<C> Sync for FinishedData<C> {}
+
+impl<C> FinishedInner<C> {
+    fn clear_finished(&self, addr: BusAddr) {
+        if let Some(data) = unsafe { &mut *self.data.get() }.get(&addr) {
+            data.finished.store(false, Ordering::Release);
+            data.taken.store(false, Ordering::Release);
+            unsafe {
+                (*data.data.get()).take();
+            }
+        }
+    }
+}
 
 impl<C> Finished<C> {
     pub fn new(addrs: impl Iterator<Item = BusAddr>) -> Self {
-        let mut finished = BTreeMap::new();
         let mut data = BTreeMap::new();
 
         for addr in addrs {
-            finished.insert(addr, AtomicBool::new(false));
-            data.insert(addr, (AtomicWaker::new(), None));
+            data.insert(addr, Arc::new(FinishedData::new()));
         }
         Self {
             inner: Arc::new(FinishedInner {
                 data: UnsafeCell::new(data),
-                finished,
             }),
         }
     }
 
     pub fn clear_finished(&self, addr: BusAddr) {
-        if let Some(flag) = self.inner.finished.get(&addr) {
-            flag.store(false, Ordering::Release);
-        }
+        self.inner.clear_finished(addr);
     }
 
     pub fn set_finished(&self, addr: BusAddr, value: C) {
         let data = unsafe { &mut *self.inner.data.get() };
         if let Some(slot) = data.get_mut(&addr) {
-            slot.1 = Some(value);
-            if let Some(flag) = self.inner.finished.get(&addr) {
-                flag.store(true, Ordering::Release);
+            unsafe {
+                *slot.data.get() = Some(value);
             }
-            slot.0.wake();
+            slot.finished.store(true, Ordering::Release);
+            slot.waker.wake();
         }
     }
 
-    pub(crate) fn get_finished(&self, addr: BusAddr) -> Option<C> {
-        if !self.inner.finished.get(&addr)?.load(Ordering::Acquire) {
-            return None;
-        }
+    pub fn get_finished(&self, addr: BusAddr) -> Option<C> {
+        self.waiter(addr).get_finished()
+    }
+
+    fn waiter(&self, addr: BusAddr) -> &FinishedData<C> {
         let data = unsafe { &mut *self.inner.data.get() };
-        data.get_mut(&addr)?.1.take()
+        let slot = data.get(&addr).unwrap();
+        if slot.taken.load(Ordering::Acquire) {
+            panic!("waiter called after take_waiter");
+        }
+
+        slot
     }
 
-    pub fn wait_for_finished(&self, addr: BusAddr) -> impl Future<Output = C> + '_ {
-        Water {
+    pub(crate) fn wait_command_finished(&self, addr: BusAddr) -> Waiter<'_, C> {
+        Waiter {
             addr,
             finished: self,
         }
     }
 
-    pub fn register_cx(&self, addr: BusAddr, cx: &mut Context<'_>) {
-        let data = unsafe { &mut *self.inner.data.get() };
-        if let Some(slot) = data.get_mut(&addr) {
-            slot.0.register(cx.waker());
+    pub fn register_cx(&self, addr: BusAddr, cx: &mut core::task::Context<'_>) {
+        self.waiter(addr).register(cx.waker());
+    }
+
+    pub fn take_waiter(&self, addr: BusAddr) -> TWaiter<C> {
+        let data = unsafe { &mut *self.inner.data.get() }.get(&addr).unwrap();
+        if data.taken.swap(true, Ordering::AcqRel) {
+            panic!("take_waiter called multiple times for the same addr");
+        }
+        TWaiter {
+            finished: data.clone(),
         }
     }
 }
 
-pub(crate) struct Water<'a, C> {
+pub(crate) struct Waiter<'a, C> {
     addr: BusAddr,
     finished: &'a Finished<C>,
 }
 
-impl<C> Future for Water<'_, C> {
+impl<'a, C> Future for Waiter<'a, C> {
     type Output = C;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Some(res) = self.finished.get_finished(self.addr) {
+        let this = self.get_mut();
+        let data = this.finished.waiter(this.addr);
+        if let Some(res) = data.get_finished() {
             return Poll::Ready(res);
         }
-        let data = unsafe { &mut *self.finished.inner.data.get() };
-        if let Some(slot) = data.get_mut(&self.addr) {
-            slot.0.register(cx.waker());
-        }
+        data.register(cx.waker());
         Poll::Pending
+    }
+}
+
+pub struct TWaiter<C> {
+    finished: Arc<FinishedData<C>>,
+}
+
+impl<C> Future for TWaiter<C> {
+    type Output = C;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        if let Some(res) = this.finished.get_finished() {
+            return Poll::Ready(res);
+        }
+        this.finished.register(cx.waker());
+        Poll::Pending
+    }
+}
+
+impl<C> FinishedData<C> {
+    pub fn register(&self, waker: &core::task::Waker) {
+        self.waker.register(waker);
+    }
+
+    pub fn get_finished(&self) -> Option<C> {
+        if !self.finished.load(Ordering::Acquire) {
+            return None;
+        }
+        unsafe { (*self.data.get()).take() }
     }
 }
