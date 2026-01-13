@@ -16,17 +16,19 @@ pub enum Event {
     PortChange { port: u8 },
 }
 
-pub trait EventHandlerOp: Send + Any + Sync + 'static {
+pub(crate) trait EventHandlerOp: Send + Any + Sync + 'static {
     fn handle_event(&self) -> Event;
 }
 
-pub trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
+pub(crate) trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
+    fn backend_name(&self) -> &str;
     fn descriptor(&self) -> &DeviceDescriptor;
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
 }
 
 /// USB 设备特征（高层抽象）
-pub trait DeviceOp: Send + Any + 'static {
+pub(crate) trait DeviceOp: Send + Any + 'static {
+    fn backend_name(&self) -> &str;
     fn descriptor(&self) -> &DeviceDescriptor;
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
 
@@ -42,6 +44,11 @@ pub trait DeviceOp: Send + Any + 'static {
         &'a mut self,
         configuration_value: u8,
     ) -> BoxFuture<'a, Result<(), USBError>>;
+
+    fn get_endpoint<'a>(
+        &'a mut self,
+        desc: &'a usb_if::descriptor::EndpointDescriptor,
+    ) -> BoxFuture<'a, Result<ep::EndpointBase, USBError>>;
 
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, USBError>;
 }

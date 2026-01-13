@@ -1,13 +1,12 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::Mmio;
 use crate::backend::ty::*;
 use crate::device::*;
 use crate::err::Result;
+use crate::{Mmio, backend::BackendOp};
 
 pub use crate::backend::{
-    BackendOp,
     dwc::{
         CruOp, Dwc, DwcNewParams, DwcParams, UdphyParam, Usb2PhyParam, Usb2PhyPortId,
         UsbPhyInterfaceMode,
@@ -61,7 +60,7 @@ impl USBHost {
 
     pub async fn open_device(&mut self, dev: &DeviceInfo) -> Result<Device> {
         let device = self.backend.open_device(dev.inner.as_ref()).await?;
-        Ok(Device { inner: device })
+        Ok(device.into())
     }
 }
 

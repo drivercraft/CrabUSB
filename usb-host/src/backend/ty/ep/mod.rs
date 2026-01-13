@@ -14,24 +14,24 @@ mod ctrl;
 
 pub use ctrl::*;
 
-pub enum EndpointType {
+pub enum EndpointKind {
     Control(EndpointControl),
     Isochronous,
     Bulk,
     Interrupt,
 }
 
-impl EndpointType {
+impl EndpointKind {
     pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {
         match self {
-            EndpointType::Control(ep) => ep.raw.as_raw_mut::<T>(),
-            EndpointType::Isochronous => {
+            EndpointKind::Control(ep) => ep.raw.as_raw_mut::<T>(),
+            EndpointKind::Isochronous => {
                 panic!("EndpointType::as_type_mut: Isochronous endpoint not implemented")
             }
-            EndpointType::Bulk => {
+            EndpointKind::Bulk => {
                 panic!("EndpointType::as_type_mut: Bulk endpoint not implemented")
             }
-            EndpointType::Interrupt => {
+            EndpointKind::Interrupt => {
                 panic!("EndpointType::as_type_mut: Interrupt endpoint not implemented")
             }
         }
@@ -39,14 +39,14 @@ impl EndpointType {
 
     pub(crate) fn as_raw_ref<T: EndpointOp>(&self) -> &T {
         match self {
-            EndpointType::Control(ep) => ep.raw.as_raw_ref::<T>(),
-            EndpointType::Isochronous => {
+            EndpointKind::Control(ep) => ep.raw.as_raw_ref::<T>(),
+            EndpointKind::Isochronous => {
                 panic!("EndpointType::as_type_ref: Isochronous endpoint not implemented")
             }
-            EndpointType::Bulk => {
+            EndpointKind::Bulk => {
                 panic!("EndpointType::as_type_ref: Bulk endpoint not implemented")
             }
-            EndpointType::Interrupt => {
+            EndpointKind::Interrupt => {
                 panic!("EndpointType::as_type_ref: Interrupt endpoint not implemented")
             }
         }

@@ -20,6 +20,10 @@ impl EndpointControl {
         }
     }
 
+    pub fn new_from_base(raw: EndpointBase) -> Self {
+        Self { raw }
+    }
+
     pub async fn control_in(
         &mut self,
         param: usb_if::host::ControlSetup,

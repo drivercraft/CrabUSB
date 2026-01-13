@@ -3,14 +3,21 @@ use alloc::{sync::Arc, vec::Vec};
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
-use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
+use usb_if::{
+    descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor},
+    host::ControlSetup,
+    transfer::{Recipient, RequestType},
+};
 use xhci::ring::trb::command;
 
 use crate::{
     Xhci,
     backend::{
         Dci, PortId,
-        ty::{DeviceInfoOp, DeviceOp, ep::EndpointControl},
+        ty::{
+            DeviceInfoOp, DeviceOp,
+            ep::{EndpointBase, EndpointControl},
+        },
         xhci::{
             SlotId, append_port_to_route_string, context::ContextData, endpoint::Endpoint,
             parse_default_max_packet_size_from_port_speed, reg::SlotBell,
@@ -43,13 +50,13 @@ impl DeviceInfo {
     pub fn slot_id(&self) -> SlotId {
         self.slot_id
     }
-
-    pub fn configurations(&self) -> &[ConfigurationDescriptor] {
-        &self.config_desc
-    }
 }
 
 impl DeviceInfoOp for DeviceInfo {
+    fn backend_name(&self) -> &str {
+        "xhci"
+    }
+
     fn descriptor(&self) -> &DeviceDescriptor {
         &self.desc
     }
@@ -282,9 +289,45 @@ impl Device {
         debug!("Device configuration set to {configuration_value}");
         Ok(())
     }
+
+    async fn _claim_interface(&mut self, interface: u8, alternate: u8) -> Result {
+        self.ctx.with_input(|input| {
+            let c = input.control_mut();
+            c.set_interface_number(interface);
+            c.set_alternate_setting(alternate);
+        });
+
+        self.ep_ctrl()
+            .control_out(
+                ControlSetup {
+                    request_type: RequestType::Standard,
+                    recipient: Recipient::Interface,
+                    request: usb_if::transfer::Request::SetInterface,
+                    value: alternate as _, // alternate setting goes in value
+                    index: interface as _, // interface number goes in index
+                },
+                &[],
+            )
+            .await?;
+        debug!("Interface {interface} set successfully");
+        Ok(())
+    }
+
+    async fn new_endpoint(
+        &mut self,
+        desc: &usb_if::descriptor::EndpointDescriptor,
+    ) -> Result<EndpointBase> {
+        let dci = desc.dci();
+
+        todo!()
+    }
 }
 
 impl DeviceOp for Device {
+    fn backend_name(&self) -> &str {
+        "xhci"
+    }
+
     fn descriptor(&self) -> &DeviceDescriptor {
         &self.desc
     }
@@ -293,7 +336,7 @@ impl DeviceOp for Device {
         interface: u8,
         alternate: u8,
     ) -> BoxFuture<'a, Result<()>> {
-        async { Ok(()) }.boxed()
+        self._claim_interface(interface, alternate).boxed()
     }
     fn set_configuration<'a>(&'a mut self, configuration_value: u8) -> BoxFuture<'a, Result<()>> {
         self._set_configuration(configuration_value).boxed()
@@ -307,7 +350,13 @@ impl DeviceOp for Device {
         &self.config_desc
     }
 
-    // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, usb_if::host::USBError> {
-    //     todo!()
-    // }
+    fn get_endpoint<'a>(
+        &'a mut self,
+        desc: &'a usb_if::descriptor::EndpointDescriptor,
+    ) -> BoxFuture<
+        'a,
+        core::result::Result<crate::backend::ty::ep::EndpointBase, usb_if::host::USBError>,
+    > {
+        self.new_endpoint(desc).boxed()
+    }
 }

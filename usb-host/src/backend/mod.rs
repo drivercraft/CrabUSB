@@ -30,7 +30,7 @@ impl Dci {
     }
 }
 
-pub trait BackendOp: Send + Any + 'static {
+pub(crate) trait BackendOp: Send + Any + 'static {
     /// 初始化后端
     fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>>;
 
