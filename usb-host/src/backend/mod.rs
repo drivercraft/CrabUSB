@@ -1,8 +1,12 @@
+use core::any::Any;
+
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use futures::future::{BoxFuture, LocalBoxFuture};
 use usb_if::host::USBError;
 
-use crate::backend::ty::{DeviceInfoOp, EventHandlerOp};
+use crate::backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp};
 
 // #[cfg(feature = "libusb")]
 // pub mod libusb;
@@ -26,22 +30,19 @@ impl Dci {
     }
 }
 
-pub trait BackendOp {
-    type DeviceInfo: DeviceInfoOp;
-    type EventHandler: EventHandlerOp;
-
+pub trait BackendOp: Send + Any + 'static {
     /// 初始化后端
-    fn init(&mut self) -> impl Future<Output = Result<(), USBError>> + Send;
+    fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>>;
 
     /// 探测已连接的设备
-    fn probe_devices(
-        &mut self,
-    ) -> impl Future<Output = Result<Vec<Self::DeviceInfo>, USBError>> + Send;
+    fn probe_devices<'a>(
+        &'a mut self,
+    ) -> BoxFuture<'a, Result<Vec<Box<dyn DeviceInfoOp>>, USBError>>;
 
-    fn open_device(
-        &mut self,
-        dev: &Self::DeviceInfo,
-    ) -> impl Future<Output = Result<<Self::DeviceInfo as DeviceInfoOp>::Device, USBError>> + Send;
+    fn open_device<'a>(
+        &'a mut self,
+        dev: &'a dyn DeviceInfoOp,
+    ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
 
-    fn create_event_handler(&mut self) -> Self::EventHandler;
+    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
 }

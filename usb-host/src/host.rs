@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::Mmio;
@@ -15,26 +16,28 @@ pub use crate::backend::{
 };
 
 /// USB 主机控制器
-pub struct USBHost<B> {
-    backend: B,
+pub struct USBHost {
+    backend: Box<dyn BackendOp>,
 }
 
-impl USBHost<Xhci> {
-    pub fn new_xhci(mmio: Mmio, dma_mask: usize) -> Result<USBHost<Xhci>> {
+impl USBHost {
+    pub fn new_xhci(mmio: Mmio, dma_mask: usize) -> Result<USBHost> {
         Ok(USBHost::new(Xhci::new(mmio, dma_mask)?))
     }
 }
 
-impl USBHost<Dwc> {
-    pub fn new_dwc(params: DwcNewParams<'_, impl CruOp>) -> Result<USBHost<Dwc>> {
+impl USBHost {
+    pub fn new_dwc(params: DwcNewParams<'_, impl CruOp>) -> Result<USBHost> {
         Ok(USBHost::new(Dwc::new(params)?))
     }
 }
 
-impl<B: BackendOp> USBHost<B> {
+impl USBHost {
     /// 创建新的 USB 主机控制器
-    pub(crate) fn new(backend: B) -> Self {
-        Self { backend }
+    pub(crate) fn new(backend: impl BackendOp) -> Self {
+        Self {
+            backend: Box::new(backend),
+        }
     }
 
     /// 初始化主机控制器
@@ -42,7 +45,7 @@ impl<B: BackendOp> USBHost<B> {
         self.backend.init().await
     }
 
-    pub async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo<B>>> {
+    pub async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>> {
         self.backend.probe_devices().await.map(|infos| {
             infos
                 .into_iter()
@@ -51,22 +54,22 @@ impl<B: BackendOp> USBHost<B> {
         })
     }
 
-    pub fn create_event_handler(&mut self) -> EventHandler<B> {
+    pub fn create_event_handler(&mut self) -> EventHandler {
         let handler = self.backend.create_event_handler();
         EventHandler { handler }
     }
 
-    pub async fn open_device(&mut self, dev: &DeviceInfo<B>) -> Result<Device<B>> {
-        let device = self.backend.open_device(&dev.inner).await?;
+    pub async fn open_device(&mut self, dev: &DeviceInfo) -> Result<Device> {
+        let device = self.backend.open_device(dev.inner.as_ref()).await?;
         Ok(Device { inner: device })
     }
 }
 
-pub struct EventHandler<B: BackendOp> {
-    handler: B::EventHandler,
+pub struct EventHandler {
+    handler: Box<dyn EventHandlerOp>,
 }
 
-impl<B: BackendOp> EventHandler<B> {
+impl EventHandler {
     /// 处理事件
     pub fn handle_event(&self) -> Event {
         self.handler.handle_event()

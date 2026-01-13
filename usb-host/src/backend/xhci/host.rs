@@ -1,5 +1,6 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cell::UnsafeCell;
+use futures::{FutureExt, future::LocalBoxFuture};
 use spin::RwLock;
 
 use mbarrier::{mb, wmb};
@@ -15,7 +16,11 @@ use super::Device;
 use super::reg::{MemMapper, XhciRegisters};
 use crate::{
     Mmio,
-    backend::{BackendOp, xhci::transfer::TransferResultHandler},
+    backend::{
+        BackendOp,
+        ty::{DeviceInfoOp, DeviceOp},
+        xhci::transfer::TransferResultHandler,
+    },
     err::Result,
 };
 use crate::{backend::PortId, osal::SpinWhile};
@@ -81,13 +86,8 @@ impl Xhci {
             inited_devices: BTreeMap::new(),
         })
     }
-}
 
-impl BackendOp for Xhci {
-    type DeviceInfo = DeviceInfo;
-    type EventHandler = EventHandler;
-
-    async fn init(&mut self) -> Result {
+    async fn _init(&mut self) -> Result {
         self.disable_irq();
         // 4.2 Host Controller Initialization
         self.init_ext_caps().await?;
@@ -131,7 +131,7 @@ impl BackendOp for Xhci {
         Ok(())
     }
 
-    async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>> {
+    async fn _probe_devices(&mut self) -> Result<Vec<Box<dyn DeviceInfoOp>>> {
         for port_idx in self.need_init_port_idxs().collect::<Vec<usize>>() {
             self.new_device(port_idx).await?;
             self.port_status[port_idx] = ProtStaus::Inited;
@@ -142,21 +142,55 @@ impl BackendOp for Xhci {
             .values()
             .map(|d| {
                 let desc = d.descriptor().clone();
-                DeviceInfo::new(d.slot_id(), desc, d.configuration_descriptors())
+                Box::new(DeviceInfo::new(
+                    d.slot_id(),
+                    desc,
+                    d.configuration_descriptors(),
+                )) as Box<dyn DeviceInfoOp>
             })
             .collect())
     }
 
-    fn create_event_handler(&mut self) -> Self::EventHandler {
-        self.event_handler
-            .take()
-            .expect("Event handler can only be created once")
-    }
-
-    async fn open_device(&mut self, dev: &DeviceInfo) -> Result<Device> {
+    async fn _open_device(&mut self, dev: &DeviceInfo) -> Result<Device> {
         self.inited_devices
             .remove(&dev.slot_id())
             .ok_or(USBError::NotFound)
+    }
+}
+
+impl BackendOp for Xhci {
+    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp> {
+        Box::new(
+            self.event_handler
+                .take()
+                .expect("Event handler can only be created once"),
+        )
+    }
+
+    fn init<'a>(&'a mut self) -> futures::future::BoxFuture<'a, Result<()>> {
+        self._init().boxed()
+    }
+
+    fn probe_devices<'a>(
+        &'a mut self,
+    ) -> futures::future::BoxFuture<'a, Result<Vec<Box<dyn crate::backend::ty::DeviceInfoOp>>>>
+    {
+        self._probe_devices().boxed()
+    }
+
+    fn open_device<'a>(
+        &'a mut self,
+        dev: &'a dyn crate::backend::ty::DeviceInfoOp,
+    ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>>> {
+        async move {
+            let dev_info = (dev as &dyn core::any::Any)
+                .downcast_ref::<DeviceInfo>()
+                .unwrap();
+
+            let device = self._open_device(dev_info).await?;
+            Ok(Box::new(device) as Box<dyn DeviceOp>)
+        }
+        .boxed()
     }
 }
 

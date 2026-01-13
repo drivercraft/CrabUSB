@@ -179,7 +179,7 @@ mod tests {
        }
 
     struct XhciInfo {
-        usb: USBHost<Xhci>,
+        usb: USBHost,
         irq: Option<IrqInfo>,
     }
 
@@ -343,10 +343,10 @@ mod tests {
         panic!("no xhci found");
     }
 
-    fn register_irq(irq: IrqInfo, host: &mut USBHost<Xhci>) {
+    fn register_irq(irq: IrqInfo, host: &mut USBHost) {
         let handle = host.create_event_handler();
 
-        for one in &irq.cfgs {
+        if let Some(one) = irq.cfgs.first() {
             IrqParam {
                 intc: irq.irq_parent,
                 cfg: one.clone(),
@@ -354,18 +354,14 @@ mod tests {
             .register_builder({
                 move |_irq| {
                     let event = handle.handle_event();
-                    match event {
-                        Event::PortChange { .. } => {
-                            PROT_CHANGED.store(true, Ordering::Release);
-                        }
-                        _ => {}
+                    if let Event::PortChange { .. } = event {
+                        PROT_CHANGED.store(true, Ordering::Release);
                     }
 
                     IrqHandleResult::Handled
                 }
             })
             .register();
-            break;
         }
     }
 }

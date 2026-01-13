@@ -1,10 +1,8 @@
-use core::{fmt::Debug, future::Future};
+use core::any::Any;
+use core::fmt::Debug;
 
-use usb_if::{
-    descriptor::{ConfigurationDescriptor, DeviceDescriptor},
-    err::TransferError,
-    host::ControlSetup,
-};
+use futures::future::BoxFuture;
+use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
 
 use crate::{backend::ty::ep::EndpointControl, err::USBError};
 
@@ -18,48 +16,31 @@ pub enum Event {
     PortChange { port: u8 },
 }
 
-pub trait EventHandlerOp: Send + Sync + 'static {
+pub trait EventHandlerOp: Send + Any + Sync + 'static {
     fn handle_event(&self) -> Event;
 }
 
-pub trait DeviceInfoOp: Send + Debug + 'static {
-    type Device: DeviceOp;
+pub trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
     fn descriptor(&self) -> &DeviceDescriptor;
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
 }
 
 /// USB 设备特征（高层抽象）
-pub trait DeviceOp: Send + 'static {
+pub trait DeviceOp: Send + Any + 'static {
     fn descriptor(&self) -> &DeviceDescriptor;
 
-    fn claim_interface(
-        &mut self,
+    fn claim_interface<'a>(
+        &'a mut self,
         interface: u8,
         alternate: u8,
-    ) -> impl Future<Output = Result<(), USBError>> + Send;
+    ) -> BoxFuture<'a, Result<(), USBError>>;
 
     fn ep_ctrl(&mut self) -> &mut EndpointControl;
 
-    fn set_configuration(
-        &mut self,
+    fn set_configuration<'a>(
+        &'a mut self,
         configuration_value: u8,
-    ) -> impl Future<Output = Result<(), USBError>> + Send;
-
-    async fn control_in(
-        &mut self,
-        param: ControlSetup,
-        buff: &mut [u8],
-    ) -> core::result::Result<usize, TransferError> {
-        self.ep_ctrl().control_in(param, buff).await
-    }
-
-    async fn control_out(
-        &mut self,
-        param: ControlSetup,
-        buff: &[u8],
-    ) -> core::result::Result<usize, TransferError> {
-        self.ep_ctrl().control_out(param, buff).await
-    }
+    ) -> BoxFuture<'a, Result<(), USBError>>;
 
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, USBError>;
 }

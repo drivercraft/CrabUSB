@@ -5,11 +5,11 @@
 
 use core::ops::{Deref, DerefMut};
 
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use alloc::{boxed::Box, collections::BTreeMap};
 use dma_api::DVec;
 use tock_registers::interfaces::*;
 use usb_if::DeviceSpeed;
@@ -32,7 +32,6 @@ use crate::{
 pub use crate::backend::xhci::*;
 
 use device::DeviceInfo;
-use host::EventHandler;
 
 use usb2phy::Usb2Phy;
 pub use usb2phy::{Usb2PhyParam, Usb2PhyPortId};
@@ -587,12 +586,6 @@ impl Dwc {
 
         info!("======================");
     }
-}
-
-impl BackendOp for Dwc {
-    type DeviceInfo = DeviceInfo;
-    type EventHandler = EventHandler;
-
     /// 初始化 DWC3 控制器
     ///
     /// ## 初始化顺序说明
@@ -635,24 +628,27 @@ impl BackendOp for Dwc {
 
         Ok(())
     }
+}
 
-    /// 探测 USB 设备
-    async fn probe_devices(&mut self) -> Result<Vec<Self::DeviceInfo>> {
-        let devices = self.xhci.probe_devices().await?;
-        Ok(devices)
+impl BackendOp for Dwc {
+    fn init(&mut self) -> futures::future::BoxFuture<Result<()>> {
+        self.xhci.init()
     }
 
-    /// 打开 USB 设备
-    async fn open_device(
+    fn probe_devices(
         &mut self,
-        dev: &Self::DeviceInfo,
-    ) -> Result<<Self::DeviceInfo as super::ty::DeviceInfoOp>::Device> {
-        let device = self.xhci.open_device(dev).await?;
-        Ok(device)
+    ) -> futures::future::BoxFuture<Result<Vec<Box<dyn super::ty::DeviceInfoOp>>>> {
+        self.xhci.probe_devices()
     }
 
-    /// 创建事件处理器
-    fn create_event_handler(&mut self) -> Self::EventHandler {
+    fn open_device<'a>(
+        &'a mut self,
+        dev: &'a dyn super::ty::DeviceInfoOp,
+    ) -> futures::future::LocalBoxFuture<'a, Result<Box<dyn super::ty::DeviceOp>>> {
+        self.xhci.open_device(dev)
+    }
+
+    fn create_event_handler(&mut self) -> Box<dyn super::ty::EventHandlerOp> {
         self.xhci.create_event_handler()
     }
 }

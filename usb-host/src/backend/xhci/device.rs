@@ -1,6 +1,8 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
@@ -54,8 +56,6 @@ impl DeviceInfo {
 }
 
 impl DeviceInfoOp for DeviceInfo {
-    type Device = Device;
-
     fn descriptor(&self) -> &DeviceDescriptor {
         &self.desc
     }
@@ -272,18 +272,8 @@ impl Device {
         self.current_config_value = Some(val);
         Ok(val)
     }
-}
 
-impl DeviceOp for Device {
-    async fn claim_interface(&mut self, interface: u8, alternate: u8) -> Result {
-        todo!()
-    }
-
-    fn descriptor(&self) -> &DeviceDescriptor {
-        &self.desc
-    }
-
-    async fn set_configuration(&mut self, configuration_value: u8) -> Result {
+    async fn _set_configuration(&mut self, configuration_value: u8) -> Result {
         self.ep_ctrl()
             .set_configuration(configuration_value)
             .await?;
@@ -297,6 +287,22 @@ impl DeviceOp for Device {
 
         debug!("Device configuration set to {configuration_value}");
         Ok(())
+    }
+}
+
+impl DeviceOp for Device {
+    fn descriptor(&self) -> &DeviceDescriptor {
+        &self.desc
+    }
+    fn claim_interface<'a>(
+        &'a mut self,
+        interface: u8,
+        alternate: u8,
+    ) -> BoxFuture<'a, Result<()>> {
+        async { Ok(()) }.boxed()
+    }
+    fn set_configuration<'a>(&'a mut self, configuration_value: u8) -> BoxFuture<'a, Result<()>> {
+        self._set_configuration(configuration_value).boxed()
     }
 
     fn ep_ctrl(&mut self) -> &mut EndpointControl {
