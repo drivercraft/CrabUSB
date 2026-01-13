@@ -3,7 +3,6 @@
 //! 这个模块提供 USB2 PHY 的完整初始化功能，包括 RK3588 特定的 PHY 调优。
 //! 参照 U-Boot 的 `drivers/phy/phy-rockchip-inno-usb2.c` 实现。
 
-
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;

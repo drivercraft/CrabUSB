@@ -25,7 +25,6 @@
 //! Offset 0x0034: USB3OTG1_CFG - USB3 OTG1 配置
 //! ```
 
-
 use tock_registers::interfaces::*;
 use tock_registers::registers::*;
 use tock_registers::{register_bitfields, register_structs};

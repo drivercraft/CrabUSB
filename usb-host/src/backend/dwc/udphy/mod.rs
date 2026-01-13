@@ -307,12 +307,12 @@ impl Udphy {
         for (idx, sel) in self.lane_mux_sel.iter().enumerate() {
             if *sel == PHY_LANE_MUX_DP {
                 fv += match idx {
-                        0 => CMN_LANE_MUX_EN::LANE0_EN::Enable,
-                        1 => CMN_LANE_MUX_EN::LANE1_EN::Enable,
-                        2 => CMN_LANE_MUX_EN::LANE2_EN::Enable,
-                        3 => CMN_LANE_MUX_EN::LANE3_EN::Enable,
-                        _ => unreachable!(),
-                    };
+                    0 => CMN_LANE_MUX_EN::LANE0_EN::Enable,
+                    1 => CMN_LANE_MUX_EN::LANE1_EN::Enable,
+                    2 => CMN_LANE_MUX_EN::LANE2_EN::Enable,
+                    3 => CMN_LANE_MUX_EN::LANE3_EN::Enable,
+                    _ => unreachable!(),
+                };
             }
         }
         // let fv = CMN_LANE_MUX_EN::LANE0_EN::Enable

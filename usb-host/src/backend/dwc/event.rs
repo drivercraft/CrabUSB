@@ -1,6 +1,5 @@
 use dma_api::DVec;
 
-
 pub struct EventBuffer {
     pub buffer: DVec<u8>,
     pub lpos: usize,

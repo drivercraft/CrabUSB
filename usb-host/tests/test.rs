@@ -120,7 +120,6 @@ mod tests {
                     info!("endpoint: {ep_desc:?}");
                     let ep = device.get_endpoint(ep_desc.address).await.unwrap();
 
-
                     //         match (ep_desc.transfer_type, ep_desc.direction) {
                     //             (EndpointType::Bulk, Direction::In) => {
                     //                 let mut bulk_in = interface.endpoint_bulk_in(ep_desc.address).unwrap();

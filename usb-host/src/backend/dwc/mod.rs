@@ -11,10 +11,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use alloc::{boxed::Box, collections::BTreeMap};
 use dma_api::DVec;
+use futures::FutureExt;
 use tock_registers::interfaces::*;
 use usb_if::DeviceSpeed;
 pub use usb_if::DrMode;
 
+use crate::backend::dwc::reg::GEVNTSIZ;
 use crate::{
     Mmio, Xhci,
     backend::{
@@ -28,8 +30,6 @@ use crate::{
     err::{Result, USBError},
     osal::kernel::page_size,
 };
-
-
 
 use usb2phy::Usb2Phy;
 pub use usb2phy::{Usb2PhyParam, Usb2PhyPortId};
@@ -189,8 +189,6 @@ impl Dwc {
     }
 
     fn event_buffers_setup(&mut self) {
-        
-
         info!("DWC3: Setting up event buffers");
 
         let regs = self.dwc_regs.globals();
@@ -212,8 +210,21 @@ impl Dwc {
             // 使用 gevnt 数组访问事件缓冲区寄存器
             regs.gevnt[i].adrlo.set((dma_addr & 0xffffffff) as u32);
             regs.gevnt[i].adrhi.set((dma_addr >> 32) as u32);
-            regs.gevnt[i].size.set(length as u32);
+
+            // 关键修复：设置 GEVNTSIZ 时必须清除 INTMASK 位（bit 31）
+            // INTMASK = 0: 使能事件中断；INTMASK = 1: 屏蔽事件中断
+            regs.gevnt[i]
+                .size
+                .modify(GEVNTSIZ::INTMASK::Unmasked + GEVNTSIZ::SIZE.val(length as _));
+
             regs.gevnt[i].count.set(0);
+
+            debug!(
+                "DWC3: GEVNTSIZ[{}] = {:?} (INTMASK cleared, SIZE={})",
+                i,
+                regs.gevnt[i].size.debug(),
+                length
+            );
         }
 
         debug!("DWC3: Event buffers setup completed");
@@ -596,7 +607,7 @@ impl Dwc {
     ///
     /// **关键点**：DWC3 PHY 配置寄存器必须在 xHCI 执行 HCRST **之后**才能访问，
     /// 因为 HCRST 会复位并使能 host block 的 PHY 接口。
-    async fn init(&mut self) -> Result {
+    async fn _init(&mut self) -> Result {
         info!("DWC3: Starting controller initialization");
 
         /*
@@ -630,7 +641,7 @@ impl Dwc {
 
 impl BackendOp for Dwc {
     fn init(&mut self) -> futures::future::BoxFuture<'_, Result<()>> {
-        self.xhci.init()
+        self._init().boxed()
     }
 
     fn probe_devices(

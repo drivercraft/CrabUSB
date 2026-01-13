@@ -195,7 +195,7 @@ mod tests {
     }
 
     struct XhciInfo {
-        usb: USBHost<Dwc>,
+        usb: USBHost,
         irq: Option<IrqInfo>,
     }
 
@@ -509,7 +509,7 @@ mod tests {
         panic!("no xhci found");
     }
 
-    fn register_irq(irq: IrqInfo, host: &mut USBHost<Dwc>) {
+    fn register_irq(irq: IrqInfo, host: &mut USBHost) {
         let handle = host.create_event_handler();
 
         for one in &irq.cfgs {
@@ -854,7 +854,7 @@ fn set_pinctrl(m: &mut PinManager, pinctrl_node: &str) {
     let dst_dir = GpioDirection::Output(true);
     info!("GPIO Direction: {:?} -> {dst_dir:?}", dir);
     info!("dtb pin config: {:?}", pin_conf);
-    
+
     m.set_config(pin_conf).expect("Failed to get pin config");
     m.set_gpio_direction(pin_conf.id, dst_dir).unwrap();
 }
