@@ -395,14 +395,15 @@ impl Device {
         });
         mb();
 
-        let _result = self
-            .root
-            .post_cmd(command::Allowed::ConfigureEndpoint(
-                *command::ConfigureEndpoint::default()
-                    .set_slot_id(self.id.into())
-                    .set_input_context_pointer(self.ctx().input_bus_addr()),
-            ))
-            .await?;
+        todo!("configure endpoint");
+        // let _result = self
+        //     .root
+        //     .post_cmd(command::Allowed::ConfigureEndpoint(
+        //         *command::ConfigureEndpoint::default()
+        //             .set_slot_id(self.id.into())
+        //             .set_input_context_pointer(self.ctx().input_bus_addr()),
+        //     ))
+        //     .await?;
 
         Ok(())
     }
