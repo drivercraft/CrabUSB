@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+use core::any::Any;
 use core::{
     future::Future,
     ops::{Deref, DerefMut},
@@ -12,13 +14,52 @@ mod ctrl;
 
 pub use ctrl::*;
 
-pub(crate) struct EndpointBase<T: EndpointOp> {
-    raw: T,
+pub enum EndpointType {
+    Control(EndpointControl),
+    Isochronous,
+    Bulk,
+    Interrupt,
 }
 
-impl<T: EndpointOp> EndpointBase<T> {
-    pub fn new(raw: T) -> Self {
-        Self { raw }
+impl EndpointType {
+    pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {
+        match self {
+            EndpointType::Control(ep) => ep.raw.as_raw_mut::<T>(),
+            EndpointType::Isochronous => {
+                panic!("EndpointType::as_type_mut: Isochronous endpoint not implemented")
+            }
+            EndpointType::Bulk => {
+                panic!("EndpointType::as_type_mut: Bulk endpoint not implemented")
+            }
+            EndpointType::Interrupt => {
+                panic!("EndpointType::as_type_mut: Interrupt endpoint not implemented")
+            }
+        }
+    }
+
+    pub(crate) fn as_raw_ref<T: EndpointOp>(&self) -> &T {
+        match self {
+            EndpointType::Control(ep) => ep.raw.as_raw_ref::<T>(),
+            EndpointType::Isochronous => {
+                panic!("EndpointType::as_type_ref: Isochronous endpoint not implemented")
+            }
+            EndpointType::Bulk => {
+                panic!("EndpointType::as_type_ref: Bulk endpoint not implemented")
+            }
+            EndpointType::Interrupt => {
+                panic!("EndpointType::as_type_ref: Interrupt endpoint not implemented")
+            }
+        }
+    }
+}
+
+pub(crate) struct EndpointBase {
+    raw: Box<dyn EndpointOp>,
+}
+
+impl EndpointBase {
+    pub fn new(raw: impl EndpointOp) -> Self {
+        Self { raw: Box::new(raw) }
     }
 
     pub fn request(
@@ -31,23 +72,21 @@ impl<T: EndpointOp> EndpointBase<T> {
             handle.await
         }
     }
-}
 
-impl<T: EndpointOp> Deref for EndpointBase<T> {
-    type Target = T;
+    pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {
+        let d = self.raw.as_mut() as &mut dyn Any;
+        d.downcast_mut::<T>()
+            .expect("EndpointBase downcast_mut failed")
+    }
 
-    fn deref(&self) -> &T {
-        &self.raw
+    pub(crate) fn as_raw_ref<T: EndpointOp>(&self) -> &T {
+        let d = self.raw.as_ref() as &dyn Any;
+        d.downcast_ref::<T>()
+            .expect("EndpointBase downcast_ref failed")
     }
 }
 
-impl<T: EndpointOp> DerefMut for EndpointBase<T> {
-    fn deref_mut(&mut self) -> &mut T {
-        &mut self.raw
-    }
-}
-
-pub trait EndpointOp: Send + 'static {
+pub trait EndpointOp: Send + Any + 'static {
     fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle<'_>, TransferError>;
 
     fn query_transfer(&mut self, id: u64) -> Option<Result<Transfer, TransferError>>;

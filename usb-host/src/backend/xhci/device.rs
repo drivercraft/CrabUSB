@@ -70,7 +70,7 @@ pub struct Device {
     port_id: PortId,
     ctx: ContextData,
     desc: DeviceDescriptor,
-    ctrl_ep: Option<EndpointControl<Endpoint>>,
+    ctrl_ep: Option<EndpointControl>,
     transfer_result_handler: TransferResultHandler,
     bell: Arc<Mutex<SlotBell>>,
     dma_mask: usize,
@@ -153,7 +153,7 @@ impl Device {
 
         let route_string = append_port_to_route_string(0, 0);
 
-        let ctrl_ring_addr = self.ctrl_ep.as_ref().unwrap().raw.bus_addr();
+        let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
         // ctrl dci
         let dci = 1;
         trace!(
@@ -275,8 +275,6 @@ impl Device {
 }
 
 impl DeviceOp for Device {
-    type Ep = Endpoint;
-
     async fn claim_interface(&mut self, interface: u8, alternate: u8) -> Result {
         todo!()
     }
@@ -301,7 +299,7 @@ impl DeviceOp for Device {
         Ok(())
     }
 
-    fn ep_ctrl(&mut self) -> &mut EndpointControl<Self::Ep> {
+    fn ep_ctrl(&mut self) -> &mut EndpointControl {
         self.ctrl_ep.as_mut().unwrap()
     }
 

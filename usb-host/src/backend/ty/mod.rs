@@ -6,10 +6,7 @@ use usb_if::{
     host::ControlSetup,
 };
 
-use crate::{
-    backend::ty::ep::{EndpointControl, EndpointOp},
-    err::USBError,
-};
+use crate::{backend::ty::ep::EndpointControl, err::USBError};
 
 // pub mod hub;
 pub mod ep;
@@ -33,8 +30,6 @@ pub trait DeviceInfoOp: Send + Debug + 'static {
 
 /// USB 设备特征（高层抽象）
 pub trait DeviceOp: Send + 'static {
-    type Ep: EndpointOp;
-
     fn descriptor(&self) -> &DeviceDescriptor;
 
     fn claim_interface(
@@ -43,7 +38,7 @@ pub trait DeviceOp: Send + 'static {
         alternate: u8,
     ) -> impl Future<Output = Result<(), USBError>> + Send;
 
-    fn ep_ctrl(&mut self) -> &mut EndpointControl<Self::Ep>;
+    fn ep_ctrl(&mut self) -> &mut EndpointControl;
 
     fn set_configuration(
         &mut self,

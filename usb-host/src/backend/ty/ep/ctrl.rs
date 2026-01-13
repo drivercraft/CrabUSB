@@ -9,12 +9,12 @@ use crate::backend::ty::transfer::{Transfer, TransferKind};
 
 use super::{EndpointBase, EndpointOp};
 
-pub struct EndpointControl<T: EndpointOp> {
-    pub(crate) raw: EndpointBase<T>,
+pub struct EndpointControl {
+    pub(crate) raw: EndpointBase,
 }
 
-impl<T: EndpointOp> EndpointControl<T> {
-    pub fn new(raw: T) -> Self {
+impl EndpointControl {
+    pub fn new(raw: impl EndpointOp) -> Self {
         Self {
             raw: EndpointBase::new(raw),
         }
