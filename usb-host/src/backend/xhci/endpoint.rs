@@ -3,6 +3,7 @@ use alloc::{collections::BTreeMap, sync::Arc};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
+    descriptor::{self, EndpointDescriptor},
     err::TransferError,
     transfer::{BmRequestType, Direction},
 };
@@ -170,5 +171,29 @@ impl EndpointOp for Endpoint {
 
     fn register_cx(&self, id: u64, cx: &mut core::task::Context<'_>) {
         self.ring.register_cx(BusAddr(id), cx);
+    }
+}
+
+pub(crate) trait EndpointDescriptorExt {
+    fn endpoint_type(&self) -> xhci::context::EndpointType;
+}
+
+impl EndpointDescriptorExt for EndpointDescriptor {
+    fn endpoint_type(&self) -> xhci::context::EndpointType {
+        match self.transfer_type {
+            descriptor::EndpointType::Control => xhci::context::EndpointType::Control,
+            descriptor::EndpointType::Isochronous => match self.direction {
+                usb_if::transfer::Direction::Out => xhci::context::EndpointType::IsochOut,
+                usb_if::transfer::Direction::In => xhci::context::EndpointType::IsochIn,
+            },
+            descriptor::EndpointType::Bulk => match self.direction {
+                usb_if::transfer::Direction::Out => xhci::context::EndpointType::BulkOut,
+                usb_if::transfer::Direction::In => xhci::context::EndpointType::BulkIn,
+            },
+            descriptor::EndpointType::Interrupt => match self.direction {
+                usb_if::transfer::Direction::Out => xhci::context::EndpointType::InterruptOut,
+                usb_if::transfer::Direction::In => xhci::context::EndpointType::InterruptIn,
+            },
+        }
     }
 }

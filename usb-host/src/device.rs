@@ -124,7 +124,7 @@ impl Device {
 
     pub async fn get_endpoint(&mut self, address: u8) -> Result<EndpointKind, USBError> {
         let ep_desc = self.find_ep_desc(address)?.clone();
-        let base = self.inner.get_endpoint(&ep_desc).await?;
+        let base = self.inner.get_endpoint(&ep_desc)?;
         match ep_desc.transfer_type {
             usb_if::descriptor::EndpointType::Control => Ok(EndpointKind::Control(
                 crate::backend::ty::ep::EndpointControl::new_from_base(base),

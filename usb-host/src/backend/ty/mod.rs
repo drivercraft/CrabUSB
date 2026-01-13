@@ -45,10 +45,10 @@ pub(crate) trait DeviceOp: Send + Any + 'static {
         configuration_value: u8,
     ) -> BoxFuture<'a, Result<(), USBError>>;
 
-    fn get_endpoint<'a>(
-        &'a mut self,
-        desc: &'a usb_if::descriptor::EndpointDescriptor,
-    ) -> BoxFuture<'a, Result<ep::EndpointBase, USBError>>;
+    fn get_endpoint(
+        &mut self,
+        desc: &usb_if::descriptor::EndpointDescriptor,
+    ) -> Result<ep::EndpointBase, USBError>;
 
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, USBError>;
 }

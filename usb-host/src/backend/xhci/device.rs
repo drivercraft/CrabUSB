@@ -1,11 +1,15 @@
+use alloc::collections::BTreeMap;
+
 use alloc::{sync::Arc, vec::Vec};
 
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
-    descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor},
-    host::ControlSetup,
+    descriptor::{
+        ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,
+    },
+    host::{ControlSetup, USBError},
     transfer::{Recipient, RequestType},
 };
 use xhci::ring::trb::command;
@@ -19,8 +23,11 @@ use crate::{
             ep::{EndpointBase, EndpointControl},
         },
         xhci::{
-            SlotId, append_port_to_route_string, context::ContextData, endpoint::Endpoint,
-            parse_default_max_packet_size_from_port_speed, reg::SlotBell,
+            SlotId, append_port_to_route_string,
+            context::ContextData,
+            endpoint::{Endpoint, EndpointDescriptorExt},
+            parse_default_max_packet_size_from_port_speed,
+            reg::SlotBell,
             transfer::TransferResultHandler,
         },
     },
@@ -77,6 +84,8 @@ pub struct Device {
     dma_mask: usize,
     current_config_value: Option<u8>,
     config_desc: Vec<ConfigurationDescriptor>,
+    port_speed: u8,
+    eps: BTreeMap<Dci, EndpointBase>,
 }
 
 impl Device {
@@ -92,7 +101,7 @@ impl Device {
         let ctx = host.dev_mut()?.new_ctx(slot_id, is_64, dma_mask)?;
         let bell = host.new_slot_bell(slot_id);
         let bell = Arc::new(Mutex::new(bell));
-
+        let port_speed = host.port_speed(port);
         let desc = unsafe { core::mem::zeroed() };
 
         Ok(Self {
@@ -106,6 +115,8 @@ impl Device {
             transfer_result_handler: host.transfer_result_handler.clone(),
             current_config_value: None,
             config_desc: vec![],
+            port_speed,
+            eps: BTreeMap::new(),
         })
     }
 
@@ -309,17 +320,186 @@ impl Device {
                 &[],
             )
             .await?;
+        self.setup_all_endpoints(interface, alternate).await?;
         debug!("Interface {interface} set successfully");
         Ok(())
     }
 
-    async fn new_endpoint(
-        &mut self,
-        desc: &usb_if::descriptor::EndpointDescriptor,
-    ) -> Result<EndpointBase> {
-        let dci = desc.dci();
+    async fn setup_all_endpoints(&mut self, interface: u8, alternate: u8) -> Result {
+        let mut max_dci = 1;
+        self.ctx.input_perper_modify();
+        self.eps.clear();
 
-        todo!()
+        for desc in self
+            .find_interface_endpoints(interface, alternate)?
+            .to_vec()
+        {
+            let dci = desc.dci();
+            if dci > max_dci {
+                max_dci = dci;
+            }
+            let ep_raw = self.new_ep(dci.into())?;
+            let ring_addr = ep_raw.bus_addr();
+            self.eps.insert(dci.into(), EndpointBase::new(ep_raw));
+
+            let xhci_interval =
+                self.calculate_xhci_interval(desc.interval, desc.transfer_type, desc.interval);
+
+            self.ctx.with_input(|input| {
+                let control_context = input.control_mut();
+
+                control_context.set_add_context_flag(dci as _);
+
+                debug!(
+                    "init ep addr {:#x}  dci {dci} {:?}",
+                    desc.address, desc.transfer_type
+                );
+
+                let ep_mut = input.device_mut().endpoint_mut(dci as _);
+
+                debug!(
+                    "Set XHCI interval: {} (original bInterval: {})",
+                    xhci_interval, desc.interval
+                );
+                ep_mut.set_interval(xhci_interval);
+                ep_mut.set_endpoint_type(desc.endpoint_type());
+                ep_mut.set_tr_dequeue_pointer(ring_addr.raw());
+                ep_mut.set_max_packet_size(desc.max_packet_size);
+                ep_mut.set_error_count(3);
+                ep_mut.set_dequeue_cycle_state();
+
+                match desc.transfer_type {
+                    EndpointType::Isochronous | EndpointType::Interrupt => {
+                        //init for isoch/interrupt
+                        ep_mut.set_max_packet_size(desc.max_packet_size & 0x7ff); //refer xhci page 162
+                        ep_mut.set_max_burst_size(
+                            ((desc.max_packet_size & 0x1800) >> 11).try_into().unwrap(),
+                        );
+                        ep_mut.set_mult(0); //always 0 for interrupt
+                        ep_mut.set_max_endpoint_service_time_interval_payload_low(4);
+                    }
+                    _ => {}
+                }
+
+                if let EndpointType::Isochronous = desc.transfer_type {
+                    ep_mut.set_error_count(0);
+                }
+            });
+        }
+
+        self.ctx.with_input(|input| {
+            input
+                .device_mut()
+                .slot_mut()
+                .set_context_entries(max_dci + 1);
+        });
+        mb();
+
+        let _result = self
+            .root
+            .post_cmd(command::Allowed::ConfigureEndpoint(
+                *command::ConfigureEndpoint::default()
+                    .set_slot_id(self.id.into())
+                    .set_input_context_pointer(self.ctx().input_bus_addr()),
+            ))
+            .await?;
+
+        Ok(())
+    }
+
+    fn find_interface_endpoints(
+        &self,
+        interface: u8,
+        alternate: u8,
+    ) -> Result<&[EndpointDescriptor]> {
+        for config in &self.config_desc {
+            for iface in &config.interfaces {
+                if iface.interface_number == interface {
+                    for alt in &iface.alt_settings {
+                        if alt.alternate_setting == alternate {
+                            return Ok(&alt.endpoints);
+                        }
+                    }
+                }
+            }
+        }
+        Err(USBError::NotFound)
+    }
+
+    /// 根据 XHCI 规范计算端点的 interval 值
+    /// 参考 xHCI 规范第 6.2.3.6 节
+    fn calculate_xhci_interval(
+        &self,
+        binterval: u8,
+        transfer_type: EndpointType,
+        default: u8,
+    ) -> u8 {
+        match transfer_type {
+            EndpointType::Isochronous => {
+                match self.port_speed {
+                    2..=5 => {
+                        // HighSpeed, SuperSpeed, SuperSpeedPlus ISO 端点
+                        // Interval = max(1, min(16, bInterval))
+                        let interval = binterval.clamp(1, 16);
+                        info!(
+                            "ISO endpoint HS/SS: bInterval={} -> XHCI interval={}",
+                            binterval, interval
+                        );
+                        interval
+                    }
+                    _ => {
+                        // FullSpeed/LowSpeed ISO 端点
+                        // Interval = max(1, min(16, floor(log2(bInterval)) + 3))
+                        if binterval == 0 {
+                            1
+                        } else {
+                            // 计算 floor(log2(bInterval))
+                            let log2_binterval = 31 - (binterval as u32).leading_zeros() as u8 - 1;
+                            let interval = (log2_binterval + 3).clamp(1, 16);
+                            info!(
+                                "ISO endpoint FS/LS: bInterval={} -> log2={} -> XHCI interval={}",
+                                binterval, log2_binterval, interval
+                            );
+                            interval
+                        }
+                    }
+                }
+            }
+            EndpointType::Interrupt => {
+                match self.port_speed {
+                    2..=5 => {
+                        // HighSpeed, SuperSpeed, SuperSpeedPlus 中断端点
+                        // Interval = max(1, min(16, bInterval))
+                        let interval = binterval.clamp(1, 16);
+                        info!(
+                            "INT endpoint HS/SS: bInterval={} -> XHCI interval={}",
+                            binterval, interval
+                        );
+                        interval
+                    }
+                    _ => {
+                        // FullSpeed/LowSpeed 中断端点
+                        // Interval = max(1, min(16, floor(log2(bInterval)) + 3))
+                        if binterval == 0 {
+                            1
+                        } else {
+                            // 计算 floor(log2(bInterval))
+                            let log2_binterval = 31 - (binterval as u32).leading_zeros() as u8 - 1;
+                            let interval = (log2_binterval + 3).clamp(1, 16);
+                            info!(
+                                "INT endpoint FS/LS: bInterval={} -> log2={} -> XHCI interval={}",
+                                binterval, log2_binterval, interval
+                            );
+                            interval
+                        }
+                    }
+                }
+            }
+            _ => {
+                // 控制和批量端点不使用 interval
+                default
+            }
+        }
     }
 }
 
@@ -350,13 +530,11 @@ impl DeviceOp for Device {
         &self.config_desc
     }
 
-    fn get_endpoint<'a>(
-        &'a mut self,
-        desc: &'a usb_if::descriptor::EndpointDescriptor,
-    ) -> BoxFuture<
-        'a,
-        core::result::Result<crate::backend::ty::ep::EndpointBase, usb_if::host::USBError>,
-    > {
-        self.new_endpoint(desc).boxed()
+    fn get_endpoint(
+        &mut self,
+        desc: &usb_if::descriptor::EndpointDescriptor,
+    ) -> Result<EndpointBase> {
+        let ep = self.eps.remove(&desc.dci().into());
+        ep.ok_or(USBError::NotFound)
     }
 }
