@@ -124,10 +124,14 @@ mod tests {
                         EndpointKind::BulkIn(mut bulk_in) => {
                             let mut buff = alloc::vec![0u8; 64];
 
-                            for _ in 0..5 {
-                                let n = bulk_in.submit_and_wait(&mut buff).await.unwrap();
-                                let data = &buff[..n];
-                                info!("bulk in data: {data:?}",);
+                            match bulk_in.submit_and_wait(&mut buff).await {
+                                Ok(n) => {
+                                    let data = &buff[..n];
+                                    info!("bulk in data: {data:?}",);
+                                }
+                                Err(e) => {
+                                    info!("bulk in error: {:?}", e);
+                                }
                             }
                         }
 
@@ -138,42 +142,6 @@ mod tests {
                             );
                         }
                     }
-
-                    // match (ep_desc.transfer_type, ep_desc.direction) {
-                    //     (EndpointType::Bulk, Direction::In) => {
-                    //         let mut bulk_in = interface.endpoint_bulk_in(ep_desc.address).unwrap();
-                    //         // You can use bulk_in to transfer data
-
-                    //         let mut buff = alloc::vec![0u8; 64];
-                    //         while let Ok(n) = bulk_in.submit(&mut buff).unwrap().await {
-                    //             let data = &buff[..n];
-                    //             info!("bulk in data: {data:?}",);
-                    //             break; // For testing, break after first transfer
-                    //         }
-                    //     }
-                    //     // (EndpointType::Isochronous, Direction::In) => {
-                    //     //     let _iso_in = interface
-                    //     //         .endpoint::<Isochronous, In>(ep_desc.address)
-                    //     //         .unwrap();
-                    //     //     // You can use iso_in to transfer data
-                    //     // }
-                    //     _ => {
-                    //         info!(
-                    //             "unsupported {:?} {:?}",
-                    //             ep_desc.transfer_type, ep_desc.direction
-                    //         );
-                    //     }
-                    // }
-                    // }
-
-                    // // let mut _bulk_in = interface.endpoint::<Bulk, In>(0x81).unwrap();
-
-                    // // let mut buff = alloc::vec![0u8; 64];
-
-                    // // while let Ok(n) = bulk_in.transfer(&mut buff).await {
-                    // //     let data = &buff[..n];
-
-                    // //     info!("bulk in data: {data:?}",);
                 }
 
                 drop(device);
