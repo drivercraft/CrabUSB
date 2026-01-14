@@ -85,7 +85,7 @@ mod tests {
                 sleep(Duration::from_millis(1000)).await;
             }
 
-            for mut info in ls {
+            for info in ls {
                 info!("{info:#x?}");
 
                 let mut interface_desc = None;
@@ -233,18 +233,6 @@ mod tests {
                 let regs = node.reg().unwrap().collect::<Vec<_>>();
                 println!("usb regs: {:?}", regs);
 
-                // 确认是 fc400000 而不是 fc000000 或 fcd00000
-                if regs.len() > 0 {
-                    info!("  Register address: 0x{:x}", regs[0].address);
-                    if regs[0].address == 0xfc400000 {
-                        info!("  ✓ Correct USB controller (fc400000)");
-                    } else if regs[0].address == 0xfc000000 {
-                        warn!("  ⚠ Got fc000000 (OTG) instead of fc400000!");
-                    } else if regs[0].address == 0xfcd00000 {
-                        warn!("  ⚠ Got fcd00000 instead of fc400000!");
-                    }
-                }
-
                 for clk in node.clocks() {
                     println!("usb clock: {:?}", clk);
                 }
@@ -267,22 +255,6 @@ mod tests {
                     info!("  IRQ configs: {:?}", i.cfgs);
                     for cfg in &i.cfgs {
                         info!("    IRQ: {:?}, flags: {:?}", cfg.irq, cfg.trigger);
-                    }
-                }
-
-                // WORKAROUND: Force use correct IRQ 0xdd (221) for USB@fc400000
-                // The device tree parser seems to be returning wrong IRQ (0xfd for PCIe)
-                if regs.len() > 0 && regs[0].address == 0xfc400000 {
-                    if let Some(ref i) = irq {
-                        // 检查是否需要修正
-                        if i.cfgs[0].irq != 0xdd.into() {
-                            warn!(
-                                "⚠ WORKAROUND: Detected wrong IRQ {:?}, forcing to 0xdd (221)",
-                                i.cfgs[0].irq
-                            );
-                            // 由于 IrqInfo 没有 Copy trait，我们需要创建修改后的版本
-                            // 这里先记录，实际修改在 register_irq 中处理
-                        }
                     }
                 }
 
@@ -559,36 +531,23 @@ mod tests {
     fn register_irq(irq: IrqInfo, host: &mut USBHost) {
         let handle = host.create_event_handler();
 
-        for one in &irq.cfgs {
-            let mut cfg = one.clone();
+        let cfg = irq.cfgs[0].clone();
 
-            // WORKAROUND: 修正 USB@fc400000 的中断号
-            // 如果检测到错误的 IRQ (0xfd for PCIe)，强制使用正确的 IRQ 0xdd (221)
-            if cfg.irq == 0xfd.into() {
-                warn!("⚠ WORKAROUND: Correcting IRQ from 0xfd (253, PCIe) to 0xdd (221, USB)");
-                cfg.irq = 0xdd.into();
-            }
-
-            IrqParam {
-                intc: irq.irq_parent,
-                cfg,
-            }
-            .register_builder({
-                move |_irq| {
-                    let event = handle.handle_event();
-                    match event {
-                        Event::PortChange { .. } => {
-                            PROT_CHANGED.store(true, Ordering::Release);
-                        }
-                        _ => {}
-                    }
-
-                    IrqHandleResult::Handled
-                }
-            })
-            .register();
-            break;
+        IrqParam {
+            intc: irq.irq_parent,
+            cfg,
         }
+        .register_builder({
+            move |_irq| {
+                let event = handle.handle_event();
+                if let Event::PortChange { .. } = event {
+                    PROT_CHANGED.store(true, Ordering::Release);
+                }
+
+                IrqHandleResult::Handled
+            }
+        })
+        .register();
     }
 
     fn enable_power() {
