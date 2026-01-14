@@ -9,17 +9,21 @@ use core::{
 use super::transfer::Transfer;
 use usb_if::err::TransferError;
 
+mod bulk;
 mod ctrl;
 mod int;
 
+pub use bulk::*;
 pub use ctrl::*;
 pub use int::*;
 
 pub enum EndpointKind {
     Control(EndpointControl),
     Isochronous,
-    Bulk,
-    Interrupt(EndpointInterrupt),
+    BulkIn(EndpointBulkIn),
+    BulkOut(EndpointBulkOut),
+    InterruptIn(EndpointInterruptIn),
+    InterruptOut(EndpointInterruptOut),
 }
 
 impl EndpointKind {
@@ -63,15 +67,19 @@ impl EndpointBase {
         Self { raw: Box::new(raw) }
     }
 
-    pub fn request(
+    pub fn submit_and_wait(
         &mut self,
         transfer: Transfer,
     ) -> impl Future<Output = Result<Transfer, TransferError>> {
-        let handle = self.raw.submit(transfer);
+        let handle = self.submit(transfer);
         async move {
             let handle = handle?;
             handle.await
         }
+    }
+
+    pub fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle<'_>, TransferError> {
+        self.raw.submit(transfer)
     }
 
     pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {

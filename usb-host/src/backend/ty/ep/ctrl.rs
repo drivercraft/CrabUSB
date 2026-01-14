@@ -26,7 +26,7 @@ impl EndpointControl {
         buff: &mut [u8],
     ) -> Result<usize, TransferError> {
         let transfer = Transfer::new_in(TransferKind::Control(param), Pin::new(buff));
-        let t = self.raw.request(transfer).await?;
+        let t = self.raw.submit_and_wait(transfer).await?;
         let n = t.transfer_len;
         Ok(n)
     }
@@ -37,7 +37,7 @@ impl EndpointControl {
         buff: &[u8],
     ) -> Result<usize, TransferError> {
         let transfer = Transfer::new_out(TransferKind::Control(param), Pin::new(buff));
-        let t = self.raw.request(transfer).await?;
+        let t = self.raw.submit_and_wait(transfer).await?;
         let n = t.transfer_len;
         Ok(n)
     }

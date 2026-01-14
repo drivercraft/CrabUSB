@@ -5,8 +5,8 @@ use usb_if::host::ControlSetup;
 #[derive(Clone)]
 pub enum TransferKind {
     Control(ControlSetup),
+    Bulk,
     Interrupt,
-    
     // Other kinds can be added here
 }
 

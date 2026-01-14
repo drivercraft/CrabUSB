@@ -125,11 +125,23 @@ impl Device {
     pub async fn get_endpoint(&mut self, address: u8) -> Result<EndpointKind, USBError> {
         let ep_desc = self.find_ep_desc(address)?.clone();
         let base = self.inner.get_endpoint(&ep_desc)?;
-        match ep_desc.transfer_type {
-            usb_if::descriptor::EndpointType::Control => Ok(EndpointKind::Control(base.into())),
-            usb_if::descriptor::EndpointType::Isochronous => Ok(EndpointKind::Isochronous),
-            usb_if::descriptor::EndpointType::Bulk => Ok(EndpointKind::Bulk),
-            usb_if::descriptor::EndpointType::Interrupt => Ok(EndpointKind::Interrupt(base.into())),
+        match (ep_desc.transfer_type, ep_desc.direction) {
+            (usb_if::descriptor::EndpointType::Control, _) => {
+                Ok(EndpointKind::Control(base.into()))
+            }
+            (usb_if::descriptor::EndpointType::Isochronous, _) => Ok(EndpointKind::Isochronous),
+            (usb_if::descriptor::EndpointType::Bulk, usb_if::transfer::Direction::In) => {
+                Ok(EndpointKind::BulkIn(base.into()))
+            }
+            (usb_if::descriptor::EndpointType::Bulk, usb_if::transfer::Direction::Out) => {
+                Ok(EndpointKind::BulkOut(base.into()))
+            }
+            (usb_if::descriptor::EndpointType::Interrupt, usb_if::transfer::Direction::In) => {
+                Ok(EndpointKind::InterruptIn(base.into()))
+            }
+            (usb_if::descriptor::EndpointType::Interrupt, usb_if::transfer::Direction::Out) => {
+                Ok(EndpointKind::InterruptOut(base.into()))
+            }
         }
     }
 

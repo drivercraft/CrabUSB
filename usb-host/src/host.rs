@@ -6,11 +6,12 @@ use crate::device::*;
 use crate::err::Result;
 use crate::{Mmio, backend::BackendOp};
 
-pub use crate::backend::{
+pub use super::backend::{
     dwc::{
         CruOp, Dwc, DwcNewParams, DwcParams, UdphyParam, Usb2PhyParam, Usb2PhyPortId,
         UsbPhyInterfaceMode,
     },
+    ty::ep::*,
     xhci::Xhci,
 };
 

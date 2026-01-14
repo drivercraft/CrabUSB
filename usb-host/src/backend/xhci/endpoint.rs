@@ -151,7 +151,7 @@ impl EndpointOp for Endpoint {
                 }
                 handle.0 = self.ring.enque_transfer(status.into());
             }
-            TransferKind::Interrupt => {
+            TransferKind::Interrupt | TransferKind::Bulk => {
                 let trb = transfer::Allowed::Normal(
                     *Normal::new()
                         .set_data_buffer_pointer(data_bus_addr as _)

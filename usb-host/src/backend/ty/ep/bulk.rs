@@ -1,6 +1,6 @@
 use core::pin::Pin;
 
-use usb_if::err::TransferError;
+use usb_if::{err::TransferError, transfer};
 
 use crate::{
     TransferHandle,
@@ -9,11 +9,11 @@ use crate::{
 
 use super::EndpointBase;
 
-pub struct EndpointInterruptIn {
+pub struct EndpointBulkIn {
     pub(crate) raw: EndpointBase,
 }
 
-impl EndpointInterruptIn {
+impl EndpointBulkIn {
     pub async fn submit_and_wait(&mut self, buff: &mut [u8]) -> Result<usize, TransferError> {
         let t = self.submit(buff)?.await?;
         let n = t.transfer_len;
@@ -21,22 +21,22 @@ impl EndpointInterruptIn {
     }
 
     pub fn submit(&mut self, buff: &mut [u8]) -> Result<TransferHandle<'_>, TransferError> {
-        let transfer = Transfer::new_in(TransferKind::Interrupt, Pin::new(buff));
+        let transfer = Transfer::new_in(TransferKind::Bulk, Pin::new(buff));
         self.raw.submit(transfer)
     }
 }
 
-impl From<EndpointBase> for EndpointInterruptIn {
+impl From<EndpointBase> for EndpointBulkIn {
     fn from(raw: EndpointBase) -> Self {
         Self { raw }
     }
 }
 
-pub struct EndpointInterruptOut {
+pub struct EndpointBulkOut {
     pub(crate) raw: EndpointBase,
 }
 
-impl EndpointInterruptOut {
+impl EndpointBulkOut {
     pub async fn submit_and_wait(&mut self, buff: &[u8]) -> Result<usize, TransferError> {
         let t = self.submit(buff)?.await?;
         let n = t.transfer_len;
@@ -44,12 +44,12 @@ impl EndpointInterruptOut {
     }
 
     pub fn submit(&mut self, buff: &[u8]) -> Result<TransferHandle<'_>, TransferError> {
-        let transfer = Transfer::new_out(TransferKind::Interrupt, Pin::new(buff));
+        let transfer = Transfer::new_out(TransferKind::Bulk, Pin::new(buff));
         self.raw.submit(transfer)
     }
 }
 
-impl From<EndpointBase> for EndpointInterruptOut {
+impl From<EndpointBase> for EndpointBulkOut {
     fn from(raw: EndpointBase) -> Self {
         Self { raw }
     }
