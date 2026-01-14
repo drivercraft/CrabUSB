@@ -61,7 +61,7 @@ mod tests {
             let mut ls = Vec::new();
             for _ in 0..50 {
                 let ls2 = host.probe_devices().await.unwrap();
-                if ls2.len() > 0 {
+                if !ls2.is_empty() {
                     info!("found {} devices", ls2.len());
                     ls = ls2;
                     break;
@@ -69,7 +69,7 @@ mod tests {
                 sleep(Duration::from_millis(100)).await;
             }
 
-            for mut info in ls {
+            for info in ls {
                 info!("{info:#x?}");
 
                 let mut interface_desc = None;

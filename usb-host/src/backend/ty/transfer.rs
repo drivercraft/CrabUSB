@@ -7,7 +7,7 @@ pub enum TransferKind {
     Control(ControlSetup),
     Bulk,
     Interrupt,
-    // Other kinds can be added here
+    Isochronous { num_pkgs: usize },
 }
 
 #[derive(Clone)]

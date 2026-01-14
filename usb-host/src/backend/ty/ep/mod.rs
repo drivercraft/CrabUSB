@@ -12,14 +12,17 @@ use usb_if::err::TransferError;
 mod bulk;
 mod ctrl;
 mod int;
+mod iso;
 
 pub use bulk::*;
 pub use ctrl::*;
 pub use int::*;
+pub use iso::*;
 
 pub enum EndpointKind {
     Control(EndpointControl),
-    Isochronous,
+    IsochronousIn(EndpointIsoIn),
+    IsochronousOut(EndpointIsoOut),
     BulkIn(EndpointBulkIn),
     BulkOut(EndpointBulkOut),
     InterruptIn(EndpointInterruptIn),

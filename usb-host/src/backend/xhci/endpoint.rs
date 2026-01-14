@@ -11,7 +11,7 @@ use xhci::{
     registers::doorbell,
     ring::trb::{
         event::TransferEvent,
-        transfer::{self, Normal},
+        transfer::{self, Isoch, Normal},
     },
 };
 
@@ -82,6 +82,82 @@ impl Endpoint {
         }
         t.transfer_len = c.trb_transfer_length() as usize;
         Ok(t)
+    }
+
+    fn enque_trb(&mut self, trb: transfer::Allowed) -> TransferId {
+        TransferId(self.ring.enque_transfer(trb))
+    }
+
+    fn enque_iso(&mut self, bus_addr: u64, buff_len: usize, num_iso_packets: usize) -> TransferId {
+        if buff_len == 0 || num_iso_packets < 2 {
+            self.enque_iso_trb(bus_addr, buff_len)
+        } else {
+            self.enque_iso_multi(bus_addr, buff_len, num_iso_packets)
+        }
+    }
+
+    fn enque_iso_trb(&mut self, bus_addr: u64, buff_len: usize) -> TransferId {
+        let mut trb = Isoch::new();
+        trb.set_data_buffer_pointer(bus_addr as _)
+            .set_trb_transfer_length(buff_len as _)
+            .set_interrupter_target(0)
+            .set_interrupt_on_completion();
+
+        // if use_sia {
+        //     trb.set_start_isoch_asap(); // 启用SIA
+        // }
+
+        // 创建Isoch TRB
+        let trb = transfer::Allowed::Isoch(trb);
+        self.enque_trb(trb)
+    }
+    fn enque_iso_multi(&mut self, bus_addr: u64, len: usize, num_iso_packets: usize) -> TransferId {
+        let len = len as u64;
+        let packet_size = if len == 0 {
+            0
+        } else {
+            len.div_ceil(num_iso_packets as u64)
+        };
+
+        let mut id = TransferId(BusAddr(0));
+
+        for i in 0..num_iso_packets {
+            let i = i as u64;
+            let offset = i * packet_size;
+            if offset >= len {
+                break; // 避免越界
+            }
+            let remaining = len - offset;
+            let current_size = if remaining >= packet_size {
+                packet_size
+            } else {
+                remaining
+            };
+
+            if current_size > 0 {
+                let current_addr = bus_addr + offset;
+                let is_last = (i == num_iso_packets as u64 - 1) || (offset + current_size >= len);
+
+                if i == 0 {
+                    // 第一个TRB必须是Isoch TRB
+                    id = self.enque_iso_trb(current_addr, current_size as _);
+                } else {
+                    // 后续TRB使用Normal TRB
+                    let mut trb = Normal::new();
+                    trb.set_data_buffer_pointer(current_addr as _);
+                    trb.set_trb_transfer_length(current_size as _);
+                    trb.set_interrupter_target(0);
+
+                    if is_last {
+                        trb.set_interrupt_on_completion();
+                    }
+                    let trb = transfer::Allowed::Normal(trb);
+                    id = self.enque_trb(trb);
+                }
+            }
+        }
+
+        id
     }
 }
 
@@ -161,6 +237,9 @@ impl EndpointOp for Endpoint {
                         .set_interrupt_on_completion(),
                 );
                 handle.0 = self.ring.enque_transfer(trb);
+            }
+            TransferKind::Isochronous { num_pkgs } => {
+                handle = self.enque_iso(data_bus_addr, data_len, *num_pkgs);
             }
         }
         self.transfers.insert(handle, transfer);

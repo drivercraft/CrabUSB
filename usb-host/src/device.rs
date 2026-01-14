@@ -129,7 +129,12 @@ impl Device {
             (usb_if::descriptor::EndpointType::Control, _) => {
                 Ok(EndpointKind::Control(base.into()))
             }
-            (usb_if::descriptor::EndpointType::Isochronous, _) => Ok(EndpointKind::Isochronous),
+            (usb_if::descriptor::EndpointType::Isochronous, usb_if::transfer::Direction::In) => {
+                Ok(EndpointKind::IsochronousIn(base.into()))
+            }
+            (usb_if::descriptor::EndpointType::Isochronous, usb_if::transfer::Direction::Out) => {
+                Ok(EndpointKind::IsochronousOut(base.into()))
+            }
             (usb_if::descriptor::EndpointType::Bulk, usb_if::transfer::Direction::In) => {
                 Ok(EndpointKind::BulkIn(base.into()))
             }

@@ -1,6 +1,6 @@
 use core::pin::Pin;
 
-use usb_if::{err::TransferError, transfer};
+use usb_if::err::TransferError;
 
 use crate::{
     TransferHandle,
