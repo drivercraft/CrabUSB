@@ -1,15 +1,13 @@
-#![cfg_attr(target_os = "none", no_std)]
+#![no_std]
 
 extern crate alloc;
 use alloc::{string::ToString, vec::Vec};
 
-use crab_usb::{
-    Class, Direction, EndpointType, TransferError,
-    device::{Device, DeviceInfo},
-    err::USBError,
-};
+use crab_usb::device::{Device, DeviceInfo};
+use crab_usb::{Class, Direction, EndpointKind, EndpointType, err::USBError};
 use keyboard_types::{Key, Modifiers, NamedKey};
 use log::debug;
+use usb_if::err::TransferError;
 
 /// 键盘事件类型
 #[derive(Debug, Clone, PartialEq)]
@@ -118,70 +116,87 @@ fn scancode_to_key(scancode: u8) -> Option<Key> {
 
 pub struct KeyBoard {
     _device: Device,
-    ep_in: EndpointInterruptIn,
     /// 上一次按键状态，用于检测按键变化
     previous_state: [u8; 8],
+    /// 中断端点地址
+    endpoint_address: u8,
 }
 
 impl KeyBoard {
+    /// 检查设备是否为 HID 键盘设备
     pub fn check(info: &DeviceInfo) -> bool {
-        for iface in info.interface_descriptors() {
-            if matches!(iface.class(), Class::Hid) && iface.subclass == 1 && iface.protocol == 1 {
-                return true;
+        for config in info.configurations() {
+            for interface in &config.interfaces {
+                let alt = interface.first_alt_setting();
+                if matches!(alt.class(), Class::Hid) && alt.subclass == 1 && alt.protocol == 1 {
+                    return true;
+                }
             }
         }
         false
     }
 
+    /// 创建新的键盘设备实例
     pub async fn new(mut device: Device) -> Result<Self, USBError> {
-        for config in device.configurations().iter() {
+        for config in device.configurations() {
             debug!("Configuration: {config:?}");
         }
 
+        // 查找 HID 键盘接口
         let config = &device.configurations()[0];
-        let interface = config
+        let (interface_number, alternate_setting, endpoint_address) = config
             .interfaces
             .iter()
-            .find(|iface| {
-                let iface = iface.first_alt_setting();
-                matches!(iface.class(), Class::Hid) && iface.subclass == 1 && iface.protocol == 1
+            .find_map(|iface| {
+                let alt = iface.first_alt_setting();
+                if matches!(alt.class(), Class::Hid) && alt.subclass == 1 && alt.protocol == 1 {
+                    // 查找中断 IN 端点
+                    for ep in &alt.endpoints {
+                        if matches!(ep.transfer_type, EndpointType::Interrupt)
+                            && matches!(ep.direction, Direction::In)
+                        {
+                            return Some((alt.interface_number, alt.alternate_setting, ep.address));
+                        }
+                    }
+                }
+                None
             })
-            .ok_or(USBError::NotFound)?
-            .first_alt_setting();
+            .ok_or(USBError::NotFound)?;
 
-        debug!("Using interface: {interface:?}");
+        debug!(
+            "Using interface: {interface_number}, alt: {alternate_setting}, endpoint: {endpoint_address:#x}"
+        );
 
-        let mut interface = device
-            .claim_interface(interface.interface_number, interface.alternate_setting)
+        // 声明接口
+        device
+            .claim_interface(interface_number, alternate_setting)
             .await?;
-
-        let mut ep_in = None;
-
-        for endpoint in interface.descriptor.endpoints.clone().into_iter() {
-            match (endpoint.transfer_type, endpoint.direction) {
-                (EndpointType::Interrupt, Direction::In) => {
-                    debug!("Found interrupt IN endpoint: {endpoint:?}");
-                    ep_in = Some(interface.endpoint_interrupt_in(endpoint.address)?);
-                }
-
-                _ => {
-                    debug!("Ignoring endpoint: {endpoint:?}");
-                }
-            }
-        }
 
         Ok(Self {
             _device: device,
-            _interface: interface,
-            ep_in: ep_in.ok_or(USBError::NotFound)?,
             previous_state: [0; 8],
+            endpoint_address,
         })
     }
 
     /// 接收并解析键盘事件
     pub async fn recv_events(&mut self) -> Result<Vec<KeyEvent>, TransferError> {
+        // 每次接收时获取端点
+        let endpoint_kind = self
+            ._device
+            .get_endpoint(self.endpoint_address)
+            .await
+            .map_err(|e| TransferError::Other(alloc::format!("Failed to get endpoint: {e}")))?;
+
         let mut buf = [0u8; 8];
-        let n = self.ep_in.submit(&mut buf)?.await?;
+        let n = match endpoint_kind {
+            EndpointKind::InterruptIn(mut ep) => {
+                // 使用 submit_and_wait 方法进行同步等待
+                ep.submit_and_wait(&mut buf).await?
+            }
+            _ => return Err(TransferError::Other("Unexpected endpoint type".into())),
+        };
+
         if n == 0 {
             return Err(TransferError::Other("Transfer returned zero bytes".into()));
         }
