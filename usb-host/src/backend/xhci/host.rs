@@ -1,5 +1,6 @@
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cell::UnsafeCell;
+use core::time::Duration;
 use futures::{FutureExt, future::LocalBoxFuture};
 use spin::RwLock;
 
@@ -124,7 +125,6 @@ impl Xhci {
         self.wait_for_running().await;
 
         self.enable_irq();
-
         self.reset_ports().await;
 
         Ok(())
@@ -479,6 +479,9 @@ impl Xhci {
 
         info!("Running");
 
+        // 必须等待至少200ms，否则 port enable = false
+        crate::osal::kernel::delay(Duration::from_millis(200));
+
         self.reg
             .write()
             .doorbell
@@ -488,37 +491,43 @@ impl Xhci {
     async fn reset_ports(&mut self) {
         let mut regs = self.reg.write();
         let port_len = regs.port_register_set.len();
+        debug!("Resetting {} ports", port_len);
+        // Enable port power for all ports
+        for i in 0..port_len {
+            let portsc = regs.port_register_set.read_volatile_at(i).portsc;
+            if !portsc.port_power() {
+                regs.port_register_set.update_volatile_at(i, |port| {
+                    port.portsc.set_port_power();
+                });
+            }
+        }
 
         for i in 0..port_len {
-            // 读取复位前的端口状态
-            let port_reg = regs.port_register_set.read_volatile_at(i);
-
-            info!("Port {} initial status:", i);
-            info!(
-                "  Current Connect Status: {}",
-                port_reg.portsc.current_connect_status()
-            );
-            info!(
-                "  Port Enabled: {}",
-                port_reg.portsc.port_enabled_disabled()
-            );
-            info!("  Port Speed: {}", port_reg.portsc.port_speed());
-            info!("  Port Power: {}", port_reg.portsc.port_power());
-
             self.port_status.push(ProtStaus::Uninit);
-            debug!("Port {} start reset", i);
-
             regs.port_register_set.update_volatile_at(i, |port| {
                 port.portsc.set_0_port_enabled_disabled();
                 port.portsc.set_port_reset();
             });
         }
+
+        debug!("Waiting for reset ...");
+
+        for i in 0..port_len {
+            // 等待复位完成
+            SpinWhile::new(|| {
+                let port_reg = regs.port_register_set.read_volatile_at(i);
+                port_reg.portsc.port_reset()
+            })
+            .await;
+        }
+
+        info!("All ports reset completed");
     }
 
     fn need_init_port_idxs(&self) -> impl Iterator<Item = usize> {
         (0..self.reg.read().port_register_set.len()).filter(move |&i| {
             let portsc = self.reg.read().port_register_set.read_volatile_at(i).portsc;
-            debug!("Port {i} status: {portsc:#x?}");
+            info!("Port {i} status: {portsc:#x?}");
 
             portsc.port_enabled_disabled()
                 && portsc.current_connect_status()
