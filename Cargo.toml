@@ -16,6 +16,5 @@ usb-if = {path = "usb-if", version = "0.3" }
 crab-uvc = {path = "usb-device/uvc", version = "0.1" }
 tock-registers = "0.10"
 bare-test = {version = "0.7"}
-rockchip-pm = { path = "../rockchip-pm" }
-rockchip-soc = { path = "../rockchip-soc" }
-rk3588-clk = {path = "../rk3588-clk" }
+rockchip-pm = "0.4"
+rockchip-soc = "0.1"

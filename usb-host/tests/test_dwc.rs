@@ -19,7 +19,6 @@ use bare_test::{
     irq::{IrqHandleResult, IrqInfo, IrqParam},
     mem::{iomap, page_size},
     println,
-    time::spin_delay,
 };
 use core::{
     ptr::NonNull,
@@ -29,9 +28,8 @@ use core::{
 use crab_usb::{impl_trait, *};
 use log::info;
 use log::*;
-use pcie::*;
-use rockchip_pm::{PowerDomain, RockchipPM};
-use rockchip_soc::{GpioDirection, PinConfig, PinManager, rk3588::Cru};
+use rockchip_pm::RockchipPM;
+use rockchip_soc::{Cru, CruOp, GpioDirection, PinConfig, PinCtrl, PinCtrlOp, SocType};
 use spin::Mutex;
 use usb_if::descriptor::ConfigurationDescriptor;
 
@@ -41,6 +39,7 @@ mod tests {
     use core::ptr::NonNull;
 
     use bare_test::time::spin_delay;
+    use rockchip_soc::CruOp;
 
     use super::*;
 
@@ -687,10 +686,7 @@ fn on_probe_cru(node: FdtInfo<'_>, dev: PlatformDevice) -> Result<(), OnProbeErr
 
     let grf = get_grf(grf_phandle);
 
-    let mut clk = CruDev(Cru::new(base, grf));
-
-    clk.0.init();
-
+    let clk = CruDev(Cru::new(SocType::Rk3588, base, grf));
     dev.register(clk);
 
     Ok(())
@@ -811,7 +807,7 @@ fn get_grf2(node: &Node, name: &str) -> NonNull<u8> {
     iomap(start.into(), end - start)
 }
 
-fn find_pinctrl() -> PinManager {
+fn find_pinctrl() -> PinCtrl {
     let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
     let fdt = fdt.get();
 
@@ -840,10 +836,10 @@ fn find_pinctrl() -> PinManager {
         gpio_banks[idx] = gpio_mmio;
     }
 
-    PinManager::new(ioc, gpio_banks)
+    PinCtrl::new(SocType::Rk3588, ioc, &gpio_banks)
 }
 
-fn set_pinctrl(m: &mut PinManager, pinctrl_node: &str) {
+fn set_pinctrl(m: &mut PinCtrl, pinctrl_node: &str) {
     info!("Reading pinctrl node: {}", pinctrl_node);
     let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
     let fdt = fdt.get();
@@ -882,7 +878,7 @@ fn setup_pinctrl() {
 
 struct CruOpImpl;
 
-impl CruOp for CruOpImpl {
+impl crab_usb::CruOp for CruOpImpl {
     fn reset_assert(&self, id: u64) {
         let cru = rdrive::get_list::<CruDev>().remove(0);
         cru.lock().unwrap().0.reset_assert(id.into());
