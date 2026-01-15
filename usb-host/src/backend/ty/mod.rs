@@ -14,6 +14,7 @@ pub mod transfer;
 pub enum Event {
     Nothing,
     PortChange { port: u8 },
+    Stopped,
 }
 
 pub(crate) trait EventHandlerOp: Send + Any + Sync + 'static {

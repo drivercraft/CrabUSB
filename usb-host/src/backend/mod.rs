@@ -8,9 +8,9 @@ use usb_if::host::USBError;
 
 use crate::backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp};
 
-// #[cfg(feature = "libusb")]
-// pub mod libusb;
 pub mod dwc;
+#[cfg(feature = "libusb")]
+pub mod libusb;
 pub mod xhci;
 
 pub(crate) mod ty;

@@ -12,15 +12,9 @@ async fn test() {
         .is_test(true)
         .init();
 
-    let mut host = USBHost::new_libusb();
-    let event_handler = host.event_handler();
-    let ls = host.device_list().await.unwrap();
+    let mut host = USBHost::new_libusb().unwrap();
 
-    thread::spawn(move || {
-        while event_handler.handle_event() {
-            spin_loop();
-        }
-    });
+    let ls = host.device_list().await.unwrap();
 
     let mut info: Option<DeviceInfo> = None;
 

@@ -24,11 +24,15 @@ impl USBHost {
     pub fn new_xhci(mmio: Mmio, dma_mask: usize) -> Result<USBHost> {
         Ok(USBHost::new(Xhci::new(mmio, dma_mask)?))
     }
-}
 
-impl USBHost {
     pub fn new_dwc(params: DwcNewParams<'_, impl CruOp>) -> Result<USBHost> {
         Ok(USBHost::new(Dwc::new(params)?))
+    }
+
+    #[cfg(feature = "libusb")]
+    pub fn new_libusb() -> Result<USBHost> {
+        let host = USBHost::new(crate::backend::libusb::Libusb::new());
+        Ok(host)
     }
 }
 
