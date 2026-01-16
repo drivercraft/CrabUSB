@@ -12,7 +12,7 @@ crab-usb = {path = "usb-host", version = "0.5" }
 futures = {version = "0.3", default-features = false}
 log = "0.4"
 thiserror = {version = "2", default-features = false}
-usb-if = {path = "usb-if", version = "0.3" }
+usb-if = {path = "usb-if", version = "0.4" }
 crab-uvc = {path = "usb-device/uvc", version = "0.1" }
 tock-registers = "0.10"
 bare-test = {version = "0.7"}
