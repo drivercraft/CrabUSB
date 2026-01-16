@@ -9,7 +9,7 @@ use usb_if::descriptor::{
 
 use crate::err::*;
 use crate::{
-    EndpointBase,
+    EndpointBase, EndpointControl,
     backend::{
         libusb::{context::Context, endpoint::EndpointImpl},
         ty::{DeviceInfoOp, DeviceOp},
@@ -174,6 +174,7 @@ pub struct Device {
     handle: Arc<DeviceHandle>,
     desc: DeviceDescriptor,
     configs: Vec<ConfigurationDescriptor>,
+    ctrl_ep: EndpointControl,
 }
 
 unsafe impl Send for Device {}
@@ -191,10 +192,16 @@ impl Device {
             raw: handle,
             _ctx: ctx,
         });
+
+        // 创建控制端点（endpoint address 0）
+        let ctrl_ep_impl = EndpointImpl::new(handle.clone(), 0);
+        let ctrl_ep = EndpointControl::new(ctrl_ep_impl);
+
         Ok(Self {
             handle,
             desc,
             configs,
+            ctrl_ep,
         })
     }
 
@@ -249,7 +256,7 @@ impl DeviceOp for Device {
     }
 
     fn ep_ctrl(&mut self) -> &mut crate::EndpointControl {
-        todo!()
+        &mut self.ctrl_ep
     }
 
     fn set_configuration<'a>(

@@ -8,10 +8,14 @@ use futures::task::AtomicWaker;
 use libusb1_sys::{
     libusb_device_handle, libusb_fill_bulk_transfer, libusb_fill_control_setup,
     libusb_fill_control_transfer, libusb_fill_interrupt_transfer, libusb_fill_iso_transfer,
-    libusb_get_iso_packet_buffer_simple, libusb_transfer,
+    libusb_get_iso_packet_buffer_simple, libusb_submit_transfer, libusb_transfer,
 };
 use log::trace;
-use usb_if::{err::TransferError, host::USBError, transfer::BmRequestType};
+use usb_if::{
+    err::TransferError,
+    host::USBError,
+    transfer::{BmRequestType, Direction},
+};
 
 use crate::{
     EndpointOp,
@@ -44,8 +48,15 @@ impl EndpointImpl {
         if trans_ptr.is_null() {
             return Err(TransferError::Other("no memory".into()));
         }
+
+        // 保存类型和方向
+        let kind = transfer.kind.clone();
+        let direction = transfer.direction;
+
         let trans_handle = Arc::new(TransferHandleRaw {
             transfer: trans_ptr,
+            kind,
+            direction,
             waker: AtomicWaker::new(),
             ok: AtomicBool::new(false),
         });
@@ -144,8 +155,16 @@ impl EndpointOp for EndpointImpl {
     ) -> Result<crate::TransferHandle<'_>, usb_if::err::TransferError> {
         let trans = self.make_transfer(transfer)?;
         let id = trans.id();
+        let ptr = trans.transfer;
         self.transfers.insert(id, trans);
+        let submit_result = usb!(libusb_submit_transfer(ptr))
+            .map_err(|e| TransferError::Other(format!("Failed to submit transfer: {e:?}")));
 
+        if submit_result.is_err() {
+            self.transfers.remove(&id);
+            return Err(submit_result.err().unwrap());
+        }
+        trace!("Submitted libusb transfer id {:#x}, ptr{:p}", id, ptr);
         Ok(crate::TransferHandle::new(id, self))
     }
 
@@ -170,6 +189,8 @@ impl EndpointOp for EndpointImpl {
 
 struct TransferHandleRaw {
     transfer: *mut libusb_transfer,
+    kind: TransferKind,
+    direction: Direction,
     ok: AtomicBool,
     waker: AtomicWaker,
 }
@@ -187,11 +208,12 @@ impl TransferHandleRaw {
     ) -> Result<crate::backend::ty::transfer::Transfer, usb_if::err::TransferError> {
         transfer_status_to_result(unsafe { (*self.transfer).status })?;
         let trans_raw = unsafe { &*self.transfer };
+
         let trans = crate::backend::ty::transfer::Transfer {
-            kind: todo!(),
-            direction: todo!(),
-            buffer_addr: todo!(),
-            buffer_len: todo!(),
+            kind: self.kind.clone(),
+            direction: self.direction,
+            buffer_addr: trans_raw.buffer as usize,
+            buffer_len: trans_raw.length as usize,
             transfer_len: trans_raw.actual_length as usize,
         };
 

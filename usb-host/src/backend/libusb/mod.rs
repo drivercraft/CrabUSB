@@ -61,10 +61,13 @@ impl BackendOp for Libusb {
         let handle = Arc::downgrade(&self.ctx);
 
         thread::spawn(move || {
+            trace!("Libusb event handling thread started");
             while let Some(ctx) = handle.upgrade() {
                 if let Err(e) = ctx.handle_events() {
                     error!("Libusb handle events error: {:?}", e);
                 }
+
+                trace!("Libusb event handling iteration complete");
             }
         });
 
