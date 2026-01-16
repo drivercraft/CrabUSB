@@ -5,7 +5,6 @@
 
 use core::ops::{Deref, DerefMut};
 
-use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -233,10 +232,10 @@ impl Dwc {
     async fn core_init(&mut self) -> Result<()> {
         self.revistion = self.dwc_regs.read_revision() as _;
         if self.revistion != 0x55330000 {
-            return Err(USBError::Other(format!(
+            Err(anyhow!(
                 "Unsupported DWC3 revision: 0x{:08x}",
                 self.revistion
-            )));
+            ))?;
         }
         self.revistion += self.dwc_regs.read_product_id();
         debug!("DWC3: Detected revision 0x{:08x}", self.revistion);

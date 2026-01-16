@@ -1,4 +1,5 @@
 use alloc::{boxed::Box, string::String};
+use anyhow::anyhow;
 use core::{
     any::Any,
     fmt::{Debug, Display},
@@ -169,7 +170,7 @@ impl Device {
         self.ep_ctrl()
             .get_descriptor(DescriptorType::STRING, index, lang_id.into(), &mut data)
             .await?;
-        let res = decode_string_descriptor(&data).map_err(|e| USBError::Other(e.into()))?;
+        let res = decode_string_descriptor(&data)?;
         Ok(res)
     }
 
@@ -252,7 +253,7 @@ impl Device {
     ) -> core::result::Result<&usb_if::descriptor::EndpointDescriptor, USBError> {
         let (interface_number, alternate_setting) = match self.current_interface {
             Some((i, a)) => (i, a),
-            None => return Err(USBError::Other("Interface not claim".into())),
+            None => Err(anyhow!("Interface not claim"))?,
         };
         for config in self.configurations() {
             for interface in &config.interfaces {

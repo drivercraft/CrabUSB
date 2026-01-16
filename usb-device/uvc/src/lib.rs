@@ -416,9 +416,7 @@ impl UvcDevice {
         self.device.control_in(setup, &mut header_buffer).await?;
 
         if header_buffer.len() < 4 {
-            return Err(USBError::Other(
-                "Configuration descriptor header too short".into(),
-            ));
+            Err("Configuration descriptor header too short")?;
         }
 
         // 提取总长度（小端格式）
@@ -426,9 +424,7 @@ impl UvcDevice {
         trace!("Configuration descriptor total length: {total_length} bytes");
 
         if total_length < 9 {
-            return Err(USBError::Other(
-                "Invalid configuration descriptor length".into(),
-            ));
+            Err("Invalid configuration descriptor length")?;
         }
 
         // 获取完整的配置描述符
@@ -692,7 +688,7 @@ impl UvcDevice {
     /// 解析MJPEG格式描述符
     fn parse_mjpeg_format(&self, data: &[u8]) -> Result<Vec<VideoFormat>, USBError> {
         if data.len() < 11 {
-            return Err(USBError::Other("MJPEG format descriptor too short".into()));
+            Err("MJPEG format descriptor too short")?;
         }
 
         let format_index = data[3];
@@ -732,9 +728,7 @@ impl UvcDevice {
     /// 解析未压缩格式描述符
     fn parse_uncompressed_format(&self, data: &[u8]) -> Result<Vec<VideoFormat>, USBError> {
         if data.len() < 27 {
-            return Err(USBError::Other(
-                "Uncompressed format descriptor too short".into(),
-            ));
+            return Err("Uncompressed format descriptor too short".into());
         }
 
         let format_index = data[3];
@@ -826,7 +820,7 @@ impl UvcDevice {
         let current_format = self
             .current_format
             .clone()
-            .ok_or(USBError::Other("No format selected".into()))?;
+            .ok_or(USBError::from("No format selected"))?;
 
         // 参考 libuvc 的实现，根据 dwMaxPayloadTransferSize 选择合适的 alternate setting
         let config = &self.device.configurations()[0];
@@ -895,7 +889,7 @@ impl UvcDevice {
         let endpoint_kind = self.device.get_endpoint(endpoint_address).await?;
         let ep = match endpoint_kind {
             EndpointKind::IsochronousIn(ep) => ep,
-            _ => return Err(USBError::Other("Unexpected endpoint type".into())),
+            _ => return Err("Unexpected endpoint type".into()),
         };
 
         debug!("Starting video streaming");
@@ -1015,7 +1009,7 @@ impl UvcDevice {
         let (format_index, frame_index) =
             self.find_format_indices(&formats, format).ok_or_else(|| {
                 debug!("Failed to find matching format for: {format:?}");
-                USBError::Other("No matching format found".into())
+                USBError::from("No matching format found")
             })?;
 
         // 计算帧间隔 (100ns 单位)，参考 libuvc 的计算方式
@@ -1229,7 +1223,7 @@ impl UvcDevice {
     /// 解析 StreamControl 响应
     fn parse_stream_control(&self, data: &[u8]) -> Result<StreamControl, USBError> {
         if data.len() < 26 {
-            return Err(USBError::Other("Stream control response too short".into()));
+            return Err("Stream control response too short".into());
         }
 
         let hint = u16::from_le_bytes([data[0], data[1]]);

@@ -78,9 +78,7 @@ fn libusb_get_configuration_descriptors(
     let desc = unsafe { desc.assume_init() };
 
     if desc.is_null() {
-        return Err(usb_if::host::USBError::Other(
-            "Failed to get configuration descriptor".into(),
-        ));
+        Err(anyhow!("Failed to get configuration descriptor",))?;
     }
 
     let desc = unsafe { &*desc };

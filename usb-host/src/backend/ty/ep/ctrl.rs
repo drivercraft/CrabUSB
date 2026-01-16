@@ -86,8 +86,7 @@ impl EndpointControl {
         self.get_descriptor(DescriptorType::DEVICE, 0, 0, &mut buff)
             .await?;
         trace!("data: {buff:?}");
-        let desc = DeviceDescriptor::parse(&buff)
-            .ok_or(USBError::Other("device descriptor parse err".into()))?;
+        let desc = DeviceDescriptor::parse(&buff).ok_or(anyhow!("device descriptor parse err"))?;
 
         Ok(desc)
     }
@@ -126,7 +125,7 @@ impl EndpointControl {
             .await?;
 
         let parsed_config = ConfigurationDescriptor::parse(&full_data)
-            .ok_or(USBError::Other("config descriptor parse err".into()))?;
+            .ok_or(anyhow!("config descriptor parse err"))?;
 
         Ok(parsed_config)
     }

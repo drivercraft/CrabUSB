@@ -1,8 +1,5 @@
 use num_enum::{FromPrimitive, IntoPrimitive};
 
-pub mod sync;
-pub mod wait;
-
 #[repr(u8)]
 /// The direction of the data transfer.
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]

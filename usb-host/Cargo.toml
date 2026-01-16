@@ -33,6 +33,7 @@ usb-if = {workspace = true}
 xhci = "0.9"
 trait-ffi = "0.2.4"
 enum_dispatch = "0.3"
+anyhow = { version = "1", default-features = false}
 
 [target.'cfg(not(target_os = "none"))'.dependencies]
 libusb1-sys = { version = "0.7", optional = true}
