@@ -5,7 +5,7 @@
 use crab_usb::USBHost;
 use crab_uvc::{UvcDevice, VideoControlEvent};
 use log::{debug, error, info, warn};
-use std::{hint::spin_loop, sync::Arc, thread, time::Duration};
+use std::{sync::Arc, time::Duration};
 use uvc_frame_parser::Parser;
 
 #[tokio::main]

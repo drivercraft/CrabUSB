@@ -246,10 +246,7 @@ impl EndpointOp for Endpoint {
         mb();
         self.doorbell();
 
-        Ok(TransferHandle {
-            id: handle.0.raw(),
-            endpoint: self,
-        })
+        Ok(TransferHandle::new(handle.0.raw(), self))
     }
 
     fn query_transfer(

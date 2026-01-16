@@ -111,6 +111,12 @@ pub struct TransferHandle<'a> {
     pub(crate) endpoint: &'a mut dyn EndpointOp,
 }
 
+impl<'a> TransferHandle<'a> {
+    pub fn new(id: u64, endpoint: &'a mut dyn EndpointOp) -> Self {
+        Self { id, endpoint }
+    }
+}
+
 impl<'a> Future for TransferHandle<'a> {
     type Output = Result<Transfer, TransferError>;
 
