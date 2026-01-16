@@ -658,7 +658,16 @@ impl EventHandler {
 
 impl EventHandlerOp for EventHandler {
     fn handle_event(&self) -> Event {
-        let res;
+        let mut res = Event::Nothing;
+        let sts = self.reg().operational.usbsts.read_volatile();
+        if !sts.event_interrupt() {
+            return res;
+        }
+
+        self.reg().operational.usbsts.update_volatile(|r| {
+            r.clear_event_interrupt();
+        });
+
         let erdp = {
             res = self.clean_event_ring();
             self.event_ring().erdp()
