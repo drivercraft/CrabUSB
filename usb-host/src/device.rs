@@ -1,7 +1,9 @@
-use alloc::boxed::Box;
-use core::any::Any;
-use core::fmt::Debug;
-use core::fmt::Display;
+use alloc::{boxed::Box, string::String};
+use core::{
+    any::Any,
+    fmt::{Debug, Display},
+};
+
 use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, InterfaceDescriptor, LanguageId,
