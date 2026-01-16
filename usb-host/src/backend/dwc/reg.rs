@@ -848,6 +848,7 @@ register_bitfields![u32,
 ];
 
 /// DWC3 寄存器访问器
+#[derive(Clone)]
 pub struct Dwc3Regs {
     base: usize,
 }
