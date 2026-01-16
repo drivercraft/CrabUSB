@@ -660,6 +660,7 @@ impl EventHandlerOp for EventHandler {
     fn handle_event(&self) -> Event {
         let mut res = Event::Nothing;
         let sts = self.reg().operational.usbsts.read_volatile();
+
         if !sts.event_interrupt() {
             return res;
         }
@@ -668,21 +669,24 @@ impl EventHandlerOp for EventHandler {
             r.clear_event_interrupt();
         });
 
+        // 【关键】GIC 中断模式下，需要手动清除 IMAN.IP
+        // 参考: Linux xhci_irq() in xhci-ring.c:3054-3059
+        let mut irq = self.reg().interrupter_register_set.interrupter_mut(0);
+        irq.iman.update_volatile(|r| {
+            r.clear_interrupt_pending();
+        });
+
         let erdp = {
             res = self.clean_event_ring();
             self.event_ring().erdp()
         };
         {
-            let mut irq = self.reg().interrupter_register_set.interrupter_mut(0);
             irq.erdp.update_volatile(|r| {
                 r.set_event_ring_dequeue_pointer(erdp);
                 r.clear_event_handler_busy();
             });
-
-            irq.iman.update_volatile(|r| {
-                r.clear_interrupt_pending();
-            });
         }
+
         res
     }
 }

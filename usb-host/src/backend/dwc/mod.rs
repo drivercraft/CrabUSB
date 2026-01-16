@@ -657,7 +657,10 @@ impl BackendOp for Dwc {
     }
 
     fn create_event_handler(&mut self) -> Box<dyn super::ty::EventHandlerOp> {
-        self.xhci.create_event_handler()
+        Box::new(DwcEventHandler {
+            xhci: self.xhci.create_event_handler(),
+            _dwc: self.dwc_regs.clone(),
+        })
     }
 }
 
@@ -672,5 +675,19 @@ impl Deref for Dwc {
 impl DerefMut for Dwc {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.params
+    }
+}
+
+pub struct DwcEventHandler {
+    xhci: Box<dyn super::ty::EventHandlerOp>,
+    _dwc: Dwc3Regs,
+}
+impl super::ty::EventHandlerOp for DwcEventHandler {
+    fn handle_event(&self) -> crate::Event {
+        // let cnt = self.dwc.globals().gevnt[0].count.get();
+        // debug!("DWC3 Event Handler: GEVNT[0] COUNT = {}", cnt);
+        // self.dwc.globals().gevnt[0].count.set(0);
+
+        self.xhci.handle_event()
     }
 }
