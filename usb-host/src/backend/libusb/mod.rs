@@ -17,9 +17,21 @@ pub struct Libusb {
 
 impl Libusb {
     pub fn new() -> Self {
-        Self {
-            ctx: context::Context::new().expect("Failed to create libusb context"),
-        }
+        let ctx = context::Context::new().expect("Failed to create libusb context");
+        let handle = Arc::downgrade(&ctx);
+
+        thread::spawn(move || {
+            trace!("Libusb event handling thread started");
+            while let Some(ctx) = handle.upgrade() {
+                if let Err(e) = ctx.handle_events() {
+                    error!("Libusb handle events error: {:?}", e);
+                }
+
+                trace!("Libusb event handling iteration complete");
+            }
+        });
+
+        Self { ctx }
     }
 
     async fn device_list(
@@ -58,19 +70,6 @@ impl BackendOp for Libusb {
     fn init<'a>(
         &'a mut self,
     ) -> futures::future::BoxFuture<'a, Result<(), usb_if::host::USBError>> {
-        let handle = Arc::downgrade(&self.ctx);
-
-        thread::spawn(move || {
-            trace!("Libusb event handling thread started");
-            while let Some(ctx) = handle.upgrade() {
-                if let Err(e) = ctx.handle_events() {
-                    error!("Libusb handle events error: {:?}", e);
-                }
-
-                trace!("Libusb event handling iteration complete");
-            }
-        });
-
         async { Ok(()) }.boxed()
     }
 
