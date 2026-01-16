@@ -2,7 +2,6 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::backend::ty::*;
-use crate::device::*;
 use crate::err::Result;
 use crate::{Mmio, backend::BackendOp};
 
@@ -14,6 +13,7 @@ pub use super::backend::{
     ty::ep::*,
     xhci::Xhci,
 };
+pub use crate::device::{Device, DeviceInfo};
 
 /// USB 主机控制器
 pub struct USBHost {
