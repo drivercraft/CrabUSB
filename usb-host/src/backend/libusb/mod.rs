@@ -23,6 +23,19 @@ impl Libusb {
             ctx: context::Context::new().expect("Failed to create libusb context"),
         }
     }
+
+    async fn device_list(
+        &mut self,
+    ) -> Result<Vec<Box<dyn super::ty::DeviceInfoOp>>, usb_if::host::USBError> {
+        let ctx = self.ctx.clone();
+        let devices = ctx.device_list()?;
+        let mut infos = Vec::new();
+        for dev in devices {
+            let info = device::DeviceInfo::new(dev, ctx.clone())?;
+            infos.push(Box::new(info) as Box<dyn super::ty::DeviceInfoOp>);
+        }
+        Ok(infos)
+    }
 }
 
 impl Default for Libusb {
@@ -54,7 +67,7 @@ impl BackendOp for Libusb {
         'a,
         Result<Vec<Box<dyn super::ty::DeviceInfoOp>>, usb_if::host::USBError>,
     > {
-        todo!()
+        async move { self.device_list().await }.boxed()
     }
 
     fn open_device<'a>(

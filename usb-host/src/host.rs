@@ -65,7 +65,9 @@ impl USBHost {
 
     pub async fn open_device(&mut self, dev: &DeviceInfo) -> Result<Device> {
         let device = self.backend.open_device(dev.inner.as_ref()).await?;
-        Ok(device.into())
+        let mut device: Device = device.into();
+        device.init().await?;
+        Ok(device)
     }
 }
 

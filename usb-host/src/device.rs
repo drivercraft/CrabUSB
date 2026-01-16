@@ -1,8 +1,12 @@
 use alloc::boxed::Box;
 use core::any::Any;
 use core::fmt::Debug;
+use core::fmt::Display;
 use usb_if::{
-    descriptor::ConfigurationDescriptor,
+    descriptor::{
+        ConfigurationDescriptor, DescriptorType, InterfaceDescriptor, LanguageId,
+        decode_string_descriptor,
+    },
     err::TransferError,
     host::{ControlSetup, USBError},
 };
@@ -22,6 +26,25 @@ impl DeviceInfo {
     pub fn configurations(&self) -> &[crate::ConfigurationDescriptor] {
         self.inner.configuration_descriptors()
     }
+
+    pub fn interface_descriptors<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = &'a InterfaceDescriptor> + 'a {
+        self.configurations().iter().flat_map(|config| {
+            config
+                .interfaces
+                .iter()
+                .flat_map(|interface| interface.alt_settings.first())
+        })
+    }
+
+    pub fn product_id(&self) -> u16 {
+        self.descriptor().product_id
+    }
+
+    pub fn vendor_id(&self) -> u16 {
+        self.descriptor().vendor_id
+    }
 }
 
 impl Debug for DeviceInfo {
@@ -34,8 +57,21 @@ impl Debug for DeviceInfo {
     }
 }
 
+impl Display for DeviceInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{:04x}:{:04x}",
+            self.inner.descriptor().vendor_id,
+            self.inner.descriptor().product_id
+        )
+    }
+}
+
 pub struct Device {
     pub(crate) inner: Box<dyn DeviceOp>,
+    lang_id: LanguageId,
+    manufacturer: Option<String>,
     current_interface: Option<(u8, u8)>,
 }
 
@@ -54,6 +90,8 @@ impl<T: DeviceOp> From<T> for Device {
         Self {
             inner: Box::new(inner),
             current_interface: None,
+            lang_id: LanguageId::default(),
+            manufacturer: None,
         }
     }
 }
@@ -63,11 +101,26 @@ impl From<Box<dyn DeviceOp>> for Device {
         Self {
             inner,
             current_interface: None,
+            lang_id: LanguageId::default(),
+            manufacturer: None,
         }
     }
 }
 
 impl Device {
+    pub(crate) async fn init(&mut self) -> Result<(), USBError> {
+        self.manufacturer = self.read_manufacturer().await;
+        Ok(())
+    }
+
+    pub fn product_id(&self) -> u16 {
+        self.descriptor().product_id
+    }
+
+    pub fn vendor_id(&self) -> u16 {
+        self.descriptor().vendor_id
+    }
+
     pub async fn claim_interface(&mut self, interface: u8, alternate: u8) -> Result<(), USBError> {
         trace!("Claiming interface {interface}, alternate {alternate}");
         self.inner.claim_interface(interface, alternate).await?;
@@ -83,12 +136,39 @@ impl Device {
         self.inner.configuration_descriptors()
     }
 
+    pub fn manufacturer(&self) -> Option<&str> {
+        self.manufacturer.as_deref()
+    }
+
     pub async fn set_configuration(&mut self, configuration_value: u8) -> crate::err::Result {
         self.inner.set_configuration(configuration_value).await
     }
 
     pub fn ep_ctrl(&mut self) -> &mut EndpointControl {
         self.inner.ep_ctrl()
+    }
+
+    async fn read_manufacturer(&mut self) -> Option<String> {
+        let idx = self.descriptor().manufacturer_string_index?;
+        self.string_descriptor(idx.get()).await.ok()
+    }
+
+    pub fn lang_id(&self) -> LanguageId {
+        self.lang_id
+    }
+
+    pub fn set_lang_id(&mut self, lang_id: LanguageId) {
+        self.lang_id = lang_id;
+    }
+
+    pub async fn string_descriptor(&mut self, index: u8) -> Result<String, USBError> {
+        let mut data = alloc::vec![0u8; 256];
+        let lang_id = self.lang_id();
+        self.ep_ctrl()
+            .get_descriptor(DescriptorType::STRING, index, lang_id.into(), &mut data)
+            .await?;
+        let res = decode_string_descriptor(&data).map_err(|e| USBError::Other(e.into()))?;
+        Ok(res)
     }
 
     pub async fn control_in(
@@ -188,5 +268,16 @@ impl Device {
             }
         }
         Err(USBError::NotFound)
+    }
+}
+
+impl Display for Device {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{:04x}:{:04x}",
+            self.inner.descriptor().vendor_id,
+            self.inner.descriptor().product_id
+        )
     }
 }

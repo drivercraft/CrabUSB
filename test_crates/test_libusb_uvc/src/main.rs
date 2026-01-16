@@ -4,7 +4,6 @@
 
 use crab_usb::USBHost;
 use crab_uvc::{UvcDevice, VideoControlEvent};
-use env_logger;
 use log::{debug, error, info, warn};
 use std::{hint::spin_loop, sync::Arc, thread, time::Duration};
 use uvc_frame_parser::Parser;
@@ -18,16 +17,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting UVC video capture example");
 
     // 创建 USB 主机
-    let mut host = USBHost::new_libusb();
-    let event_handler = host.event_handler();
-    thread::spawn(move || {
-        while event_handler.handle_event() {
-            spin_loop();
-        }
-    });
+    let mut host = USBHost::new_libusb().unwrap();
 
     // 扫描连接的设备
-    let devices = host.device_list().await?;
+    let devices = host.probe_devices().await?;
 
     // 查找 UVC 设备
     let mut uvc_device = None;
@@ -40,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if UvcDevice::check(&device_info) {
             info!("Found UVC device!");
-            let device = device_info.open().await?;
+            let device = host.open_device(&device_info).await?;
             uvc_device = Some(UvcDevice::new(device).await?);
             break;
         }

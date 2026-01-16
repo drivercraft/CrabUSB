@@ -14,7 +14,10 @@ use usb_if::{
     transfer::{BmRequestType, Direction},
 };
 
-use crate::backend::{libusb::context::Context, ty::DeviceInfoOp};
+use crate::backend::{
+    libusb::context::Context,
+    ty::{DeviceInfoOp, DeviceOp},
+};
 use crate::err::*;
 
 pub struct DeviceInfo {
@@ -179,7 +182,6 @@ fn libusb_get_configuration_descriptors(
 
 pub struct Device {
     handle: Arc<DeviceHandle>,
-    ctrl: EPControl,
 }
 
 unsafe impl Send for Device {}
@@ -187,95 +189,47 @@ unsafe impl Send for Device {}
 impl Device {
     pub(crate) fn new(raw: *mut libusb_device_handle, ctx: Arc<Context>) -> Self {
         let handle = Arc::new(DeviceHandle { raw, _ctx: ctx });
-        let ctrl = EPControl::new(32, handle.clone());
-        Self { ctrl, handle }
+        Self { handle }
     }
 }
 
-impl usb_if::host::Device for Device {
-    fn set_configuration(
-        &mut self,
-        configuration: u8,
-    ) -> futures::future::LocalBoxFuture<'_, Result<(), usb_if::host::USBError>> {
-        async move {
-            usb!(libusb_set_configuration(
-                self.handle.raw(),
-                configuration as _
-            ))?;
-            Ok(())
-        }
-        .boxed_local()
+impl DeviceOp for Device {
+    fn backend_name(&self) -> &str {
+        "libusb"
     }
 
-    fn get_configuration(
-        &mut self,
-    ) -> futures::future::LocalBoxFuture<'_, Result<u8, usb_if::host::USBError>> {
-        async move {
-            let mut config = 0;
-            usb!(libusb_get_configuration(self.handle.raw(), &mut config))?;
-            Ok(config as _)
-        }
-        .boxed_local()
+    fn descriptor(&self) -> &DeviceDescriptor {
+        todo!()
     }
 
-    fn claim_interface(
-        &mut self,
+    fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
+        todo!()
+    }
+
+    fn claim_interface<'a>(
+        &'a mut self,
         interface: u8,
         alternate: u8,
-    ) -> futures::future::LocalBoxFuture<
-        '_,
-        Result<Box<dyn usb_if::host::Interface>, usb_if::host::USBError>,
-    > {
-        async move {
-            let res = usb!(libusb_kernel_driver_active(
-                self.handle.raw(),
-                interface as _
-            ))?;
-
-            if res == 1 {
-                usb!(libusb_detach_kernel_driver(
-                    self.handle.raw(),
-                    interface as _
-                ))?;
-                debug!("Kernel driver detached for interface {interface}");
-            }
-
-            usb!(libusb_claim_interface(self.handle.raw(), interface as _))?;
-
-            debug!("Interface {interface} claimed successfully");
-            if alternate != 0 {
-                usb!(libusb_set_interface_alt_setting(
-                    self.handle.raw(),
-                    interface as _,
-                    alternate as _,
-                ))?;
-                debug!("Interface {interface} set to alternate setting {alternate} successfully");
-            }
-
-            Ok(Box::new(InterfaceImpl::new(
-                self.handle.raw(),
-                self.ctrl.clone(),
-                interface,
-                alternate,
-            )) as Box<dyn usb_if::host::Interface>)
-        }
-        .boxed_local()
+    ) -> futures::future::BoxFuture<'a, std::result::Result<(), USBError>> {
+        todo!()
     }
 
-    fn control_in<'a>(
-        &mut self,
-        setup: usb_if::host::ControlSetup,
-        data: &'a mut [u8],
-    ) -> ResultTransfer<'a> {
-        self.ctrl.control_in(setup, data)
+    fn ep_ctrl(&mut self) -> &mut crate::EndpointControl {
+        todo!()
     }
 
-    fn control_out<'a>(
+    fn set_configuration<'a>(
+        &'a mut self,
+        configuration_value: u8,
+    ) -> futures::future::BoxFuture<'a, std::result::Result<(), USBError>> {
+        todo!()
+    }
+
+    fn get_endpoint(
         &mut self,
-        setup: usb_if::host::ControlSetup,
-        data: &'a [u8],
-    ) -> ResultTransfer<'a> {
-        self.ctrl.control_out(setup, data)
+        desc: &usb_if::descriptor::EndpointDescriptor,
+    ) -> std::result::Result<crate::backend::ty::ep::EndpointBase, USBError> {
+        todo!()
     }
 }
 
@@ -296,98 +250,6 @@ fn libusb_device_desc_to_desc(
         max_packet_size_0: desc.bMaxPacketSize0,
         device_version: desc.bcdDevice,
     })
-}
-
-#[derive(Clone)]
-pub struct EPControl {
-    queue: Arc<Mutex<super::queue::Queue>>,
-    dev: Arc<DeviceHandle>,
-}
-
-unsafe impl Send for EPControl {}
-unsafe impl Sync for EPControl {}
-
-impl EPControl {
-    pub fn new(queue_size: usize, dev: Arc<DeviceHandle>) -> Self {
-        Self {
-            queue: Arc::new(Mutex::new(super::queue::Queue::new(queue_size))),
-            dev,
-        }
-    }
-
-    pub fn control_in<'a>(&self, setup: ControlSetup, data: &'a mut [u8]) -> ResultTransfer<'a> {
-        let mut queue = self.queue.lock().unwrap();
-        let len = data.len();
-        let dest_addr = data.as_mut_ptr() as usize;
-        queue.submit(|trans, on_ready| unsafe {
-            let setup_size = size_of::<libusb_control_setup>();
-            trans.buff.resize(setup_size + data.len(), 0);
-            let src_addr = trans.buff.as_mut_ptr();
-
-            on_ready.param1 = src_addr as *mut ();
-            on_ready.param2 = dest_addr as *mut ();
-            on_ready.param3 = len as *mut ();
-            on_ready.on_ready = |param1, param2, param3| {
-                let src_addr = param1 as *mut u8;
-                let dest_addr = param2 as *mut u8;
-                let len = param3 as usize;
-
-                std::ptr::copy_nonoverlapping(
-                    src_addr.add(size_of::<libusb_control_setup>()),
-                    dest_addr,
-                    len,
-                );
-            };
-
-            libusb_fill_control_setup(
-                src_addr,
-                BmRequestType::new(Direction::In, setup.request_type, setup.recipient).into(),
-                setup.request.into(),
-                setup.value,
-                setup.index,
-                data.len() as _,
-            );
-
-            libusb_fill_control_transfer(
-                trans.ptr,
-                self.dev.raw(),
-                src_addr,
-                transfer_callback,
-                null_mut(),
-                1000,
-            );
-        })
-    }
-
-    pub fn control_out<'a>(&self, setup: ControlSetup, data: &'a [u8]) -> ResultTransfer<'a> {
-        let mut queue = self.queue.lock().unwrap();
-
-        queue.submit(|trans, _| unsafe {
-            let setup_size = size_of::<libusb_control_setup>();
-            trans.buff.resize(setup_size + data.len(), 0);
-            let src_addr = trans.buff.as_mut_ptr();
-
-            trans.buff[setup_size..].copy_from_slice(data);
-
-            libusb_fill_control_setup(
-                src_addr,
-                BmRequestType::new(Direction::Out, setup.request_type, setup.recipient).into(),
-                setup.request.into(),
-                setup.value,
-                setup.index,
-                data.len() as _,
-            );
-
-            libusb_fill_control_transfer(
-                trans.ptr,
-                self.dev.raw(),
-                src_addr,
-                transfer_callback,
-                null_mut(),
-                1000,
-            );
-        })
-    }
 }
 
 extern "system" fn transfer_callback(_transfer: *mut libusb_transfer) {}
