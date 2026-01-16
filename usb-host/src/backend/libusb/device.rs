@@ -1,30 +1,25 @@
-use core::{mem::MaybeUninit, num::NonZero, ptr::null_mut};
-use std::{
-    fmt::Debug,
-    sync::{Arc, Mutex},
-};
+use core::{mem::MaybeUninit, num::NonZero};
+use std::{fmt::Debug, sync::Arc};
 
 use futures::FutureExt;
 use libusb1_sys::*;
-use usb_if::{
-    descriptor::{
-        ConfigurationDescriptor, DeviceDescriptor, InterfaceDescriptor, InterfaceDescriptors,
-    },
-    host::{ControlSetup, ResultTransfer},
-    transfer::{BmRequestType, Direction},
+use usb_if::descriptor::{
+    ConfigurationDescriptor, DeviceDescriptor, InterfaceDescriptor, InterfaceDescriptors,
 };
 
-use crate::backend::{
-    libusb::context::Context,
-    ty::{DeviceInfoOp, DeviceOp},
-};
 use crate::err::*;
+use crate::{
+    EndpointBase,
+    backend::{
+        libusb::{context::Context, endpoint::EndpointImpl},
+        ty::{DeviceInfoOp, DeviceOp},
+    },
+};
 
 pub struct DeviceInfo {
     pub(crate) raw: *mut libusb_device,
     desc: DeviceDescriptor,
     configs: Vec<ConfigurationDescriptor>,
-    ctx: Arc<Context>,
 }
 
 impl Debug for DeviceInfo {
@@ -37,7 +32,7 @@ unsafe impl Send for DeviceInfo {}
 unsafe impl Sync for DeviceInfo {}
 
 impl DeviceInfo {
-    pub(crate) fn new(raw: *mut libusb_device, ctx: Arc<Context>) -> Result<Self> {
+    pub(crate) fn new(raw: *mut libusb_device) -> Result<Self> {
         let raw = unsafe { libusb_ref_device(raw) };
         let mut desc: MaybeUninit<libusb_device_descriptor> = MaybeUninit::uninit();
         usb!(libusb_get_device_descriptor(raw, desc.as_mut_ptr()))?;
@@ -48,12 +43,7 @@ impl DeviceInfo {
             let config_desc = libusb_get_configuration_descriptors(raw, i)?;
             configs.push(config_desc);
         }
-        Ok(Self {
-            raw,
-            ctx,
-            desc,
-            configs,
-        })
+        Ok(Self { raw, desc, configs })
     }
 }
 
@@ -182,14 +172,58 @@ fn libusb_get_configuration_descriptors(
 
 pub struct Device {
     handle: Arc<DeviceHandle>,
+    desc: DeviceDescriptor,
+    configs: Vec<ConfigurationDescriptor>,
 }
 
 unsafe impl Send for Device {}
 
 impl Device {
-    pub(crate) fn new(raw: *mut libusb_device_handle, ctx: Arc<Context>) -> Self {
-        let handle = Arc::new(DeviceHandle { raw, _ctx: ctx });
-        Self { handle }
+    pub(crate) fn new(info: &DeviceInfo, ctx: Arc<Context>) -> Result<Self> {
+        let raw = info.raw;
+        let mut handle = std::ptr::null_mut();
+        usb!(libusb_open(raw, &mut handle))?;
+
+        let desc = info.desc.clone();
+        let configs = info.configs.clone();
+
+        let handle = Arc::new(DeviceHandle {
+            raw: handle,
+            _ctx: ctx,
+        });
+        Ok(Self {
+            handle,
+            desc,
+            configs,
+        })
+    }
+
+    async fn _claim_interface(&mut self, interface: u8, alternate: u8) -> Result<()> {
+        let res = usb!(libusb_kernel_driver_active(
+            self.handle.raw(),
+            interface as _
+        ))?;
+
+        if res == 1 {
+            usb!(libusb_detach_kernel_driver(
+                self.handle.raw(),
+                interface as _
+            ))?;
+            debug!("Kernel driver detached for interface {interface}");
+        }
+
+        usb!(libusb_claim_interface(self.handle.raw(), interface as _))?;
+
+        debug!("Interface {interface} claimed successfully");
+        if alternate != 0 {
+            usb!(libusb_set_interface_alt_setting(
+                self.handle.raw(),
+                interface as _,
+                alternate as _,
+            ))?;
+            debug!("Interface {interface} set to alternate setting {alternate} successfully");
+        }
+        Ok(())
     }
 }
 
@@ -199,11 +233,11 @@ impl DeviceOp for Device {
     }
 
     fn descriptor(&self) -> &DeviceDescriptor {
-        todo!()
+        &self.desc
     }
 
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
-        todo!()
+        &self.configs
     }
 
     fn claim_interface<'a>(
@@ -211,7 +245,7 @@ impl DeviceOp for Device {
         interface: u8,
         alternate: u8,
     ) -> futures::future::BoxFuture<'a, std::result::Result<(), USBError>> {
-        todo!()
+        async move { self._claim_interface(interface, alternate).await }.boxed()
     }
 
     fn ep_ctrl(&mut self) -> &mut crate::EndpointControl {
@@ -222,14 +256,22 @@ impl DeviceOp for Device {
         &'a mut self,
         configuration_value: u8,
     ) -> futures::future::BoxFuture<'a, std::result::Result<(), USBError>> {
-        todo!()
+        async move {
+            usb!(libusb_set_configuration(
+                self.handle.raw(),
+                configuration_value as _
+            ))?;
+            Ok(())
+        }
+        .boxed()
     }
 
     fn get_endpoint(
         &mut self,
         desc: &usb_if::descriptor::EndpointDescriptor,
     ) -> std::result::Result<crate::backend::ty::ep::EndpointBase, USBError> {
-        todo!()
+        let ep = EndpointImpl::new(self.handle.clone(), desc.address);
+        Ok(EndpointBase::new(ep))
     }
 }
 
@@ -251,8 +293,6 @@ fn libusb_device_desc_to_desc(
         device_version: desc.bcdDevice,
     })
 }
-
-extern "system" fn transfer_callback(_transfer: *mut libusb_transfer) {}
 
 pub struct DeviceHandle {
     raw: *mut libusb_device_handle,

@@ -1,17 +1,15 @@
-use std::{
-    sync::{Arc, Weak},
-    thread,
-};
+use std::{sync::Arc, thread};
 
 use futures::FutureExt;
 
-use crate::backend::{BackendOp, ty::EventHandlerOp};
+use crate::backend::BackendOp;
 
 #[macro_use]
 mod err;
 
 mod context;
 mod device;
+mod endpoint;
 
 pub struct Libusb {
     ctx: Arc<context::Context>,
@@ -31,10 +29,22 @@ impl Libusb {
         let devices = ctx.device_list()?;
         let mut infos = Vec::new();
         for dev in devices {
-            let info = device::DeviceInfo::new(dev, ctx.clone())?;
+            let info = device::DeviceInfo::new(dev)?;
             infos.push(Box::new(info) as Box<dyn super::ty::DeviceInfoOp>);
         }
         Ok(infos)
+    }
+
+    async fn _open_device(
+        &mut self,
+        dev: &dyn super::ty::DeviceInfoOp,
+    ) -> Result<Box<dyn super::ty::DeviceOp>, usb_if::host::USBError> {
+        let dev_info = (dev as &dyn core::any::Any)
+            .downcast_ref::<device::DeviceInfo>()
+            .unwrap();
+
+        let device = device::Device::new(dev_info, self.ctx.clone())?;
+        Ok(Box::new(device) as Box<dyn super::ty::DeviceOp>)
     }
 }
 
@@ -77,7 +87,7 @@ impl BackendOp for Libusb {
         'a,
         Result<Box<dyn super::ty::DeviceOp>, usb_if::host::USBError>,
     > {
-        todo!()
+        async move { self._open_device(dev).await }.boxed_local()
     }
 
     fn create_event_handler(&mut self) -> Box<dyn super::ty::EventHandlerOp> {
