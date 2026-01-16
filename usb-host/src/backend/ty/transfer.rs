@@ -10,6 +10,15 @@ pub enum TransferKind {
     Isochronous { num_pkgs: usize },
 }
 
+impl TransferKind {
+    pub fn get_control(&self) -> Option<&ControlSetup> {
+        match self {
+            TransferKind::Control(setup) => Some(setup),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Transfer {
     pub kind: TransferKind,

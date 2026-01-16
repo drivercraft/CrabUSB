@@ -123,7 +123,7 @@ fn libusb_get_configuration_descriptors(
                 };
 
                 endpoints.push(usb_if::descriptor::EndpointDescriptor {
-                    address: ep_desc.bEndpointAddress & 0x0F,
+                    address: ep_desc.bEndpointAddress, // 保留完整的端点地址（包括方向位）
                     max_packet_size: ep_desc.wMaxPacketSize & 0x7FF,
                     transfer_type,
                     direction,
@@ -131,6 +131,16 @@ fn libusb_get_configuration_descriptors(
                     interval: ep_desc.bInterval,
                 });
             }
+
+            // 提取类特定描述符（如 UVC 的格式和帧描述符）
+            let extra = if !alt_desc.extra.is_null() && alt_desc.extra_length > 0 {
+                unsafe {
+                    core::slice::from_raw_parts(alt_desc.extra, alt_desc.extra_length as usize)
+                        .to_vec()
+                }
+            } else {
+                Vec::new()
+            };
 
             alt_settings.push(InterfaceDescriptor {
                 interface_number: alt_desc.bInterfaceNumber,
@@ -142,6 +152,7 @@ fn libusb_get_configuration_descriptors(
                 string: None,
                 num_endpoints: alt_desc.bNumEndpoints,
                 endpoints,
+                extra,
             });
         }
 

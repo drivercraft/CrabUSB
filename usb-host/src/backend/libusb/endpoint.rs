@@ -1,4 +1,3 @@
-use core::ptr::null_mut;
 use std::{
     collections::HashMap,
     sync::{Arc, Weak, atomic::AtomicBool},
@@ -6,14 +5,13 @@ use std::{
 
 use futures::task::AtomicWaker;
 use libusb1_sys::{
-    libusb_device_handle, libusb_fill_bulk_transfer, libusb_fill_control_setup,
-    libusb_fill_control_transfer, libusb_fill_interrupt_transfer, libusb_fill_iso_transfer,
-    libusb_get_iso_packet_buffer_simple, libusb_submit_transfer, libusb_transfer,
+    libusb_control_transfer_get_data, libusb_fill_bulk_transfer, libusb_fill_control_setup,
+    libusb_fill_control_transfer, libusb_fill_iso_transfer, libusb_submit_transfer,
+    libusb_transfer,
 };
 use log::trace;
 use usb_if::{
     err::TransferError,
-    host::USBError,
     transfer::{BmRequestType, Direction},
 };
 
@@ -44,42 +42,69 @@ impl EndpointImpl {
         &mut self,
         transfer: Transfer,
     ) -> Result<Arc<TransferHandleRaw>, TransferError> {
-        let trans_ptr = unsafe { libusb1_sys::libusb_alloc_transfer(0) };
+        // 对于 ISO transfer，需要指定 iso_packets 数量
+        let iso_packets = match &transfer.kind {
+            TransferKind::Isochronous { num_pkgs } => *num_pkgs as i32,
+            _ => 0,
+        };
+
+        let trans_ptr = unsafe { libusb1_sys::libusb_alloc_transfer(iso_packets) };
         if trans_ptr.is_null() {
             return Err(TransferError::Other("no memory".into()));
         }
 
         // 保存类型和方向
-        let kind = transfer.kind.clone();
         let direction = transfer.direction;
+        let mut buffer = transfer.buffer_addr as *mut u8;
+        let data_len = transfer.buffer_len;
+        let timeout = 1000; // TODO: make it configurable
+
+        // 判断是否为控制传输
+        let temp_buff = if matches!(transfer.kind, TransferKind::Control(_)) {
+            let total_len = 8 + data_len;
+            vec![0u8; total_len]
+        } else {
+            vec![]
+        };
+
+        let temp_buff_ptr = temp_buff.as_ptr() as *mut u8;
 
         let trans_handle = Arc::new(TransferHandleRaw {
             transfer: trans_ptr,
-            kind,
-            direction,
+            origin: transfer,
             waker: AtomicWaker::new(),
             ok: AtomicBool::new(false),
+            _temp_buff: temp_buff,
         });
 
         let dev_handle = self.dev.raw();
-        let buffer = transfer.buffer_addr as *mut u8;
-        let length = transfer.buffer_len as i32;
-        let timeout = 1000; // TODO: make it configurable
         let weak = Arc::downgrade(&trans_handle);
         let user_data = Weak::into_raw(weak) as *mut core::ffi::c_void;
 
-        match transfer.kind {
+        match &trans_handle.origin.kind {
             TransferKind::Control(setup) => {
                 unsafe {
+                    buffer = temp_buff_ptr;
+
+                    // OUT 传输：复制用户数据到 buffer[8..]
+                    if direction == Direction::Out && data_len > 0 {
+                        core::ptr::copy_nonoverlapping(
+                            trans_handle.origin.buffer_addr as *const u8,
+                            buffer.add(8),
+                            data_len,
+                        );
+                    }
+
+                    // 填充 setup 包到 buffer[0..8]
                     libusb_fill_control_setup(
                         buffer,
-                        BmRequestType::new(transfer.direction, setup.request_type, setup.recipient)
-                            .into(),
+                        BmRequestType::new(direction, setup.request_type, setup.recipient).into(),
                         setup.request.into(),
                         setup.value,
                         setup.index,
-                        length as _,
+                        data_len as _, // wLength = 数据长度
                     );
+
                     libusb_fill_control_transfer(
                         trans_ptr,
                         dev_handle,
@@ -97,7 +122,7 @@ impl EndpointImpl {
                         dev_handle,
                         self.address,
                         buffer,
-                        length,
+                        data_len as i32,
                         transfer_callback,
                         user_data,
                         timeout,
@@ -111,7 +136,7 @@ impl EndpointImpl {
                         dev_handle,
                         self.address,
                         buffer,
-                        length,
+                        data_len as i32,
                         transfer_callback,
                         user_data,
                         timeout,
@@ -119,13 +144,18 @@ impl EndpointImpl {
                 };
             }
             TransferKind::Isochronous { num_pkgs } => {
+                let num_pkgs = *num_pkgs;
+                trace!(
+                    "Filling ISO transfer: buff@{:p} num_pkgs={}, data_len={}",
+                    buffer, num_pkgs, data_len
+                );
                 unsafe {
                     libusb_fill_iso_transfer(
                         trans_ptr,
                         dev_handle,
                         self.address,
                         buffer,
-                        length,
+                        data_len as i32,
                         num_pkgs as _,
                         transfer_callback,
                         user_data,
@@ -134,7 +164,7 @@ impl EndpointImpl {
                 };
 
                 // 设置每个 ISO packet 的长度，防止溢出
-                let packet_size = length / num_pkgs as i32;
+                let packet_size = data_len as i32 / num_pkgs as i32;
                 for i in 0..num_pkgs {
                     let packet = unsafe { &mut *(*trans_ptr).iso_packet_desc.as_mut_ptr().add(i) };
                     packet.length = packet_size as u32;
@@ -189,10 +219,10 @@ impl EndpointOp for EndpointImpl {
 
 struct TransferHandleRaw {
     transfer: *mut libusb_transfer,
-    kind: TransferKind,
-    direction: Direction,
+    origin: Transfer,
     ok: AtomicBool,
     waker: AtomicWaker,
+    _temp_buff: Vec<u8>, // 用于控制传输的临时 buffer，保存 setup 包 + 数据
 }
 
 unsafe impl Send for TransferHandleRaw {}
@@ -209,15 +239,22 @@ impl TransferHandleRaw {
         transfer_status_to_result(unsafe { (*self.transfer).status })?;
         let trans_raw = unsafe { &*self.transfer };
 
-        let trans = crate::backend::ty::transfer::Transfer {
-            kind: self.kind.clone(),
-            direction: self.direction,
-            buffer_addr: trans_raw.buffer as usize,
-            buffer_len: trans_raw.length as usize,
-            transfer_len: trans_raw.actual_length as usize,
-        };
+        if matches!(self.origin.kind, TransferKind::Control(_)) {
+            // 控制传输，提取数据部分
+            let data_ptr = unsafe { libusb_control_transfer_get_data(self.transfer) };
+            let data_len = trans_raw.actual_length as usize;
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    data_ptr,
+                    self.origin.buffer_addr as *mut u8,
+                    data_len,
+                );
+            }
+        }
 
-        Ok(trans)
+        let mut out = self.origin.clone();
+        out.transfer_len = trans_raw.actual_length as usize;
+        Ok(out)
     }
 
     fn id(&self) -> u64 {
@@ -228,6 +265,7 @@ impl TransferHandleRaw {
 impl Drop for TransferHandleRaw {
     fn drop(&mut self) {
         unsafe {
+            trace!("Freeing libusb transfer {:p}", self.transfer);
             libusb1_sys::libusb_free_transfer(self.transfer);
         }
     }
@@ -243,6 +281,7 @@ extern "system" fn transfer_callback(transfer: *mut libusb_transfer) {
 
     if let Some(trans_handle) = weak.upgrade() {
         trace!("libusb transfer callback called, transfer={:p}", transfer);
+
         trans_handle
             .ok
             .store(true, std::sync::atomic::Ordering::Release);

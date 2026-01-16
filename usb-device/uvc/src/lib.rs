@@ -320,6 +320,12 @@ impl UvcDevice {
             .claim_interface(video_control_info.0, video_control_info.1)
             .await?;
 
+        // 声明 video streaming 接口（使用 alt setting 0，参考 libuvc）
+        // libuvc 在 uvc_scan_streaming 中也需要先 claim VS 接口
+        if let Some((vs_num, _vs_alt)) = video_streaming_info {
+            device.claim_interface(vs_num, 0).await?;
+        }
+
         Ok(Self {
             device,
             video_streaming_interface_num: video_streaming_info
@@ -336,37 +342,43 @@ impl UvcDevice {
     pub async fn get_supported_formats(&mut self) -> Result<Vec<VideoFormat>, USBError> {
         let mut formats = Vec::new();
 
-        // 获取完整的配置描述符来解析VS接口的额外描述符
+        // 从缓存的配置描述符中解析 VS 接口的 extra 数据
+        // 参考 libuvc: uvc_scan_streaming() 使用 if_desc->extra 获取类特定描述符
         let vs_interface_num = self.video_streaming_interface_num;
-        trace!("Parsing VS interface {vs_interface_num} descriptors");
+        trace!("Parsing VS interface {vs_interface_num} descriptors from cached config");
 
-        // 首先尝试通过GET_DESCRIPTOR控制请求获取完整的配置描述符
-        match self.get_full_configuration_descriptor().await {
-            Ok(config_data) => {
-                trace!(
-                    "Got full configuration descriptor: {} bytes",
-                    config_data.len()
-                );
-
-                // 解析配置描述符中的VS接口部分
-                if let Ok(parsed_formats) =
-                    self.parse_vs_interface_descriptors(&config_data, vs_interface_num)
-                    && !parsed_formats.is_empty()
-                {
-                    trace!(
-                        "Parsed {} formats from VS interface descriptors",
-                        parsed_formats.len()
-                    );
-                    formats.extend(parsed_formats);
+        let configs = self.device.configurations();
+        for config in configs {
+            for iface in &config.interfaces {
+                if iface.interface_number == vs_interface_num {
+                    // 遍历所有 alternate settings，收集 extra 数据
+                    for alt_setting in &iface.alt_settings {
+                        if !alt_setting.extra.is_empty() {
+                            debug!(
+                                "Found {} bytes of extra data in VS interface alt setting {}",
+                                alt_setting.extra.len(),
+                                alt_setting.alternate_setting
+                            );
+                            // 解析 extra 数据中的格式描述符
+                            if let Ok(parsed_formats) =
+                                self.parse_format_descriptors(&alt_setting.extra)
+                            {
+                                trace!(
+                                    "Parsed {} formats from alt setting {}",
+                                    parsed_formats.len(),
+                                    alt_setting.alternate_setting
+                                );
+                                formats.extend(parsed_formats);
+                            }
+                        }
+                    }
                 }
-            }
-            Err(e) => {
-                debug!("Failed to get full configuration descriptor: {e:?}");
             }
         }
 
-        // 如果上面的方法失败，尝试获取VS接口特定的描述符
+        // 如果从缓存中没有找到，尝试通过控制请求获取（备用方案）
         if formats.is_empty() {
+            debug!("No formats found in cached descriptors, trying control transfer");
             match self.get_vs_interface_descriptor(vs_interface_num).await {
                 Ok(vs_desc_data) => {
                     trace!("Got VS interface descriptor: {} bytes", vs_desc_data.len());
@@ -838,20 +850,27 @@ impl UvcDevice {
                 if matches!(endpoint.transfer_type, EndpointType::Isochronous)
                     && matches!(endpoint.direction, Direction::In)
                 {
-                    let packet_size = endpoint.max_packet_size as usize;
+                    // 计算实际端点大小 = max_packet_size * packets_per_microframe
+                    // 参考 libuvc stream.c:1170-1172
+                    let packet_size =
+                        endpoint.max_packet_size as usize * endpoint.packets_per_microframe;
                     debug!(
-                        "Alt setting {}: endpoint size = {}",
-                        alt_setting.alternate_setting, packet_size
+                        "Alt setting {}: endpoint base_size={}, packets_per_microframe={}, actual_size={}",
+                        alt_setting.alternate_setting,
+                        endpoint.max_packet_size,
+                        endpoint.packets_per_microframe,
+                        packet_size
                     );
 
-                    // 选择适中的端点大小以获得稳定的带宽
-                    // 避免选择太小（<256）或太大（>1024）的端点
-                    if (256..=1024).contains(&packet_size) && packet_size > best_endpoint_size {
-                        best_alt_setting = Some(alt_setting.alternate_setting);
-                        best_endpoint_size = packet_size;
-                        endpoint_address = Some(endpoint.address);
+                    // 选择满足带宽要求的最小端点
+                    if packet_size >= max_payload_size {
+                        if best_alt_setting.is_none() || packet_size < best_endpoint_size {
+                            best_alt_setting = Some(alt_setting.alternate_setting);
+                            best_endpoint_size = packet_size;
+                            endpoint_address = Some(endpoint.address);
+                        }
                     } else if best_alt_setting.is_none() && packet_size > best_endpoint_size {
-                        // 如果没有找到理想范围内的，选择最大的
+                        // 如果没有找到满足要求的，记录最大的作为备选
                         best_alt_setting = Some(alt_setting.alternate_setting);
                         best_endpoint_size = packet_size;
                         endpoint_address = Some(endpoint.address);
@@ -1135,10 +1154,13 @@ impl UvcDevice {
         };
 
         debug!(
-            "Sending VS control: selector=0x{:02x}, data_len={}",
+            "Sending VS control: selector=0x{:02x}, value=0x{:04x}, index={}, data_len={}",
             control_selector,
+            setup.value,
+            setup.index,
             data.len()
         );
+        trace!("StreamControl data: {:02x?}", &data[..data.len().min(26)]);
 
         self.device.control_out(setup, &data).await?;
 
