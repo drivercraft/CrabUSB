@@ -6,3 +6,21 @@ pub mod descriptor;
 pub mod err;
 pub mod host;
 pub mod transfer;
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DrMode {
+    #[default]
+    Host,
+    Peripheral,
+    Otg,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeviceSpeed {
+    #[default]
+    Low = 1,
+    Full,
+    High,
+    Wireless,
+    Super,
+}

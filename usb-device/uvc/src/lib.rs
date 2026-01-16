@@ -8,10 +8,11 @@ use alloc::{
     vec::Vec,
 };
 use crab_usb::{
-    Class, Device, DeviceInfo, Direction, EndpointType, Interface, Recipient, Request, RequestType,
+    Class, Direction, EndpointKind, EndpointType, Recipient, Request, RequestType,
+    device::{Device, DeviceInfo},
     err::USBError,
 };
-use log::{debug, trace};
+use log::{debug, info, trace};
 use usb_if::host::ControlSetup;
 
 // 导入描述符解析模块
@@ -228,7 +229,6 @@ struct StreamControl {
 
 pub struct UvcDevice {
     device: Device,
-    video_control_interface: Interface,
     // video_streaming_interface: Option<Interface>,
     video_streaming_interface_num: u8,
     processing_unit_id: Option<u8>, // 处理单元ID
@@ -243,20 +243,24 @@ impl UvcDevice {
     pub fn check(info: &DeviceInfo) -> bool {
         let mut has_video_control = false;
         let mut has_video_streaming = false;
+        info!("Checking device {:?}", info.descriptor());
 
-        for iface in info.interface_descriptors() {
-            match iface.class() {
-                Class::Video | Class::AudioVideo(_) => {
-                    // UVC Video Control Interface (subclass=1)
-                    if iface.subclass == 1 {
-                        has_video_control = true;
+        for config in info.configurations() {
+            for iface in &config.interfaces {
+                let alt = iface.first_alt_setting();
+                match alt.class() {
+                    Class::Video | Class::AudioVideo(_) => {
+                        // UVC Video Control Interface (subclass=1)
+                        if alt.subclass == 1 {
+                            has_video_control = true;
+                        }
+                        // UVC Video Streaming Interface (subclass=2)
+                        if alt.subclass == 2 {
+                            has_video_streaming = true;
+                        }
                     }
-                    // UVC Video Streaming Interface (subclass=2)
-                    if iface.subclass == 2 {
-                        has_video_streaming = true;
-                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
 
@@ -311,46 +315,23 @@ impl UvcDevice {
 
         debug!("Using Video Control interface: {video_control_info:?}");
 
-        let video_control_interface = device
+        // 声明 video control 接口
+        device
             .claim_interface(video_control_info.0, video_control_info.1)
             .await?;
 
-        // let mut video_streaming_interface = None;
-        // let mut ep_in = None;
-
-        // if let Some((vs_interface_num, vs_alt_setting)) = video_streaming_info {
-        //     debug!("Using Video Streaming interface: {vs_interface_num} alt {vs_alt_setting}");
-
-        //     let mut vs_interface = device
-        //         .claim_interface(vs_interface_num, vs_alt_setting)
-        //         .await?;
-
-        //     // 查找同步 IN 端点用于视频数据传输
-        //     for endpoint in vs_interface.descriptor.endpoints.clone().into_iter() {
-        //         match (endpoint.transfer_type, endpoint.direction) {
-        //             (EndpointType::Isochronous, Direction::In) => {
-        //                 debug!("Found isochronous IN endpoint: {endpoint:?}");
-        //                 ep_in = Some(vs_interface.endpoint_iso_in(endpoint.address)?);
-        //                 break;
-        //             }
-        //             _ => {
-        //                 debug!("Ignoring endpoint: {endpoint:?}");
-        //             }
-        //         }
-        //     }
-
-        //     video_streaming_interface = Some(vs_interface);
-        // }
+        // 声明 video streaming 接口（使用 alt setting 0，参考 libuvc）
+        // libuvc 在 uvc_scan_streaming 中也需要先 claim VS 接口
+        if let Some((vs_num, _vs_alt)) = video_streaming_info {
+            device.claim_interface(vs_num, 0).await?;
+        }
 
         Ok(Self {
             device,
-            video_control_interface,
-            // video_streaming_interface,
             video_streaming_interface_num: video_streaming_info
                 .map(|(num, _)| num)
                 .expect("Video Streaming interface number is required"),
             processing_unit_id: Some(1), // 通常处理单元ID为1，实际应用中应该解析描述符
-            // ep_in,
             current_format: None,
             state: UvcDeviceState::Configured,
             descriptor_parser: DescriptorParser::new(),
@@ -361,37 +342,43 @@ impl UvcDevice {
     pub async fn get_supported_formats(&mut self) -> Result<Vec<VideoFormat>, USBError> {
         let mut formats = Vec::new();
 
-        // 获取完整的配置描述符来解析VS接口的额外描述符
+        // 从缓存的配置描述符中解析 VS 接口的 extra 数据
+        // 参考 libuvc: uvc_scan_streaming() 使用 if_desc->extra 获取类特定描述符
         let vs_interface_num = self.video_streaming_interface_num;
-        trace!("Parsing VS interface {vs_interface_num} descriptors");
+        trace!("Parsing VS interface {vs_interface_num} descriptors from cached config");
 
-        // 首先尝试通过GET_DESCRIPTOR控制请求获取完整的配置描述符
-        match self.get_full_configuration_descriptor().await {
-            Ok(config_data) => {
-                trace!(
-                    "Got full configuration descriptor: {} bytes",
-                    config_data.len()
-                );
-
-                // 解析配置描述符中的VS接口部分
-                if let Ok(parsed_formats) =
-                    self.parse_vs_interface_descriptors(&config_data, vs_interface_num)
-                    && !parsed_formats.is_empty()
-                {
-                    trace!(
-                        "Parsed {} formats from VS interface descriptors",
-                        parsed_formats.len()
-                    );
-                    formats.extend(parsed_formats);
+        let configs = self.device.configurations();
+        for config in configs {
+            for iface in &config.interfaces {
+                if iface.interface_number == vs_interface_num {
+                    // 遍历所有 alternate settings，收集 extra 数据
+                    for alt_setting in &iface.alt_settings {
+                        if !alt_setting.extra.is_empty() {
+                            debug!(
+                                "Found {} bytes of extra data in VS interface alt setting {}",
+                                alt_setting.extra.len(),
+                                alt_setting.alternate_setting
+                            );
+                            // 解析 extra 数据中的格式描述符
+                            if let Ok(parsed_formats) =
+                                self.parse_format_descriptors(&alt_setting.extra)
+                            {
+                                trace!(
+                                    "Parsed {} formats from alt setting {}",
+                                    parsed_formats.len(),
+                                    alt_setting.alternate_setting
+                                );
+                                formats.extend(parsed_formats);
+                            }
+                        }
+                    }
                 }
-            }
-            Err(e) => {
-                debug!("Failed to get full configuration descriptor: {e:?}");
             }
         }
 
-        // 如果上面的方法失败，尝试获取VS接口特定的描述符
+        // 如果从缓存中没有找到，尝试通过控制请求获取（备用方案）
         if formats.is_empty() {
+            debug!("No formats found in cached descriptors, trying control transfer");
             match self.get_vs_interface_descriptor(vs_interface_num).await {
                 Ok(vs_desc_data) => {
                     trace!("Got VS interface descriptor: {} bytes", vs_desc_data.len());
@@ -426,15 +413,10 @@ impl UvcDevice {
 
         // 首先获取配置描述符头来确定总长度
         let mut header_buffer = vec![0u8; 9]; // 配置描述符头是9字节
-        let transfer = self
-            .video_control_interface
-            .control_in(setup, &mut header_buffer)?;
-        transfer.await?;
+        self.device.control_in(setup, &mut header_buffer).await?;
 
         if header_buffer.len() < 4 {
-            return Err(USBError::Other(
-                "Configuration descriptor header too short".into(),
-            ));
+            Err("Configuration descriptor header too short")?;
         }
 
         // 提取总长度（小端格式）
@@ -442,9 +424,7 @@ impl UvcDevice {
         trace!("Configuration descriptor total length: {total_length} bytes");
 
         if total_length < 9 {
-            return Err(USBError::Other(
-                "Invalid configuration descriptor length".into(),
-            ));
+            Err("Invalid configuration descriptor length")?;
         }
 
         // 获取完整的配置描述符
@@ -457,10 +437,7 @@ impl UvcDevice {
             index: 0,           // Configuration index
         };
 
-        let transfer = self
-            .video_control_interface
-            .control_in(setup_full, &mut full_buffer)?;
-        transfer.await?;
+        self.device.control_in(setup_full, &mut full_buffer).await?;
 
         Ok(full_buffer)
     }
@@ -650,11 +627,7 @@ impl UvcDevice {
 
         let mut buffer = alloc::vec![0u8; 1024]; // 1KB缓冲区
 
-        // 使用video control接口发送请求
-        let transfer = self
-            .video_control_interface
-            .control_in(setup, &mut buffer)?;
-        transfer.await?;
+        self.device.control_in(setup, &mut buffer).await?;
 
         Ok(buffer)
     }
@@ -715,7 +688,7 @@ impl UvcDevice {
     /// 解析MJPEG格式描述符
     fn parse_mjpeg_format(&self, data: &[u8]) -> Result<Vec<VideoFormat>, USBError> {
         if data.len() < 11 {
-            return Err(USBError::Other("MJPEG format descriptor too short".into()));
+            Err("MJPEG format descriptor too short")?;
         }
 
         let format_index = data[3];
@@ -755,9 +728,7 @@ impl UvcDevice {
     /// 解析未压缩格式描述符
     fn parse_uncompressed_format(&self, data: &[u8]) -> Result<Vec<VideoFormat>, USBError> {
         if data.len() < 27 {
-            return Err(USBError::Other(
-                "Uncompressed format descriptor too short".into(),
-            ));
+            return Err("Uncompressed format descriptor too short".into());
         }
 
         let format_index = data[3];
@@ -849,7 +820,7 @@ impl UvcDevice {
         let current_format = self
             .current_format
             .clone()
-            .ok_or(USBError::Other("No format selected".into()))?;
+            .ok_or(USBError::from("No format selected"))?;
 
         // 参考 libuvc 的实现，根据 dwMaxPayloadTransferSize 选择合适的 alternate setting
         let config = &self.device.configurations()[0];
@@ -863,63 +834,69 @@ impl UvcDevice {
 
         debug!("Looking for alternate setting with payload size >= {max_payload_size}");
 
-        // 查找能够满足带宽要求的 alternate setting
+        // 查找能够满足带宽要求的 alternate setting 和对应的端点地址
         let mut best_alt_setting = None;
         let mut best_endpoint_size = 0;
+        let mut endpoint_address = None;
 
         for alt_setting in vs_interface_group.alt_settings.iter() {
             for endpoint in &alt_setting.endpoints {
                 if matches!(endpoint.transfer_type, EndpointType::Isochronous)
                     && matches!(endpoint.direction, Direction::In)
                 {
-                    let packet_size = endpoint.max_packet_size as usize;
+                    // 计算实际端点大小 = max_packet_size * packets_per_microframe
+                    // 参考 libuvc stream.c:1170-1172
+                    let packet_size =
+                        endpoint.max_packet_size as usize * endpoint.packets_per_microframe;
                     debug!(
-                        "Alt setting {}: endpoint size = {}",
-                        alt_setting.alternate_setting, packet_size
+                        "Alt setting {}: endpoint base_size={}, packets_per_microframe={}, actual_size={}",
+                        alt_setting.alternate_setting,
+                        endpoint.max_packet_size,
+                        endpoint.packets_per_microframe,
+                        packet_size
                     );
 
-                    // 选择适中的端点大小以获得稳定的带宽
-                    // 避免选择太小（<256）或太大（>1024）的端点
-                    if (256..=1024).contains(&packet_size) && packet_size > best_endpoint_size {
-                        best_alt_setting = Some(alt_setting.alternate_setting);
-                        best_endpoint_size = packet_size;
+                    // 选择满足带宽要求的最小端点
+                    if packet_size >= max_payload_size {
+                        if best_alt_setting.is_none() || packet_size < best_endpoint_size {
+                            best_alt_setting = Some(alt_setting.alternate_setting);
+                            best_endpoint_size = packet_size;
+                            endpoint_address = Some(endpoint.address);
+                        }
                     } else if best_alt_setting.is_none() && packet_size > best_endpoint_size {
-                        // 如果没有找到理想范围内的，选择最大的
+                        // 如果没有找到满足要求的，记录最大的作为备选
                         best_alt_setting = Some(alt_setting.alternate_setting);
                         best_endpoint_size = packet_size;
+                        endpoint_address = Some(endpoint.address);
                     }
                 }
             }
         }
 
         let alt_setting = best_alt_setting.unwrap_or(1); // 默认为 alt setting 1
+        let endpoint_address = endpoint_address.ok_or(USBError::NotFound)?;
 
-        debug!("Selected alternate setting {alt_setting} with endpoint size {best_endpoint_size}");
+        debug!(
+            "Selected alternate setting {alt_setting} with endpoint size {best_endpoint_size}, address {endpoint_address:#x}"
+        );
 
         // 切换到选中的 alternate setting
-        let mut vs_interface = self
-            .device
+        self.device
             .claim_interface(vs_interface_num, alt_setting)
             .await?;
-        let mut ep = None;
-        // 查找同步 IN 端点
-        for endpoint in vs_interface.descriptor.endpoints.clone().into_iter() {
-            if matches!(endpoint.transfer_type, EndpointType::Isochronous)
-                && matches!(endpoint.direction, Direction::In)
-            {
-                debug!("Found isochronous IN endpoint: {endpoint:?}");
-                ep = Some(vs_interface.endpoint_iso_in(endpoint.address)?);
-                break;
-            }
-        }
 
-        let ep = ep.expect("Failed to find isochronous IN endpoint");
+        // 获取等时端点
+        let endpoint_kind = self.device.get_endpoint(endpoint_address).await?;
+        let ep = match endpoint_kind {
+            EndpointKind::IsochronousIn(ep) => ep,
+            _ => return Err("Unexpected endpoint type".into()),
+        };
 
         debug!("Starting video streaming");
         self.state = UvcDeviceState::Streaming;
         Ok(VideoStream::new(
             ep,
-            vs_interface,
+            best_endpoint_size as u16,
             self.current_format.clone().unwrap(),
         ))
     }
@@ -1003,10 +980,7 @@ impl UvcDevice {
             index: unit_id as u16,
         };
 
-        self.video_control_interface
-            .control_out(setup, data)
-            .await?
-            .await?;
+        self.device.control_out(setup, data).await?;
 
         Ok(())
     }
@@ -1035,7 +1009,7 @@ impl UvcDevice {
         let (format_index, frame_index) =
             self.find_format_indices(&formats, format).ok_or_else(|| {
                 debug!("Failed to find matching format for: {format:?}");
-                USBError::Other("No matching format found".into())
+                USBError::from("No matching format found")
             })?;
 
         // 计算帧间隔 (100ns 单位)，参考 libuvc 的计算方式
@@ -1174,16 +1148,15 @@ impl UvcDevice {
         };
 
         debug!(
-            "Sending VS control: selector=0x{:02x}, data_len={}",
+            "Sending VS control: selector=0x{:02x}, value=0x{:04x}, index={}, data_len={}",
             control_selector,
+            setup.value,
+            setup.index,
             data.len()
         );
+        trace!("StreamControl data: {:02x?}", &data[..data.len().min(26)]);
 
-        // 使用 video control 接口发送请求到 video streaming 接口
-        self.video_control_interface
-            .control_out(setup, &data)
-            .await?
-            .await?;
+        self.device.control_out(setup, &data).await?;
 
         Ok(())
     }
@@ -1205,10 +1178,7 @@ impl UvcDevice {
         };
 
         let mut buffer = vec![0u8; length];
-        let transfer = self
-            .video_control_interface
-            .control_in(setup, &mut buffer)?;
-        transfer.await?;
+        self.device.control_in(setup, &mut buffer).await?;
 
         debug!(
             "Received VS control response: selector=0x{:02x}, data_len={}",
@@ -1253,7 +1223,7 @@ impl UvcDevice {
     /// 解析 StreamControl 响应
     fn parse_stream_control(&self, data: &[u8]) -> Result<StreamControl, USBError> {
         if data.len() < 26 {
-            return Err(USBError::Other("Stream control response too short".into()));
+            return Err("Stream control response too short".into());
         }
 
         let hint = u16::from_le_bytes([data[0], data[1]]);

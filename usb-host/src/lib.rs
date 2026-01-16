@@ -1,9 +1,14 @@
-#![cfg_attr(not(feature = "libusb"), no_std)]
+#![cfg_attr(not(any(feature = "libusb", windows, unix)), no_std)]
 #![feature(iterator_try_collect)]
 
+#[macro_use]
 extern crate alloc;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate anyhow;
+
+use core::ptr::NonNull;
 
 pub use usb_if::descriptor::*;
 pub use usb_if::err::*;
@@ -13,11 +18,14 @@ pub use usb_if::transfer::*;
 mod _macros;
 
 pub(crate) mod backend;
-mod common;
+pub mod device;
 pub mod err;
+mod host;
+pub(crate) mod queue;
 
-pub use common::*;
-pub use futures::future::{BoxFuture, FutureExt};
+pub use backend::ty::Event;
+pub use host::*;
+pub use usb_if::{DeviceSpeed, DrMode};
 
 #[macro_use]
 mod osal;
@@ -25,3 +33,5 @@ pub use osal::Kernel;
 pub use trait_ffi::impl_extern_trait;
 
 define_int_type!(BusAddr, u64);
+
+pub type Mmio = NonNull<u8>;

@@ -4,34 +4,29 @@
 
 use crab_usb::USBHost;
 use crab_uvc::{UvcDevice, VideoControlEvent};
-use env_logger;
 use log::{debug, error, info, warn};
-use std::{hint::spin_loop, sync::Arc, thread, time::Duration};
+use std::{sync::Arc, time::Duration};
 use uvc_frame_parser::Parser;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_level(log::LevelFilter::Info)
         .init();
 
     info!("Starting UVC video capture example");
 
     // 创建 USB 主机
-    let mut host = USBHost::new_libusb();
-    let event_handler = host.event_handler();
-    thread::spawn(move || {
-        while event_handler.handle_event() {
-            spin_loop();
-        }
-    });
+    let mut host = USBHost::new_libusb().unwrap();
+    host.init().await.unwrap();
+    info!("usb host init ok");
 
     // 扫描连接的设备
-    let devices = host.device_list().await?;
+    let devices = host.probe_devices().await?;
 
     // 查找 UVC 设备
     let mut uvc_device = None;
-    for mut device_info in devices {
+    for device_info in devices {
         info!(
             "Checking device: VID={:04x}, PID={:04x}",
             device_info.vendor_id(),
@@ -40,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if UvcDevice::check(&device_info) {
             info!("Found UVC device!");
-            let device = device_info.open().await?;
+            let device = host.open_device(&device_info).await?;
             uvc_device = Some(UvcDevice::new(device).await?);
             break;
         }

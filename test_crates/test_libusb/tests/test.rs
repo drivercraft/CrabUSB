@@ -2,7 +2,7 @@
 
 use std::{hint::spin_loop, thread};
 
-use crab_usb::{Class, DeviceInfo, USBHost};
+use crab_usb::{Class, USBHost, device::DeviceInfo};
 use log::info;
 
 #[tokio::test]
@@ -12,22 +12,16 @@ async fn test() {
         .is_test(true)
         .init();
 
-    let mut host = USBHost::new_libusb();
-    let event_handler = host.event_handler();
-    let ls = host.device_list().await.unwrap();
+    let mut host = USBHost::new_libusb().unwrap();
 
-    thread::spawn(move || {
-        while event_handler.handle_event() {
-            spin_loop();
-        }
-    });
+    let ls = host.probe_devices().await.unwrap();
 
     let mut info: Option<DeviceInfo> = None;
 
     for device in ls {
-        println!("{device}");
+        println!("{device:?}");
 
-        for iface in device.interface_descriptors() {
+        for iface in device.interface_descriptors().cloned().collect::<Vec<_>>() {
             println!("  Interface: {:?}", iface.class());
 
             // if device.vendor_id() == 0x1a86 && device.product_id() == 0x7523 {
@@ -44,11 +38,10 @@ async fn test() {
     }
     let mut info = info.unwrap();
 
-    let mut device = info.open().await.unwrap();
-    info!("Opened device: {device}");
+    let mut device = host.open_device(&info).await.unwrap();
+    info!("Opened device: {}", device.descriptor().product_id);
 
-    if let Some(index) = device.descriptor.manufacturer_string_index {
-        let s = device.string_descriptor(index.get()).await.unwrap();
+    if let Some(s) = device.manufacturer() {
         info!("Manufacturer: {s}");
     }
 
@@ -63,7 +56,7 @@ async fn test() {
             .await
             .unwrap();
 
-        info!("  Claimed interface: {interface}");
+        info!("  Claimed interface {}", iface.interface_number);
 
         for ep in &iface.endpoints {
             info!("  Endpoint: {ep:?}");

@@ -46,7 +46,7 @@ impl From<LibUsbErr> for usb_if::host::USBError {
             LIBUSB_ERROR_NOT_FOUND => usb_if::host::USBError::NotFound,
             LIBUSB_ERROR_TIMEOUT => usb_if::host::USBError::Timeout,
             LIBUSB_ERROR_NO_MEM => usb_if::host::USBError::NoMemory,
-            _ => usb_if::host::USBError::Other(err.to_string()),
+            _ => usb_if::host::USBError::Other(anyhow!("LibUSB error {}: {}", err.code, err.msg)),
         }
     }
 }

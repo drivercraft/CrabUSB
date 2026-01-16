@@ -1,5 +1,3 @@
-use std::{hint::spin_loop, thread};
-
 use crab_usb::{DeviceInfo, USBHost};
 use log::info;
 use usb_keyboard::KeyBoard;
@@ -10,22 +8,15 @@ async fn main() {
         .filter_level(log::LevelFilter::Debug)
         .init();
 
-    let mut host = USBHost::new_libusb();
-    let event_handler = host.event_handler();
-    let ls = host.device_list().await.unwrap();
-
-    thread::spawn(move || {
-        while event_handler.handle_event() {
-            spin_loop();
-        }
-    });
+    let mut host = USBHost::new_libusb().unwrap();
+    let ls = host.probe_devices().await.unwrap();
 
     let mut info: Option<DeviceInfo> = None;
 
     for device in ls {
         println!("{device}");
 
-        for iface in device.interface_descriptors() {
+        for iface in device.interface_descriptors().cloned().collect::<Vec<_>>() {
             println!("  Interface: {:?}", iface.class());
 
             if KeyBoard::check(&device) {
@@ -36,9 +27,9 @@ async fn main() {
         }
     }
 
-    let mut info = info.expect("No device found with HID keyboard interface");
+    let info = info.expect("No device found with HID keyboard interface");
 
-    let device = info.open().await.unwrap();
+    let device = host.open_device(&info).await.unwrap();
     info!("Opened device: {device}");
 
     let mut keyboard = KeyBoard::new(device).await.unwrap();

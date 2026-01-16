@@ -1,32 +1,48 @@
+use core::any::Any;
+
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+
+use futures::future::{BoxFuture, LocalBoxFuture};
+use usb_if::host::USBError;
+
+use crate::backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp};
+
+pub mod dwc;
 #[cfg(feature = "libusb")]
 pub mod libusb;
 pub mod xhci;
 
+pub(crate) mod ty;
+
+define_int_type!(Dci, u8);
 define_int_type!(PortId, usize);
 
-pub mod endpoint {
-    pub mod kind {
-        pub struct Bulk;
+impl Dci {
+    pub const CTRL: Self = Self(1);
 
-        impl Sealed for Bulk {}
-
-        pub struct Isochronous;
-
-        impl Sealed for Isochronous {}
-        pub struct Interrupt;
-
-        impl Sealed for Interrupt {}
-
-        pub trait Sealed: Send + 'static {}
+    pub fn as_u8(&self) -> u8 {
+        self.0
     }
 
-    pub mod direction {
-        pub struct In;
-
-        impl Sealed for In {}
-        pub struct Out;
-
-        impl Sealed for Out {}
-        pub trait Sealed: Send + 'static {}
+    pub fn as_usize(&self) -> usize {
+        self.0 as usize
     }
+}
+
+pub(crate) trait BackendOp: Send + Any + 'static {
+    /// 初始化后端
+    fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>>;
+
+    /// 探测已连接的设备
+    fn probe_devices<'a>(
+        &'a mut self,
+    ) -> BoxFuture<'a, Result<Vec<Box<dyn DeviceInfoOp>>, USBError>>;
+
+    fn open_device<'a>(
+        &'a mut self,
+        dev: &'a dyn DeviceInfoOp,
+    ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
+
+    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
 }

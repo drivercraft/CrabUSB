@@ -302,3 +302,10 @@ pub enum LanguageId {
     #[num_enum(catch_all)]
     Other(u16),
 }
+
+#[allow(clippy::derivable_impls)]
+impl Default for LanguageId {
+    fn default() -> Self {
+        LanguageId::EnglishUnitedStates
+    }
+}

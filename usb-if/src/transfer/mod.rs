@@ -1,8 +1,5 @@
 use num_enum::{FromPrimitive, IntoPrimitive};
 
-mod sync;
-pub mod wait;
-
 #[repr(u8)]
 /// The direction of the data transfer.
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
@@ -76,7 +73,7 @@ pub enum Recipient {
     Other = 3,
 }
 
-#[derive(Debug, Clone, FromPrimitive, IntoPrimitive)]
+#[derive(Debug, Clone, FromPrimitive, IntoPrimitive, Copy)]
 #[repr(u8)]
 pub enum Request {
     GetStatus = 0,

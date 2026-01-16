@@ -7,40 +7,48 @@ extern crate crab_usb;
 
 use bare_test::{
     GetIrqConfig,
-    async_std::time,
     fdt_parser::{PciSpace, Status},
     globals::{PlatformInfoKind, global_val},
     irq::{IrqHandleResult, IrqInfo, IrqParam},
     mem::{iomap, page_size},
     platform::fdt::GetPciIrqConfig,
     println,
+    time::spin_delay,
 };
 use core::time::Duration;
+use crab_usb::device::DeviceInfo;
 use crab_usb::{impl_trait, *};
-use futures::FutureExt;
 
 struct KernelImpl;
 impl_trait! {
     impl Kernel for KernelImpl {
-        fn sleep<'a>(duration: Duration) -> BoxFuture<'a, ()> {
-            time::sleep(duration).boxed()
-        }
-
         fn page_size() -> usize {
             page_size()
+        }
+
+        fn delay(duration: Duration) {
+            spin_delay(duration);
         }
     }
 }
 
 #[bare_test::tests]
 mod tests {
+    use core::{
+        hint::spin_loop,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+
     use alloc::{boxed::Box, vec::Vec};
 
+    use bare_test::time::spin_delay;
     use crab_uvc::{UvcDevice, VideoControlEvent, VideoFormatType};
     use log::*;
     use pcie::*;
 
     use super::*;
+
+    static PROT_CHANGED: AtomicBool = AtomicBool::new(false);
 
     #[test]
     fn test_all() {
@@ -54,15 +62,26 @@ mod tests {
 
             host.init().await.unwrap();
             info!("usb host init ok");
+
+            let mut devices = Vec::new();
+            for _ in 0..50 {
+                let ls2 = host.probe_devices().await.unwrap();
+                if !ls2.is_empty() {
+                    info!("found {} devices", ls2.len());
+                    devices = ls2;
+                    break;
+                }
+                spin_delay(Duration::from_millis(100));
+            }
+
             info!("usb cmd test");
 
-            let ls = host.device_list().await.unwrap();
+            let dev_idx = find_camera(devices.iter()).expect("no camera found");
 
-            let mut dev_info = find_camera(ls).expect("no camera found");
+            let dev_info = &devices[dev_idx];
+            info!("found camera: {dev_info:?}");
 
-            info!("found camera: {dev_info}");
-
-            let dev = dev_info.open().await.unwrap();
+            let dev = host.open_device(dev_info).await.unwrap();
 
             let mut uvc = UvcDevice::new(dev).await.unwrap();
 
@@ -245,7 +264,8 @@ mod tests {
                 let irq = node.irq_info();
 
                 return XhciInfo {
-                    usb: USBHost::new_xhci(addr, u32::MAX as usize),
+                    usb: USBHost::new_xhci(addr, u32::MAX as usize)
+                        .expect("Failed to create xhci host"),
                     irq,
                 };
             }
@@ -356,7 +376,8 @@ mod tests {
                     println!("irq: {irq:?}");
 
                     return Some(XhciInfo {
-                        usb: USBHost::new_xhci(addr, u32::MAX as usize),
+                        usb: USBHost::new_xhci(addr, u32::MAX as usize)
+                            .expect("Failed to create xhci host"),
                         irq,
                     });
                 }
@@ -367,28 +388,30 @@ mod tests {
     }
 
     fn register_irq(irq: IrqInfo, host: &mut USBHost) {
-        let handle = host.event_handler();
+        let handle = host.create_event_handler();
+        let one = irq.cfgs[0].clone();
 
-        for one in &irq.cfgs {
-            IrqParam {
-                intc: irq.irq_parent,
-                cfg: one.clone(),
-            }
-            .register_builder({
-                move |_irq| {
-                    handle.handle_event();
-                    IrqHandleResult::Handled
-                }
-            })
-            .register();
-            break;
+        IrqParam {
+            intc: irq.irq_parent,
+            cfg: one,
         }
+        .register_builder({
+            move |_irq| {
+                let event = handle.handle_event();
+                if let Event::PortChange { .. } = event {
+                    PROT_CHANGED.store(true, Ordering::Release);
+                }
+
+                IrqHandleResult::Handled
+            }
+        })
+        .register();
     }
 
-    fn find_camera(ls: impl Iterator<Item = DeviceInfo>) -> Option<DeviceInfo> {
-        for info in ls {
-            if UvcDevice::check(&info) {
-                return Some(info);
+    fn find_camera<'a>(ls: impl Iterator<Item = &'a DeviceInfo>) -> Option<usize> {
+        for (idx, info) in ls.enumerate() {
+            if UvcDevice::check(info) {
+                return Some(idx);
             }
         }
         None

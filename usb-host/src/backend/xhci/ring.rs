@@ -1,9 +1,13 @@
 use dma_api::DVec;
 pub use dma_api::Direction;
-use log::trace;
 use xhci::ring::trb::{Link, command, transfer};
 
-use crate::{BusAddr, err::*, osal::kernel::page_size};
+use crate::{
+    BusAddr,
+    err::*,
+    osal::kernel::page_size,
+    queue::{Finished, TWaiter},
+};
 
 const TRB_LEN: usize = 4;
 const TRB_SIZE: usize = size_of::<TrbData>();
@@ -40,6 +44,7 @@ pub struct Ring {
 }
 
 unsafe impl Send for Ring {}
+unsafe impl Sync for Ring {}
 
 impl Ring {
     pub fn new_with_len(
@@ -82,7 +87,7 @@ impl Ring {
             trb.clear_cycle_bit();
         }
         let addr = self.enque_trb(trb.into());
-        trace!("[CMD] >> {trb:?} @{addr:X?}");
+        trace!("[CMD] >> {trb:X?} @{addr:X?}");
         addr
     }
 
@@ -93,7 +98,7 @@ impl Ring {
             trb.clear_cycle_bit();
         }
         let addr = self.enque_trb(trb.into());
-        trace!("[Transfer] >> {trb:?} @{addr:X?}");
+        trace!("[Transfer] >> {trb:X?} @{addr:X?}");
         addr
     }
 
@@ -158,5 +163,54 @@ impl Ring {
 
     pub fn trb_bus_addr_list(&self) -> impl Iterator<Item = BusAddr> + '_ {
         (0..self.len()).map(move |i| self.trb_bus_addr(i))
+    }
+}
+
+pub struct SendRing<R> {
+    ring: Ring,
+    finished: Finished<R>,
+}
+
+impl<R> SendRing<R> {
+    pub fn new(direction: Direction, dma_mask: usize) -> Result<Self> {
+        let ring = Ring::new(true, direction, dma_mask)?;
+        let finished = Finished::new(ring.trb_bus_addr_list());
+        Ok(Self { ring, finished })
+    }
+
+    pub fn enque_command(&mut self, trb: command::Allowed) -> BusAddr {
+        let addr = self.ring.enque_command(trb);
+        self.finished.clear_finished(addr);
+        addr
+    }
+
+    pub fn enque_transfer(&mut self, trb: transfer::Allowed) -> BusAddr {
+        let addr = self.ring.enque_transfer(trb);
+        self.finished.clear_finished(addr);
+        addr
+    }
+
+    pub fn take_finished_future(&self, addr: BusAddr) -> TWaiter<R> {
+        self.finished.take_waiter(addr)
+    }
+
+    pub fn finished_handle(&self) -> Finished<R> {
+        self.finished.clone()
+    }
+
+    pub fn get_finished(&self, addr: BusAddr) -> Option<R> {
+        self.finished.get_finished(addr)
+    }
+
+    pub fn register_cx(&self, addr: BusAddr, cx: &mut core::task::Context<'_>) {
+        self.finished.register_cx(addr, cx);
+    }
+
+    pub fn bus_addr(&self) -> BusAddr {
+        self.ring.bus_addr()
+    }
+
+    pub fn cycle(&self) -> bool {
+        self.ring.cycle
     }
 }

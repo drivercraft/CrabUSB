@@ -1,30 +1,49 @@
-use core::{mem::MaybeUninit, num::NonZero, ptr::null_mut};
-use std::sync::{Arc, Mutex};
+use core::{mem::MaybeUninit, num::NonZero};
+use std::{fmt::Debug, sync::Arc};
 
 use futures::FutureExt;
 use libusb1_sys::*;
-use log::debug;
-use usb_if::{
-    descriptor::{
-        ConfigurationDescriptor, DeviceDescriptor, InterfaceDescriptor, InterfaceDescriptors,
-    },
-    host::{ControlSetup, ResultTransfer},
-    transfer::{BmRequestType, Direction},
+use usb_if::descriptor::{
+    ConfigurationDescriptor, DeviceDescriptor, InterfaceDescriptor, InterfaceDescriptors,
 };
 
-use crate::backend::libusb::{context::Context, interface::InterfaceImpl};
+use crate::err::*;
+use crate::{
+    EndpointBase, EndpointControl,
+    backend::{
+        libusb::{context::Context, endpoint::EndpointImpl},
+        ty::{DeviceInfoOp, DeviceOp},
+    },
+};
 
 pub struct DeviceInfo {
     pub(crate) raw: *mut libusb_device,
-    ctx: Arc<Context>,
+    desc: DeviceDescriptor,
+    configs: Vec<ConfigurationDescriptor>,
+}
+
+impl Debug for DeviceInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DeviceInfo").finish()
+    }
 }
 
 unsafe impl Send for DeviceInfo {}
+unsafe impl Sync for DeviceInfo {}
 
 impl DeviceInfo {
-    pub(crate) fn new(raw: *mut libusb_device, ctx: Arc<Context>) -> Self {
+    pub(crate) fn new(raw: *mut libusb_device) -> Result<Self> {
         let raw = unsafe { libusb_ref_device(raw) };
-        Self { raw, ctx }
+        let mut desc: MaybeUninit<libusb_device_descriptor> = MaybeUninit::uninit();
+        usb!(libusb_get_device_descriptor(raw, desc.as_mut_ptr()))?;
+        let desc = unsafe { desc.assume_init() };
+        let desc = libusb_device_desc_to_desc(&desc)?;
+        let mut configs = Vec::new();
+        for i in 0..desc.num_configurations {
+            let config_desc = libusb_get_configuration_descriptors(raw, i)?;
+            configs.push(config_desc);
+        }
+        Ok(Self { raw, desc, configs })
     }
 }
 
@@ -36,244 +55,239 @@ impl Drop for DeviceInfo {
     }
 }
 
-impl usb_if::host::DeviceInfo for DeviceInfo {
-    fn open(
-        &mut self,
-    ) -> futures::future::LocalBoxFuture<
-        '_,
-        Result<Box<dyn usb_if::host::Device>, usb_if::host::USBError>,
-    > {
-        async move {
-            let mut handle = std::ptr::null_mut();
-            usb!(libusb_open(self.raw, &mut handle))?;
-            let device = Device::new(handle, self.ctx.clone());
-
-            Ok(Box::new(device) as Box<dyn usb_if::host::Device>)
-        }
-        .boxed_local()
+impl DeviceInfoOp for DeviceInfo {
+    fn backend_name(&self) -> &str {
+        "libusb"
     }
 
-    fn descriptor(
-        &self,
-    ) -> futures::future::LocalBoxFuture<'_, Result<DeviceDescriptor, usb_if::host::USBError>> {
-        async move {
-            let mut desc: MaybeUninit<libusb_device_descriptor> = MaybeUninit::uninit();
-            usb!(libusb_get_device_descriptor(self.raw, desc.as_mut_ptr()))?;
-            let desc = unsafe { desc.assume_init() };
-            libusb_device_desc_to_desc(&desc)
-        }
-        .boxed_local()
+    fn descriptor(&self) -> &DeviceDescriptor {
+        &self.desc
     }
 
-    fn configuration_descriptor(
-        &mut self,
-        index: u8,
-    ) -> futures::future::LocalBoxFuture<'_, Result<ConfigurationDescriptor, usb_if::host::USBError>>
-    {
-        async move {
-            let mut desc: MaybeUninit<*const libusb_config_descriptor> = MaybeUninit::uninit();
-            usb!(libusb_get_config_descriptor(
-                self.raw,
-                index,
-                desc.as_mut_ptr()
-            ))?;
-            let desc = unsafe { desc.assume_init() };
+    fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
+        &self.configs
+    }
+}
 
-            if desc.is_null() {
-                return Err(usb_if::host::USBError::Other(
-                    "Failed to get configuration descriptor".into(),
-                ));
-            }
+fn libusb_get_configuration_descriptors(
+    raw: *mut libusb_device,
+    index: u8,
+) -> Result<ConfigurationDescriptor> {
+    let mut desc: MaybeUninit<*const libusb_config_descriptor> = MaybeUninit::uninit();
+    usb!(libusb_get_config_descriptor(raw, index, desc.as_mut_ptr()))?;
+    let desc = unsafe { desc.assume_init() };
 
-            let desc = unsafe { &*desc };
+    if desc.is_null() {
+        Err(anyhow!("Failed to get configuration descriptor",))?;
+    }
 
-            let interface_num = desc.bNumInterfaces as usize;
-            let mut interfaces = Vec::with_capacity(interface_num);
+    let desc = unsafe { &*desc };
 
-            for iface_num in 0..interface_num {
-                let iface_desc = unsafe { &*desc.interface.add(iface_num) };
-                let alt_setting_num = iface_desc.num_altsetting as usize;
-                let mut alt_settings = Vec::with_capacity(alt_setting_num);
+    let interface_num = desc.bNumInterfaces as usize;
+    let mut interfaces = Vec::with_capacity(interface_num);
 
-                for alt_idx in 0..alt_setting_num {
-                    let alt_desc = unsafe { &*iface_desc.altsetting.add(alt_idx) };
-                    let endpoint_num = alt_desc.bNumEndpoints as usize;
-                    let mut endpoints = Vec::with_capacity(endpoint_num);
+    for iface_num in 0..interface_num {
+        let iface_desc = unsafe { &*desc.interface.add(iface_num) };
+        let alt_setting_num = iface_desc.num_altsetting as usize;
+        let mut alt_settings = Vec::with_capacity(alt_setting_num);
 
-                    for ep_idx in 0..endpoint_num {
-                        let ep_desc = unsafe { &*alt_desc.endpoint.add(ep_idx) };
-                        let direction = if ep_desc.bEndpointAddress & 0x80 != 0 {
-                            usb_if::transfer::Direction::In
-                        } else {
-                            usb_if::transfer::Direction::Out
-                        };
+        for alt_idx in 0..alt_setting_num {
+            let alt_desc = unsafe { &*iface_desc.altsetting.add(alt_idx) };
+            let endpoint_num = alt_desc.bNumEndpoints as usize;
+            let mut endpoints = Vec::with_capacity(endpoint_num);
 
-                        let transfer_type = match ep_desc.bmAttributes & 0x03 {
-                            0 => usb_if::descriptor::EndpointType::Control,
-                            1 => usb_if::descriptor::EndpointType::Isochronous,
-                            2 => usb_if::descriptor::EndpointType::Bulk,
-                            3 => usb_if::descriptor::EndpointType::Interrupt,
-                            _ => unreachable!(),
-                        };
+            for ep_idx in 0..endpoint_num {
+                let ep_desc = unsafe { &*alt_desc.endpoint.add(ep_idx) };
+                let direction = if ep_desc.bEndpointAddress & 0x80 != 0 {
+                    usb_if::transfer::Direction::In
+                } else {
+                    usb_if::transfer::Direction::Out
+                };
 
-                        let packets_per_microframe = match transfer_type {
-                            usb_if::descriptor::EndpointType::Isochronous
-                            | usb_if::descriptor::EndpointType::Interrupt => {
-                                (((ep_desc.wMaxPacketSize >> 11) & 0x03) + 1) as usize
-                            }
-                            _ => 1,
-                        };
+                let transfer_type = match ep_desc.bmAttributes & 0x03 {
+                    0 => usb_if::descriptor::EndpointType::Control,
+                    1 => usb_if::descriptor::EndpointType::Isochronous,
+                    2 => usb_if::descriptor::EndpointType::Bulk,
+                    3 => usb_if::descriptor::EndpointType::Interrupt,
+                    _ => unreachable!(),
+                };
 
-                        endpoints.push(usb_if::descriptor::EndpointDescriptor {
-                            address: ep_desc.bEndpointAddress & 0x0F,
-                            max_packet_size: ep_desc.wMaxPacketSize & 0x7FF,
-                            transfer_type,
-                            direction,
-                            packets_per_microframe,
-                            interval: ep_desc.bInterval,
-                        });
+                let packets_per_microframe = match transfer_type {
+                    usb_if::descriptor::EndpointType::Isochronous
+                    | usb_if::descriptor::EndpointType::Interrupt => {
+                        (((ep_desc.wMaxPacketSize >> 11) & 0x03) + 1) as usize
                     }
+                    _ => 1,
+                };
 
-                    alt_settings.push(InterfaceDescriptor {
-                        interface_number: alt_desc.bInterfaceNumber,
-                        alternate_setting: alt_desc.bAlternateSetting,
-                        class: alt_desc.bInterfaceClass,
-                        subclass: alt_desc.bInterfaceSubClass,
-                        protocol: alt_desc.bInterfaceProtocol,
-                        string_index: NonZero::new(alt_desc.iInterface),
-                        string: None,
-                        num_endpoints: alt_desc.bNumEndpoints,
-                        endpoints,
-                    });
-                }
-
-                interfaces.push(InterfaceDescriptors {
-                    interface_number: unsafe {
-                        if !iface_desc.altsetting.is_null() {
-                            (*iface_desc.altsetting).bInterfaceNumber
-                        } else {
-                            iface_num as u8
-                        }
-                    },
-                    alt_settings,
+                endpoints.push(usb_if::descriptor::EndpointDescriptor {
+                    address: ep_desc.bEndpointAddress, // 保留完整的端点地址（包括方向位）
+                    max_packet_size: ep_desc.wMaxPacketSize & 0x7FF,
+                    transfer_type,
+                    direction,
+                    packets_per_microframe,
+                    interval: ep_desc.bInterval,
                 });
             }
 
-            let out = ConfigurationDescriptor {
-                num_interfaces: desc.bNumInterfaces,
-                configuration_value: desc.bConfigurationValue,
-                attributes: desc.bmAttributes,
-                max_power: desc.bMaxPower,
-                string_index: NonZero::new(desc.iConfiguration),
-                string: None,
-                interfaces,
+            // 提取类特定描述符（如 UVC 的格式和帧描述符）
+            let extra = if !alt_desc.extra.is_null() && alt_desc.extra_length > 0 {
+                unsafe {
+                    core::slice::from_raw_parts(alt_desc.extra, alt_desc.extra_length as usize)
+                        .to_vec()
+                }
+            } else {
+                Vec::new()
             };
-            unsafe { libusb_free_config_descriptor(desc) };
-            Ok(out)
+
+            alt_settings.push(InterfaceDescriptor {
+                interface_number: alt_desc.bInterfaceNumber,
+                alternate_setting: alt_desc.bAlternateSetting,
+                class: alt_desc.bInterfaceClass,
+                subclass: alt_desc.bInterfaceSubClass,
+                protocol: alt_desc.bInterfaceProtocol,
+                string_index: NonZero::new(alt_desc.iInterface),
+                string: None,
+                num_endpoints: alt_desc.bNumEndpoints,
+                endpoints,
+                extra,
+            });
         }
-        .boxed_local()
+
+        interfaces.push(InterfaceDescriptors {
+            interface_number: unsafe {
+                if !iface_desc.altsetting.is_null() {
+                    (*iface_desc.altsetting).bInterfaceNumber
+                } else {
+                    iface_num as u8
+                }
+            },
+            alt_settings,
+        });
     }
+
+    let out = ConfigurationDescriptor {
+        num_interfaces: desc.bNumInterfaces,
+        configuration_value: desc.bConfigurationValue,
+        attributes: desc.bmAttributes,
+        max_power: desc.bMaxPower,
+        string_index: NonZero::new(desc.iConfiguration),
+        string: None,
+        interfaces,
+    };
+    unsafe { libusb_free_config_descriptor(desc) };
+    Ok(out)
 }
 
 pub struct Device {
     handle: Arc<DeviceHandle>,
-    ctrl: EPControl,
+    desc: DeviceDescriptor,
+    configs: Vec<ConfigurationDescriptor>,
+    ctrl_ep: EndpointControl,
 }
 
 unsafe impl Send for Device {}
 
 impl Device {
-    pub(crate) fn new(raw: *mut libusb_device_handle, ctx: Arc<Context>) -> Self {
-        let handle = Arc::new(DeviceHandle { raw, _ctx: ctx });
-        let ctrl = EPControl::new(32, handle.clone());
-        Self { ctrl, handle }
-    }
-}
+    pub(crate) fn new(info: &DeviceInfo, ctx: Arc<Context>) -> Result<Self> {
+        let raw = info.raw;
+        let mut handle = std::ptr::null_mut();
+        usb!(libusb_open(raw, &mut handle))?;
 
-impl usb_if::host::Device for Device {
-    fn set_configuration(
-        &mut self,
-        configuration: u8,
-    ) -> futures::future::LocalBoxFuture<'_, Result<(), usb_if::host::USBError>> {
-        async move {
-            usb!(libusb_set_configuration(
-                self.handle.raw(),
-                configuration as _
-            ))?;
-            Ok(())
-        }
-        .boxed_local()
-    }
+        let desc = info.desc.clone();
+        let configs = info.configs.clone();
 
-    fn get_configuration(
-        &mut self,
-    ) -> futures::future::LocalBoxFuture<'_, Result<u8, usb_if::host::USBError>> {
-        async move {
-            let mut config = 0;
-            usb!(libusb_get_configuration(self.handle.raw(), &mut config))?;
-            Ok(config as _)
-        }
-        .boxed_local()
+        let handle = Arc::new(DeviceHandle {
+            raw: handle,
+            _ctx: ctx,
+        });
+
+        // 创建控制端点（endpoint address 0）
+        let ctrl_ep_impl = EndpointImpl::new(handle.clone(), 0);
+        let ctrl_ep = EndpointControl::new(ctrl_ep_impl);
+
+        Ok(Self {
+            handle,
+            desc,
+            configs,
+            ctrl_ep,
+        })
     }
 
-    fn claim_interface(
-        &mut self,
-        interface: u8,
-        alternate: u8,
-    ) -> futures::future::LocalBoxFuture<
-        '_,
-        Result<Box<dyn usb_if::host::Interface>, usb_if::host::USBError>,
-    > {
-        async move {
-            let res = usb!(libusb_kernel_driver_active(
+    async fn _claim_interface(&mut self, interface: u8, alternate: u8) -> Result<()> {
+        let res = usb!(libusb_kernel_driver_active(
+            self.handle.raw(),
+            interface as _
+        ))?;
+
+        if res == 1 {
+            usb!(libusb_detach_kernel_driver(
                 self.handle.raw(),
                 interface as _
             ))?;
-
-            if res == 1 {
-                usb!(libusb_detach_kernel_driver(
-                    self.handle.raw(),
-                    interface as _
-                ))?;
-                debug!("Kernel driver detached for interface {interface}");
-            }
-
-            usb!(libusb_claim_interface(self.handle.raw(), interface as _))?;
-
-            debug!("Interface {interface} claimed successfully");
-            if alternate != 0 {
-                usb!(libusb_set_interface_alt_setting(
-                    self.handle.raw(),
-                    interface as _,
-                    alternate as _,
-                ))?;
-                debug!("Interface {interface} set to alternate setting {alternate} successfully");
-            }
-
-            Ok(Box::new(InterfaceImpl::new(
-                self.handle.raw(),
-                self.ctrl.clone(),
-                interface,
-                alternate,
-            )) as Box<dyn usb_if::host::Interface>)
+            debug!("Kernel driver detached for interface {interface}");
         }
-        .boxed_local()
+
+        usb!(libusb_claim_interface(self.handle.raw(), interface as _))?;
+
+        debug!("Interface {interface} claimed successfully");
+        if alternate != 0 {
+            usb!(libusb_set_interface_alt_setting(
+                self.handle.raw(),
+                interface as _,
+                alternate as _,
+            ))?;
+            debug!("Interface {interface} set to alternate setting {alternate} successfully");
+        }
+        Ok(())
+    }
+}
+
+impl DeviceOp for Device {
+    fn backend_name(&self) -> &str {
+        "libusb"
     }
 
-    fn control_in<'a>(
-        &mut self,
-        setup: usb_if::host::ControlSetup,
-        data: &'a mut [u8],
-    ) -> ResultTransfer<'a> {
-        self.ctrl.control_in(setup, data)
+    fn descriptor(&self) -> &DeviceDescriptor {
+        &self.desc
     }
 
-    fn control_out<'a>(
+    fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
+        &self.configs
+    }
+
+    fn claim_interface<'a>(
+        &'a mut self,
+        interface: u8,
+        alternate: u8,
+    ) -> futures::future::BoxFuture<'a, std::result::Result<(), USBError>> {
+        async move { self._claim_interface(interface, alternate).await }.boxed()
+    }
+
+    fn ep_ctrl(&mut self) -> &mut crate::EndpointControl {
+        &mut self.ctrl_ep
+    }
+
+    fn set_configuration<'a>(
+        &'a mut self,
+        configuration_value: u8,
+    ) -> futures::future::BoxFuture<'a, std::result::Result<(), USBError>> {
+        async move {
+            usb!(libusb_set_configuration(
+                self.handle.raw(),
+                configuration_value as _
+            ))?;
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn get_endpoint(
         &mut self,
-        setup: usb_if::host::ControlSetup,
-        data: &'a [u8],
-    ) -> ResultTransfer<'a> {
-        self.ctrl.control_out(setup, data)
+        desc: &usb_if::descriptor::EndpointDescriptor,
+    ) -> std::result::Result<crate::backend::ty::ep::EndpointBase, USBError> {
+        let ep = EndpointImpl::new(self.handle.clone(), desc.address);
+        Ok(EndpointBase::new(ep))
     }
 }
 
@@ -295,100 +309,6 @@ fn libusb_device_desc_to_desc(
         device_version: desc.bcdDevice,
     })
 }
-
-#[derive(Clone)]
-pub struct EPControl {
-    queue: Arc<Mutex<super::queue::Queue>>,
-    dev: Arc<DeviceHandle>,
-}
-
-unsafe impl Send for EPControl {}
-unsafe impl Sync for EPControl {}
-
-impl EPControl {
-    pub fn new(queue_size: usize, dev: Arc<DeviceHandle>) -> Self {
-        Self {
-            queue: Arc::new(Mutex::new(super::queue::Queue::new(queue_size))),
-            dev,
-        }
-    }
-
-    pub fn control_in<'a>(&self, setup: ControlSetup, data: &'a mut [u8]) -> ResultTransfer<'a> {
-        let mut queue = self.queue.lock().unwrap();
-        let len = data.len();
-        let dest_addr = data.as_mut_ptr() as usize;
-        queue.submit(|trans, on_ready| unsafe {
-            let setup_size = size_of::<libusb_control_setup>();
-            trans.buff.resize(setup_size + data.len(), 0);
-            let src_addr = trans.buff.as_mut_ptr();
-
-            on_ready.param1 = src_addr as *mut ();
-            on_ready.param2 = dest_addr as *mut ();
-            on_ready.param3 = len as *mut ();
-            on_ready.on_ready = |param1, param2, param3| {
-                let src_addr = param1 as *mut u8;
-                let dest_addr = param2 as *mut u8;
-                let len = param3 as usize;
-
-                std::ptr::copy_nonoverlapping(
-                    src_addr.add(size_of::<libusb_control_setup>()),
-                    dest_addr,
-                    len,
-                );
-            };
-
-            libusb_fill_control_setup(
-                src_addr,
-                BmRequestType::new(Direction::In, setup.request_type, setup.recipient).into(),
-                setup.request.into(),
-                setup.value,
-                setup.index,
-                data.len() as _,
-            );
-
-            libusb_fill_control_transfer(
-                trans.ptr,
-                self.dev.raw(),
-                src_addr,
-                transfer_callback,
-                null_mut(),
-                1000,
-            );
-        })
-    }
-
-    pub fn control_out<'a>(&self, setup: ControlSetup, data: &'a [u8]) -> ResultTransfer<'a> {
-        let mut queue = self.queue.lock().unwrap();
-
-        queue.submit(|trans, _| unsafe {
-            let setup_size = size_of::<libusb_control_setup>();
-            trans.buff.resize(setup_size + data.len(), 0);
-            let src_addr = trans.buff.as_mut_ptr();
-
-            trans.buff[setup_size..].copy_from_slice(data);
-
-            libusb_fill_control_setup(
-                src_addr,
-                BmRequestType::new(Direction::Out, setup.request_type, setup.recipient).into(),
-                setup.request.into(),
-                setup.value,
-                setup.index,
-                data.len() as _,
-            );
-
-            libusb_fill_control_transfer(
-                trans.ptr,
-                self.dev.raw(),
-                src_addr,
-                transfer_callback,
-                null_mut(),
-                1000,
-            );
-        })
-    }
-}
-
-extern "system" fn transfer_callback(_transfer: *mut libusb_transfer) {}
 
 pub struct DeviceHandle {
     raw: *mut libusb_device_handle,

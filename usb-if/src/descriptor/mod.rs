@@ -85,6 +85,8 @@ pub struct InterfaceDescriptor {
     pub string: Option<String>,
     pub num_endpoints: u8,
     pub endpoints: Vec<EndpointDescriptor>,
+    /// 类特定描述符数据（如 UVC 的格式和帧描述符）
+    pub extra: Vec<u8>,
 }
 
 impl InterfaceDescriptor {
@@ -227,6 +229,7 @@ impl From<parser::InterfaceDescriptor<'_>> for InterfaceDescriptor {
             num_endpoints: desc.num_endpoints(),
             endpoints: desc.endpoints().map(EndpointDescriptor::from).collect(),
             string: None,
+            extra: Vec::new(), // parser 模式不提取 extra 数据
         }
     }
 }

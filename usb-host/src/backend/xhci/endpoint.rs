@@ -1,100 +1,52 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc};
 
-use dma_api::{DSlice, DSliceMut};
-use log::trace;
-use mbarrier::{mb, rmb};
+use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
-    descriptor::{self, EndpointDescriptor, EndpointType},
+    descriptor::{self, EndpointDescriptor},
     err::TransferError,
-    host::{ControlSetup, ResultTransfer},
-    transfer::{BmRequestType, Direction, wait::CallbackOnReady},
+    transfer::{BmRequestType, Direction},
 };
 use xhci::{
     registers::doorbell,
-    ring::trb::transfer::{self, Isoch, Normal},
+    ring::trb::{
+        event::TransferEvent,
+        transfer::{self, Isoch, Normal},
+    },
 };
 
 use crate::{
     BusAddr,
     backend::{
-        endpoint::{direction, kind},
-        xhci::{
-            def::{Dci, DirectionExt},
-            device::DeviceState,
-            ring::Ring,
-            root::Root,
+        Dci,
+        ty::{
+            ep::{EndpointOp, TransferHandle},
+            transfer::{Transfer, TransferKind},
         },
+        xhci::{DirectionExt, reg::SlotBell, ring::SendRing, transfer::TransferId},
     },
-    err::USBError,
+    err::ConvertXhciError,
 };
 
-/// ISO传输帧调度信息
-#[derive(Debug, Clone, Copy)]
-pub struct IsoFrameSchedule {
-    /// 目标帧号（微帧）
-    pub target_frame: u16,
-    /// 是否使用ASAP模式
-    pub start_asap: bool,
-    /// 端点的传输间隔（以微帧为单位）
-    pub interval: u8,
-}
-
-pub(crate) struct EndpointRaw {
+pub struct Endpoint {
     dci: Dci,
-    pub ring: Ring,
-    device: DeviceState,
-    iso_schedule: Option<IsoFrameSchedule>,
+    pub ring: SendRing<TransferEvent>,
+    bell: Arc<Mutex<SlotBell>>,
+    transfers: BTreeMap<TransferId, Transfer>,
 }
 
-unsafe impl Send for EndpointRaw {}
+unsafe impl Send for Endpoint {}
+unsafe impl Sync for Endpoint {}
 
-impl EndpointRaw {
-    pub fn new(dci: Dci, device: &DeviceState, dma_mask: usize) -> Result<Self, USBError> {
+impl Endpoint {
+    pub fn new(dci: Dci, dma_mask: usize, bell: Arc<Mutex<SlotBell>>) -> crate::err::Result<Self> {
+        let ring = SendRing::new(dma_api::Direction::Bidirectional, dma_mask)?;
+
         Ok(Self {
             dci,
-            ring: Ring::new(true, dma_api::Direction::Bidirectional, dma_mask)?,
-            device: device.clone(),
-            iso_schedule: None,
-        })
-    }
-
-    pub fn enque<'a>(
-        &mut self,
-        trbs: impl Iterator<Item = transfer::Allowed>,
-        direction: usb_if::transfer::Direction,
-        buff_addr: usize,
-        buff_len: usize,
-    ) -> ResultTransfer<'a> {
-        let mut trb_ptr = BusAddr(0);
-
-        for trb in trbs {
-            trb_ptr = self.ring.enque_transfer(trb);
-        }
-
-        trace!("trb : {trb_ptr:#x?}, addr: {buff_addr:#x}, len: {buff_len}, {direction:?}");
-
-        self.device.root.transfer_preper_id(trb_ptr)?;
-
-        mb();
-
-        let mut bell = doorbell::Register::default();
-        bell.set_doorbell_target(self.dci.into());
-        trace!("ring doorbell: slot {}, {bell:?}", self.device.id);
-        self.device.doorbell(bell);
-
-        trace!("ring doorbell done");
-
-        Ok(unsafe {
-            self.device.root.wait_for_transfer(
-                trb_ptr,
-                CallbackOnReady {
-                    on_ready,
-                    param1: buff_addr as *mut (),
-                    param2: buff_len as *mut (),
-                    param3: direction as u8 as usize as *mut (),
-                },
-            )
+            ring,
+            bell,
+            transfers: BTreeMap::new(),
         })
     }
 
@@ -102,56 +54,213 @@ impl EndpointRaw {
         self.ring.bus_addr()
     }
 
-    /// 为ISO端点设置帧调度信息
-    pub fn set_iso_schedule(&mut self, schedule: IsoFrameSchedule) {
-        self.iso_schedule = Some(schedule);
+    fn doorbell(&mut self) {
+        let mut bell = doorbell::Register::default();
+        bell.set_doorbell_target(self.dci.into());
+        self.bell.lock().ring(bell);
     }
 
-    /// 获取当前的ISO调度信息
-    pub fn get_iso_schedule(&self) -> Option<&IsoFrameSchedule> {
-        self.iso_schedule.as_ref()
+    pub fn ring(&self) -> &SendRing<TransferEvent> {
+        &self.ring
     }
 
-    /// 计算下一个ISO传输的帧号
-    pub fn calculate_next_frame(&mut self) -> u16 {
-        if let Some(schedule) = &mut self.iso_schedule {
-            if schedule.start_asap {
-                // 使用当前微帧索引 + 一些安全边距
-                let current_mfindex = self.device.get_microframe_index();
-                let next_frame = (current_mfindex + 8) & 0x7FF; // 8个微帧的边距
-                schedule.target_frame = next_frame;
-                next_frame
-            } else {
-                // 使用预设的目标帧
-                schedule.target_frame
-            }
-        } else {
-            // 没有调度信息，使用ASAP
-            let current_mfindex = self.device.get_microframe_index();
-            (current_mfindex + 8) & 0x7FF
+    fn handle_transfer_completion(
+        &mut self,
+        c: &TransferEvent,
+        handle: BusAddr,
+    ) -> Result<Transfer, TransferError> {
+        let mut t = self.transfers.remove(&TransferId(handle)).unwrap();
+        match c.completion_code() {
+            Ok(code) => match code.to_result() {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            },
+            Err(_e) => Err(TransferError::Other("Transfer failed".into())),
+        }?;
+        if matches!(t.direction, Direction::In) && t.buffer_len > 0 {
+            t.dma_slice().prepare_read_all();
         }
+        t.transfer_len = c.trb_transfer_length() as usize;
+        Ok(t)
+    }
+
+    fn enque_trb(&mut self, trb: transfer::Allowed) -> TransferId {
+        TransferId(self.ring.enque_transfer(trb))
+    }
+
+    fn enque_iso(&mut self, bus_addr: u64, buff_len: usize, num_iso_packets: usize) -> TransferId {
+        if buff_len == 0 || num_iso_packets < 2 {
+            self.enque_iso_trb(bus_addr, buff_len)
+        } else {
+            self.enque_iso_multi(bus_addr, buff_len, num_iso_packets)
+        }
+    }
+
+    fn enque_iso_trb(&mut self, bus_addr: u64, buff_len: usize) -> TransferId {
+        let mut trb = Isoch::new();
+        trb.set_data_buffer_pointer(bus_addr as _)
+            .set_trb_transfer_length(buff_len as _)
+            .set_interrupter_target(0)
+            .set_interrupt_on_completion();
+
+        // if use_sia {
+        //     trb.set_start_isoch_asap(); // 启用SIA
+        // }
+
+        // 创建Isoch TRB
+        let trb = transfer::Allowed::Isoch(trb);
+        self.enque_trb(trb)
+    }
+    fn enque_iso_multi(&mut self, bus_addr: u64, len: usize, num_iso_packets: usize) -> TransferId {
+        let len = len as u64;
+        let packet_size = if len == 0 {
+            0
+        } else {
+            len.div_ceil(num_iso_packets as u64)
+        };
+
+        let mut id = TransferId(BusAddr(0));
+
+        for i in 0..num_iso_packets {
+            let i = i as u64;
+            let offset = i * packet_size;
+            if offset >= len {
+                break; // 避免越界
+            }
+            let remaining = len - offset;
+            let current_size = if remaining >= packet_size {
+                packet_size
+            } else {
+                remaining
+            };
+
+            if current_size > 0 {
+                let current_addr = bus_addr + offset;
+                let is_last = (i == num_iso_packets as u64 - 1) || (offset + current_size >= len);
+
+                if i == 0 {
+                    // 第一个TRB必须是Isoch TRB
+                    id = self.enque_iso_trb(current_addr, current_size as _);
+                } else {
+                    // 后续TRB使用Normal TRB
+                    let mut trb = Normal::new();
+                    trb.set_data_buffer_pointer(current_addr as _);
+                    trb.set_trb_transfer_length(current_size as _);
+                    trb.set_interrupter_target(0);
+
+                    if is_last {
+                        trb.set_interrupt_on_completion();
+                    }
+                    let trb = transfer::Allowed::Normal(trb);
+                    id = self.enque_trb(trb);
+                }
+            }
+        }
+
+        id
     }
 }
 
-fn on_ready(addr: *mut (), len: *mut (), direction: *mut ()) {
-    let addr = addr as usize;
-    let len = len as usize;
-    let direction = direction as usize as u8;
-    trace!("on_ready: {addr:#x}, {len}, {direction}");
-    let direction = Direction::from_raw(direction as usize as u8);
-    trace!("Transfer completed: addr={addr:#x}, len={len}, {direction:?}");
-    if len > 0 {
-        let data_slice = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
+impl EndpointOp for Endpoint {
+    fn submit(
+        &mut self,
+        transfer: crate::backend::ty::transfer::Transfer,
+    ) -> Result<crate::backend::ty::ep::TransferHandle<'_>, TransferError> {
+        let mut data_bus_addr = 0;
+        if transfer.buffer_len > 0 {
+            let data_slice = transfer.dma_slice();
+            if matches!(transfer.direction, Direction::Out) {
+                data_slice.confirm_write_all();
+            }
+            data_bus_addr = data_slice.bus_addr();
+        }
 
-        let dm = DSliceMut::from(
-            data_slice,
-            match direction {
-                Direction::Out => dma_api::Direction::ToDevice,
-                Direction::In => dma_api::Direction::FromDevice,
-            },
-        );
-        dm.prepare_read_all();
-        rmb();
+        let data_len = transfer.buffer_len;
+        let dir = transfer.direction;
+
+        let mut handle = TransferId(BusAddr(0));
+
+        match &transfer.kind {
+            TransferKind::Control(t) => {
+                let bm_request_type = BmRequestType {
+                    direction: transfer.direction,
+                    request_type: t.request_type,
+                    recipient: t.recipient,
+                };
+
+                let mut setup = transfer::SetupStage::default();
+                setup
+                    .set_request_type(bm_request_type.into())
+                    .set_request(t.request.into())
+                    .set_value(t.value)
+                    .set_index(t.index)
+                    .set_length(0)
+                    .set_transfer_type(transfer::TransferType::No);
+
+                let mut data = None;
+
+                if transfer.buffer_len > 0 {
+                    setup
+                        .set_transfer_type(dir.to_xhci_transfer_type())
+                        .set_length(data_len as _);
+
+                    let mut _data = transfer::DataStage::default();
+                    _data
+                        .set_data_buffer_pointer(data_bus_addr)
+                        .set_trb_transfer_length(data_len as _)
+                        .set_direction(transfer.direction.to_xhci_direction());
+                    data = Some(_data);
+                }
+
+                let mut status = transfer::StatusStage::default();
+                status.set_interrupt_on_completion();
+
+                if matches!(transfer.direction, Direction::In) && transfer.buffer_len > 0 {
+                    status.clear_direction();
+                } else {
+                    status.set_direction();
+                }
+
+                self.ring.enque_transfer(setup.into());
+                if let Some(data) = data {
+                    self.ring.enque_transfer(data.into());
+                }
+                handle.0 = self.ring.enque_transfer(status.into());
+            }
+            TransferKind::Interrupt | TransferKind::Bulk => {
+                let trb = transfer::Allowed::Normal(
+                    *Normal::new()
+                        .set_data_buffer_pointer(data_bus_addr as _)
+                        .set_trb_transfer_length(data_len as _)
+                        .set_interrupter_target(0)
+                        .set_interrupt_on_short_packet()
+                        .set_interrupt_on_completion(),
+                );
+                handle.0 = self.ring.enque_transfer(trb);
+            }
+            TransferKind::Isochronous { num_pkgs } => {
+                handle = self.enque_iso(data_bus_addr, data_len, *num_pkgs);
+            }
+        }
+        self.transfers.insert(handle, transfer);
+        mb();
+        self.doorbell();
+
+        Ok(TransferHandle::new(handle.0.raw(), self))
+    }
+
+    fn query_transfer(
+        &mut self,
+        id: u64,
+    ) -> Option<Result<crate::backend::ty::transfer::Transfer, TransferError>> {
+        let id = BusAddr(id);
+        let c = self.ring.get_finished(id)?;
+        let res = self.handle_transfer_completion(&c, id);
+        Some(res)
+    }
+
+    fn register_cx(&self, id: u64, cx: &mut core::task::Context<'_>) {
+        self.ring.register_cx(BusAddr(id), cx);
     }
 }
 
@@ -176,456 +285,5 @@ impl EndpointDescriptorExt for EndpointDescriptor {
                 usb_if::transfer::Direction::In => xhci::context::EndpointType::InterruptIn,
             },
         }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct EndpointControl(Arc<Mutex<EndpointRaw>>);
-
-impl EndpointControl {
-    pub fn new(raw: EndpointRaw) -> Self {
-        Self(Arc::new(Mutex::new(raw)))
-    }
-
-    pub fn bus_addr(&self) -> BusAddr {
-        self.0.lock().bus_addr()
-    }
-
-    pub fn transfer<'a>(
-        &self,
-        urb: ControlSetup,
-        dir: Direction,
-        buff: Option<(usize, u16)>,
-    ) -> ResultTransfer<'a> {
-        let mut trbs: Vec<transfer::Allowed> = Vec::new();
-        let bm_request_type = BmRequestType {
-            direction: dir,
-            request_type: urb.request_type,
-            recipient: urb.recipient,
-        };
-
-        let mut setup = transfer::SetupStage::default();
-        let mut buff_data = 0;
-        let mut buff_len = 0;
-
-        setup
-            .set_request_type(bm_request_type.into())
-            .set_request(urb.request.into())
-            .set_value(urb.value)
-            .set_index(urb.index)
-            .set_length(0)
-            .set_transfer_type(transfer::TransferType::No);
-
-        let mut data = None;
-
-        if let Some((addr, len)) = buff {
-            buff_data = addr;
-            buff_len = len as usize;
-            let data_slice =
-                unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };
-
-            let dm = DSliceMut::from(data_slice, dma_api::Direction::Bidirectional);
-
-            if matches!(dir, Direction::Out) {
-                dm.confirm_write_all();
-            }
-
-            setup
-                .set_transfer_type(dir.to_xhci_transfer_type())
-                .set_length(len);
-
-            let mut raw_data = transfer::DataStage::default();
-            raw_data
-                .set_data_buffer_pointer(dm.bus_addr() as _)
-                .set_trb_transfer_length(len as _)
-                .set_direction(dir.to_xhci_direction());
-
-            data = Some(raw_data)
-        }
-
-        let mut status = transfer::StatusStage::default();
-        status.set_interrupt_on_completion();
-
-        if matches!(dir, Direction::In) && buff.is_some() {
-            status.clear_direction();
-        } else {
-            status.set_direction();
-        }
-
-        trbs.push(setup.into());
-        if let Some(data) = data {
-            trbs.push(data.into());
-        }
-        trbs.push(status.into());
-
-        self.0
-            .lock()
-            .enque(trbs.into_iter(), dir, buff_data, buff_len)
-    }
-
-    pub fn listen(&self, root: &mut Root) {
-        let ring = self.0.lock();
-        root.litsen_transfer(&ring.ring);
-    }
-
-    pub fn control_in<'a>(
-        &mut self,
-        param: ControlSetup,
-        buff: &'a mut [u8],
-    ) -> ResultTransfer<'a> {
-        self.transfer(
-            param,
-            Direction::In,
-            if buff.is_empty() {
-                None
-            } else {
-                Some((buff.as_ptr() as usize, buff.len() as _))
-            },
-        )
-    }
-
-    pub fn control_out<'a>(&mut self, param: ControlSetup, buff: &'a [u8]) -> ResultTransfer<'a> {
-        self.transfer(
-            param,
-            Direction::Out,
-            if buff.is_empty() {
-                None
-            } else {
-                Some((buff.as_ptr() as usize, buff.len() as _))
-            },
-        )
-    }
-}
-
-pub struct Endpoint<T: kind::Sealed, D: direction::Sealed> {
-    pub(crate) raw: EndpointRaw,
-    desc: EndpointDescriptor,
-    _marker: core::marker::PhantomData<(T, D)>,
-}
-
-impl<T: kind::Sealed, D: direction::Sealed> Endpoint<T, D> {
-    pub(crate) fn new(desc: EndpointDescriptor, raw: EndpointRaw) -> Result<Self, USBError> {
-        Ok(Self {
-            raw,
-            desc,
-            _marker: core::marker::PhantomData,
-        })
-    }
-
-    /// 验证端点方向和传输类型
-    fn validate_endpoint(
-        &self,
-        expected_direction: usb_if::transfer::Direction,
-        expected_type: usb_if::descriptor::EndpointType,
-    ) -> Result<(), TransferError> {
-        if self.desc.direction != expected_direction {
-            return Err(TransferError::Other("Endpoint direction mismatch".into()));
-        }
-        if self.desc.transfer_type != expected_type {
-            return Err(TransferError::Other("Endpoint type mismatch".into()));
-        }
-        Ok(())
-    }
-
-    /// 为ISO端点设置帧调度信息（仅对ISO端点有效）
-    pub fn set_iso_schedule(&mut self, target_frame: u16, start_asap: bool, interval: u8) {
-        if self.desc.transfer_type == usb_if::descriptor::EndpointType::Isochronous {
-            let schedule = IsoFrameSchedule {
-                target_frame,
-                start_asap,
-                interval,
-            };
-            self.raw.set_iso_schedule(schedule);
-        }
-    }
-
-    /// 准备DMA缓冲区（输入方向）
-    fn prepare_in_buffer(&self, data: &mut [u8]) -> (usize, usize, usize) {
-        let len = data.len();
-        let addr_virt = data.as_mut_ptr() as usize;
-        let mut addr_bus = 0;
-
-        if len > 0 {
-            let dm = DSliceMut::from(data, dma_api::Direction::FromDevice);
-            addr_bus = dm.bus_addr() as usize;
-        }
-
-        (len, addr_virt, addr_bus)
-    }
-
-    /// 准备DMA缓冲区（输出方向）
-    fn prepare_out_buffer(&self, data: &[u8]) -> (usize, usize, usize) {
-        let len = data.len();
-        let addr_virt = data.as_ptr() as usize;
-        let mut addr_bus = 0;
-
-        if len > 0 {
-            let dm = DSlice::from(data, dma_api::Direction::ToDevice);
-            dm.confirm_write_all();
-            addr_bus = dm.bus_addr() as usize;
-        }
-
-        (len, addr_virt, addr_bus)
-    }
-
-    /// 创建Normal TRB
-    fn create_normal_trb(&self, addr_bus: usize, len: usize) -> transfer::Allowed {
-        transfer::Allowed::Normal(
-            *Normal::new()
-                .set_data_buffer_pointer(addr_bus as _)
-                .set_trb_transfer_length(len as _)
-                .set_interrupter_target(0)
-                .set_interrupt_on_short_packet()
-                .set_interrupt_on_completion(),
-        )
-    }
-
-    /// 创建Isoch TRB，根据xHCI规范优化
-    fn create_isoch_trb(&mut self, addr_bus: usize, len: usize) -> transfer::Allowed {
-        // 计算帧号
-        let _frame_number = self.raw.calculate_next_frame();
-
-        // 检查是否使用SIA (Start Isoch ASAP)
-        let use_sia = if let Some(schedule) = self.raw.get_iso_schedule() {
-            schedule.start_asap
-        } else {
-            true // 默认使用SIA
-        };
-
-        let mut trb = Isoch::new();
-        trb.set_data_buffer_pointer(addr_bus as _)
-            .set_trb_transfer_length(len as _)
-            .set_interrupter_target(0)
-            .set_interrupt_on_completion();
-
-        if use_sia {
-            trb.set_start_isoch_asap(); // 启用SIA
-        }
-
-        // 创建Isoch TRB
-        transfer::Allowed::Isoch(trb)
-    }
-
-    /// 创建Normal TRB用于Isoch TD的链接
-    fn create_normal_trb_for_isoch(
-        &self,
-        addr_bus: usize,
-        len: usize,
-        is_last: bool,
-    ) -> transfer::Allowed {
-        if is_last {
-            transfer::Allowed::Normal(
-                *Normal::new()
-                    .set_data_buffer_pointer(addr_bus as _)
-                    .set_trb_transfer_length(len as _)
-                    .set_interrupter_target(0)
-                    .set_interrupt_on_completion(),
-            )
-        } else {
-            transfer::Allowed::Normal(
-                *Normal::new()
-                    .set_data_buffer_pointer(addr_bus as _)
-                    .set_trb_transfer_length(len as _)
-                    .set_interrupter_target(0),
-            )
-        }
-    }
-
-    /// 执行传输的通用方法
-    fn execute_transfer<'a>(
-        &mut self,
-        trb: transfer::Allowed,
-        addr_virt: usize,
-        len: usize,
-    ) -> ResultTransfer<'a> {
-        self.raw
-            .enque([trb].into_iter(), self.desc.direction, addr_virt, len)
-    }
-
-    /// 执行多包ISO传输的通用方法
-    fn execute_iso_transfer<'a>(
-        &mut self,
-        trbs: Vec<transfer::Allowed>,
-        addr_virt: usize,
-        len: usize,
-    ) -> ResultTransfer<'a> {
-        self.raw
-            .enque(trbs.into_iter(), self.desc.direction, addr_virt, len)
-    }
-
-    /// 创建多包ISO传输的TRB列表
-    fn create_iso_trb_list(
-        &mut self,
-        addr_bus: usize,
-        len: usize,
-        num_iso_packets: usize,
-    ) -> Vec<transfer::Allowed> {
-        let mut trbs = Vec::new();
-        let packet_size = if len == 0 {
-            0
-        } else {
-            len.div_ceil(num_iso_packets)
-        };
-
-        for i in 0..num_iso_packets {
-            let offset = i * packet_size;
-            if offset >= len {
-                break; // 避免越界
-            }
-            let remaining = len - offset;
-            let current_size = if remaining >= packet_size {
-                packet_size
-            } else {
-                remaining
-            };
-
-            if current_size > 0 {
-                let current_addr = addr_bus + offset;
-                let is_last = (i == num_iso_packets - 1) || (offset + current_size >= len);
-
-                if i == 0 {
-                    // 第一个TRB必须是Isoch TRB
-                    let trb = self.create_isoch_trb(current_addr, current_size);
-                    trbs.push(trb);
-                } else {
-                    // 后续TRB使用Normal TRB
-                    let trb = self.create_normal_trb_for_isoch(current_addr, current_size, is_last);
-                    trbs.push(trb);
-                }
-            }
-        }
-
-        trbs
-    }
-}
-
-impl Endpoint<kind::Bulk, direction::In> {
-    pub fn transfer<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
-        self.validate_endpoint(Direction::In, usb_if::descriptor::EndpointType::Bulk)?;
-
-        let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
-        let trb = self.create_normal_trb(addr_bus, len);
-
-        self.execute_transfer(trb, addr_virt, len)
-    }
-}
-
-impl Endpoint<kind::Bulk, direction::Out> {
-    pub fn transfer<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
-        self.validate_endpoint(Direction::Out, usb_if::descriptor::EndpointType::Bulk)?;
-
-        let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
-        let trb = self.create_normal_trb(addr_bus, len);
-
-        self.execute_transfer(trb, addr_virt, len)
-    }
-}
-
-impl Endpoint<kind::Interrupt, direction::In> {
-    pub fn transfer<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
-        self.validate_endpoint(Direction::In, usb_if::descriptor::EndpointType::Interrupt)?;
-
-        let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
-        let trb = self.create_normal_trb(addr_bus, len);
-
-        self.execute_transfer(trb, addr_virt, len)
-    }
-}
-
-impl Endpoint<kind::Interrupt, direction::Out> {
-    pub fn transfer<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
-        self.validate_endpoint(Direction::Out, EndpointType::Interrupt)?;
-
-        let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
-        let trb = self.create_normal_trb(addr_bus, len);
-
-        self.execute_transfer(trb, addr_virt, len)
-    }
-}
-
-impl Endpoint<kind::Isochronous, direction::In> {
-    pub fn transfer_multi_packet<'a>(
-        &mut self,
-        data: &'a mut [u8],
-        num_iso_packets: usize,
-    ) -> ResultTransfer<'a> {
-        self.validate_endpoint(Direction::In, EndpointType::Isochronous)?;
-
-        let (len, addr_virt, addr_bus) = self.prepare_in_buffer(data);
-
-        if num_iso_packets <= 1 || len == 0 {
-            // 单包传输，使用原有逻辑
-            let trb = self.create_isoch_trb(addr_bus, len);
-            return self.execute_transfer(trb, addr_virt, len);
-        }
-
-        // 多包传输，使用公共方法创建TRB列表
-        let trbs = self.create_iso_trb_list(addr_bus, len, num_iso_packets);
-        self.execute_iso_transfer(trbs, addr_virt, len)
-    }
-}
-
-impl Endpoint<kind::Isochronous, direction::Out> {
-    pub fn transfer_multi_packet<'a>(
-        &mut self,
-        data: &'a [u8],
-        num_iso_packets: usize,
-    ) -> ResultTransfer<'a> {
-        self.validate_endpoint(Direction::Out, EndpointType::Isochronous)?;
-
-        let (len, addr_virt, addr_bus) = self.prepare_out_buffer(data);
-
-        if num_iso_packets <= 1 || len == 0 {
-            // 单包传输，使用原有逻辑
-            let trb = self.create_isoch_trb(addr_bus, len);
-            return self.execute_transfer(trb, addr_virt, len);
-        }
-
-        // 多包传输，使用公共方法创建TRB列表
-        let trbs = self.create_iso_trb_list(addr_bus, len, num_iso_packets);
-        self.execute_iso_transfer(trbs, addr_virt, len)
-    }
-}
-
-impl<T, D> usb_if::host::TEndpoint for Endpoint<T, D>
-where
-    T: kind::Sealed,
-    D: direction::Sealed,
-{
-}
-
-impl usb_if::host::EndpointBulkIn for Endpoint<kind::Bulk, direction::In> {
-    fn submit<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
-        self.transfer(data)
-    }
-}
-
-impl usb_if::host::EndpointBulkOut for Endpoint<kind::Bulk, direction::Out> {
-    fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
-        self.transfer(data)
-    }
-}
-
-impl usb_if::host::EndpointInterruptIn for Endpoint<kind::Interrupt, direction::In> {
-    fn submit<'a>(&mut self, data: &'a mut [u8]) -> ResultTransfer<'a> {
-        self.transfer(data)
-    }
-}
-
-impl usb_if::host::EndpointInterruptOut for Endpoint<kind::Interrupt, direction::Out> {
-    fn submit<'a>(&mut self, data: &'a [u8]) -> ResultTransfer<'a> {
-        self.transfer(data)
-    }
-}
-
-impl usb_if::host::EndpintIsoIn for Endpoint<kind::Isochronous, direction::In> {
-    fn submit<'a>(&mut self, data: &'a mut [u8], num_iso_packets: usize) -> ResultTransfer<'a> {
-        self.transfer_multi_packet(data, num_iso_packets)
-    }
-}
-
-impl usb_if::host::EndpintIsoOut for Endpoint<kind::Isochronous, direction::Out> {
-    fn submit<'a>(&mut self, data: &'a [u8], num_iso_packets: usize) -> ResultTransfer<'a> {
-        self.transfer_multi_packet(data, num_iso_packets)
     }
 }

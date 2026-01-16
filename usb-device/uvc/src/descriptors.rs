@@ -225,7 +225,7 @@ impl DescriptorParser {
     /// 解析VideoControl头描述符
     pub fn parse_vc_header(&self, data: &[u8]) -> Result<VcHeaderDescriptor, USBError> {
         if data.len() < 12 {
-            return Err(USBError::Other("VC header descriptor too short".into()));
+            return Err("VC header descriptor too short".into());
         }
 
         let length = data[0] as usize;
@@ -235,7 +235,7 @@ impl DescriptorParser {
         if descriptor_type != descriptor_types::CS_INTERFACE
             || descriptor_subtype != vc_descriptor_subtypes::HEADER
         {
-            return Err(USBError::Other("Invalid VC header descriptor".into()));
+            return Err("Invalid VC header descriptor".into());
         }
 
         let bcd_uvc = u16::from_le_bytes([data[3], data[4]]);
@@ -264,9 +264,7 @@ impl DescriptorParser {
     /// 解析输入终端描述符
     pub fn parse_input_terminal(&self, data: &[u8]) -> Result<InputTerminalDescriptor, USBError> {
         if data.len() < 15 {
-            return Err(USBError::Other(
-                "Input terminal descriptor too short".into(),
-            ));
+            return Err("Input terminal descriptor too short".into());
         }
 
         let length = data[0] as usize;
@@ -314,9 +312,7 @@ impl DescriptorParser {
     /// 解析处理单元描述符
     pub fn parse_processing_unit(&self, data: &[u8]) -> Result<ProcessingUnitDescriptor, USBError> {
         if data.len() < 10 {
-            return Err(USBError::Other(
-                "Processing unit descriptor too short".into(),
-            ));
+            return Err("Processing unit descriptor too short".into());
         }
 
         let length = data[0] as usize;
@@ -326,9 +322,7 @@ impl DescriptorParser {
         let controls_size = data[7] as usize;
 
         if length < 8 + controls_size {
-            return Err(USBError::Other(
-                "Processing unit controls data incomplete".into(),
-            ));
+            return Err("Processing unit controls data incomplete".into());
         }
 
         let controls = data[8..8 + controls_size].to_vec();
@@ -349,9 +343,7 @@ impl DescriptorParser {
     /// 解析VideoStreaming输入头描述符
     pub fn parse_vs_input_header(&self, data: &[u8]) -> Result<VsInputHeaderDescriptor, USBError> {
         if data.len() < 13 {
-            return Err(USBError::Other(
-                "VS input header descriptor too short".into(),
-            ));
+            return Err("VS input header descriptor too short".into());
         }
 
         let length = data[0] as usize;
@@ -366,9 +358,7 @@ impl DescriptorParser {
         let controls_size = data[12] as usize;
 
         if length < 13 + controls_size * num_formats as usize {
-            return Err(USBError::Other(
-                "VS input header controls data incomplete".into(),
-            ));
+            return Err("VS input header controls data incomplete".into());
         }
 
         let format_controls = data[13..13 + controls_size * num_formats as usize].to_vec();
@@ -397,9 +387,7 @@ impl DescriptorParser {
         data: &[u8],
     ) -> Result<UncompressedFormatDescriptor, USBError> {
         if data.len() < 27 {
-            return Err(USBError::Other(
-                "Uncompressed format descriptor too short".into(),
-            ));
+            return Err("Uncompressed format descriptor too short".into());
         }
 
         let length = data[0] as usize;
@@ -435,7 +423,7 @@ impl DescriptorParser {
     /// 解析MJPEG格式描述符
     pub fn parse_mjpeg_format(&self, data: &[u8]) -> Result<MjpegFormatDescriptor, USBError> {
         if data.len() < 11 {
-            return Err(USBError::Other("MJPEG format descriptor too short".into()));
+            return Err("MJPEG format descriptor too short".into());
         }
 
         let length = data[0] as usize;
@@ -468,7 +456,7 @@ impl DescriptorParser {
     /// 解析帧描述符
     pub fn parse_frame_descriptor(&self, data: &[u8]) -> Result<FrameDescriptor, USBError> {
         if data.len() < 26 {
-            return Err(USBError::Other("Frame descriptor too short".into()));
+            return Err("Frame descriptor too short".into());
         }
 
         let length = data[0] as usize;
