@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.3.2...usb-if-v0.4.0) - 2026-01-16
+
+### Other
+
+- [refactor] api improve ([#47](https://github.com/drivercraft/CrabUSB/pull/47))
+
 ## [0.3.2](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.3.1...usb-if-v0.3.2) - 2025-08-25
 
 ### Other
