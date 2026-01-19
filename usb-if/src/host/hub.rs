@@ -1,6 +1,6 @@
 //! USB Hub 设备抽象
 
-use alloc::{ vec::Vec};
+use alloc::vec::Vec;
 
 /// 寄存器宽度
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +69,101 @@ pub struct HubDescriptor {
 
     /// Hub 控制器电流（单位：mA）
     pub hub_current: u8,
+}
+
+impl HubDescriptor {
+    /// 从原始字节数据解析 Hub 描述符
+    ///
+    /// 参照 USB 2.0 规范 11.23.2.1 和 Linux 内核 `struct usb_hub_descriptor`。
+    ///
+    /// # 参数
+    /// - `data`: 原始描述符字节数据
+    ///
+    /// # 返回
+    /// 成功返回解析的 `HubDescriptor`，失败返回 `None`
+    ///
+    /// # 字节布局
+    /// ```text
+    /// Offset  Size  Field
+    /// ------ ----- ------------------
+    /// 0      1     bDescLength
+    /// 1      1     bDescriptorType (0x29)
+    /// 2      1     bNbrPorts
+    /// 3-4    2     wHubCharacteristics (little-endian)
+    /// 5      1     bPwrOn2PwrGood
+    /// 6      1     bHubContrCurrent
+    /// 7+     变长  DeviceRemovable 和 PortPwrCtrlMask
+    /// ```
+    ///
+    /// # 最小长度
+    /// 至少需要 7 字节
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+        // 验证最小长度
+        if data.len() < 7 {
+            return None;
+        }
+
+        // 验证描述符长度字段（至少 7）
+        let desc_len = data[0] as usize;
+        if desc_len < 7 || data.len() < desc_len {
+            return None;
+        }
+
+        // 验证描述符类型 (0x29)
+        if data[1] != 0x29 {
+            return None;
+        }
+
+        // 解析端口数量
+        let num_ports = data[2];
+
+        // 解析 Hub 特性（little-endian u16）
+        let characteristics_raw = u16::from_le_bytes([data[3], data[4]]);
+        let characteristics = HubCharacteristics::from_descriptor(characteristics_raw);
+
+        // 解析电源良好时间
+        let power_good_time = data[5];
+
+        // 解析 Hub 控制器电流
+        let hub_current = data[6];
+
+        Some(Self {
+            num_ports,
+            characteristics,
+            power_good_time,
+            hub_current,
+        })
+    }
+
+    /// 转换为字节数组
+    ///
+    /// 返回固定 7 字节的 Hub 描述符（不含可变字段）
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(7);
+        bytes.push(7); // bDescLength (固定 7，不含可变字段)
+        bytes.push(0x29); // bDescriptorType
+        bytes.push(self.num_ports);
+
+        // wHubCharacteristics (little-endian)
+        let characteristics = self.characteristics.to_descriptor();
+        bytes.extend_from_slice(&characteristics.to_le_bytes());
+
+        bytes.push(self.power_good_time);
+        bytes.push(self.hub_current);
+
+        bytes
+    }
+
+    /// 获取 DeviceRemovable 字段
+    ///
+    /// 返回每个端口的可移除位图（如果存在）
+    pub fn device_removable<'a>(&self, data: &'a [u8]) -> Option<&'a [u8]> {
+        if data.len() > 7 {
+            Some(&data[7..])
+        } else {
+            None
+        }
+    }
 }
 
 /// Hub 特性
@@ -270,5 +365,65 @@ mod tests {
         assert_eq!(original.compound_device, decoded.compound_device);
         assert_eq!(original.over_current_mode, decoded.over_current_mode);
         assert_eq!(original.port_indicators, decoded.port_indicators);
+    }
+
+    #[test]
+    fn test_hub_descriptor_from_bytes() {
+        // 测试数据：4 端口 Hub
+        let data = [
+            0x09, // bDescLength = 9
+            0x29, // bDescriptorType = 0x29 (Hub)
+            0x04, // bNbrPorts = 4
+            0x00, 0x12, // wHubCharacteristics = 0x1200
+            0x32, // bPwrOn2PwrGood = 50 * 2ms = 100ms
+            0x64, // bHubContrCurrent = 100mA
+        ];
+
+        let desc = HubDescriptor::from_bytes(&data).expect("Failed to parse");
+
+        assert_eq!(desc.num_ports, 4);
+        assert_eq!(desc.power_good_time, 50);
+        assert_eq!(desc.hub_current, 100);
+
+        // 验证特性解析
+        assert!(matches!(
+            desc.characteristics.power_switching,
+            PowerSwitchingMode::Individual
+        ));
+    }
+
+    #[test]
+    fn test_hub_descriptor_invalid_length() {
+        let data = [0x09, 0x29]; // 太短
+        assert!(HubDescriptor::from_bytes(&data).is_none());
+    }
+
+    #[test]
+    fn test_hub_descriptor_invalid_type() {
+        let mut data = [0x09u8; 7];
+        data[1] = 0x01; // 错误的类型
+        assert!(HubDescriptor::from_bytes(&data).is_none());
+    }
+
+    #[test]
+    fn test_hub_descriptor_roundtrip() {
+        let original = HubDescriptor {
+            num_ports: 4,
+            characteristics: HubCharacteristics {
+                power_switching: PowerSwitchingMode::Individual,
+                compound_device: true,
+                over_current_mode: OverCurrentMode::Global,
+                port_indicators: true,
+            },
+            power_good_time: 50,
+            hub_current: 100,
+        };
+
+        let bytes = original.to_bytes();
+        let parsed = HubDescriptor::from_bytes(&bytes).expect("Failed to parse");
+
+        assert_eq!(parsed.num_ports, original.num_ports);
+        assert_eq!(parsed.power_good_time, original.power_good_time);
+        assert_eq!(parsed.hub_current, original.hub_current);
     }
 }

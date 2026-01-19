@@ -159,18 +159,18 @@ impl HubDevice {
 
     async fn get_hub_descriptor(&mut self) -> Result<HubDescriptor, USBError> {
         let mut buf = [0u8; 256];
-        let len = self
-            .data
+        let lang_id = self.data.dev.lang_id();
+        self.data
             .dev
             .ep_ctrl()
             .get_descriptor(
                 usb_if::descriptor::DescriptorType::HUB,
                 0,
-                self.data.dev.lang_id().into(),
+                lang_id.into(),
                 &mut buf,
             )
             .await?;
-        HubDescriptor::from_bytes(&buf[..len])
+        HubDescriptor::from_bytes(&buf)
             .ok_or(USBError::Other(anyhow!("Failed to parse hub descriptor")))
     }
 }
