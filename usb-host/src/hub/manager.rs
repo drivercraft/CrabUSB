@@ -2,6 +2,7 @@
 //!
 //! 管理所有 Hub 设备，包括 Root Hub 和 External Hub，维护 Hub 树结构。
 
+use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::vec::Vec;
 use core::ops::RangeInclusive;
@@ -12,7 +13,7 @@ use usb_if::host::{
 };
 
 use super::event::HubId;
-use crate::backend::DeviceId;
+use crate::{Device, backend::DeviceId};
 
 /// Hub 设备管理器
 ///
@@ -23,9 +24,6 @@ pub struct HubManager {
 
     /// 设备到 Hub 的映射 (device_id -> hub_id)
     device_to_hub: BTreeMap<DeviceId, HubId>,
-
-    /// Hub ID 分配器
-    next_hub_id: HubId,
 }
 
 impl HubManager {
@@ -34,20 +32,12 @@ impl HubManager {
         Self {
             hubs: BTreeMap::new(),
             device_to_hub: BTreeMap::new(),
-            next_hub_id: 1,
         }
-    }
-
-    /// 分配新的 Hub ID
-    fn allocate_hub_id(&mut self) -> HubId {
-        let id = self.next_hub_id;
-        self.next_hub_id += 1;
-        id
     }
 
     /// 添加 Hub 设备
     pub fn add_hub(&mut self, hub: HubDevice) -> HubId {
-        let hub_id = hub.id;
+        let hub_id = hub.id();
         self.hubs.insert(hub_id, hub);
         hub_id
     }
@@ -103,12 +93,10 @@ impl Default for HubManager {
 ///
 /// 表示一个 Hub 设备（Root Hub 或 External Hub）。
 pub struct HubDevice {
-    /// Hub ID
-    pub id: HubId,
+    data: Box<Inner>,
+}
 
-    /// Hub 类型
-    pub kind: HubKind,
-
+struct Inner {
     /// Hub 状态
     pub state: HubState,
 
@@ -118,110 +106,72 @@ pub struct HubDevice {
     /// 端口列表
     pub ports: Vec<Port>,
 
-    /// 父 Hub ID（如果有）
     pub parent_hub: Option<HubId>,
-
-    /// 父端口号（如果有）
-    pub parent_port: Option<u8>,
 
     /// 层级深度（Root Hub = 0）
     pub depth: u8,
+
+    pub dev: Device,
+
+    pub descriptor: Option<HubDescriptor>,
 }
 
 impl HubDevice {
     /// 创建新的 Hub 设备
-    pub fn new(
-        id: HubId,
-        kind: HubKind,
-        num_ports: u8,
-        parent_hub: Option<HubId>,
-        parent_port: Option<u8>,
-        depth: u8,
-    ) -> Self {
-        // 创建端口列表
-        let ports = (0..num_ports).map(|i| Port::new(i + 1)).collect();
-
+    pub fn new(parent_hub: Option<HubId>, depth: u8, dev: Device) -> Self {
         Self {
-            id,
-            kind,
-            state: HubState::Uninitialized,
-            num_ports,
-            ports,
-            parent_hub,
-            parent_port,
-            depth,
+            data: Box::new(Inner {
+                state: HubState::Uninitialized,
+                num_ports: 0,
+                ports: vec![],
+                parent_hub,
+                depth,
+                dev,
+                descriptor: None,
+            }),
         }
     }
 
-    /// 获取 Hub 描述符（如果可用）
-    pub fn descriptor(&self) -> Option<&HubDescriptor> {
-        match &self.kind {
-            HubKind::External(ext) => Some(ext.descriptor()),
-            _ => None,
-        }
+    pub fn id(&self) -> HubId {
+        self.data.as_ref() as *const Inner as usize as HubId
     }
 
-    /// 获取端口
-    pub fn get_port(&self, port_index: u8) -> Option<&Port> {
-        if port_index == 0 || port_index > self.num_ports {
-            return None;
-        }
-        self.ports.get((port_index - 1) as usize)
+    pub async fn init(&mut self) -> Result<(), USBError> {
+        self.data.dev.init().await?;
+
+        let config = self
+            .data
+            .dev
+            .configurations()
+            .first()
+            .ok_or(USBError::Other(anyhow!("Hub device has no configuration")))?
+            .configuration_value;
+
+        self.data.dev.set_configuration(config).await?;
+
+        let descriptor = self.get_hub_descriptor().await?;
+        self.data.num_ports = descriptor.num_ports;
+        self.data.ports = (1..=descriptor.num_ports).map(Port::new).collect();
+        self.data.descriptor = Some(descriptor);
+
+        Ok(())
     }
 
-    /// 获取端口（可变）
-    pub fn get_port_mut(&mut self, port_index: u8) -> Option<&mut Port> {
-        if port_index == 0 || port_index > self.num_ports {
-            return None;
-        }
-        self.ports.get_mut((port_index - 1) as usize)
-    }
-}
-
-/// Hub 类型
-pub enum HubKind {
-    /// Root Hub（xHCI 控制器集成）
-    Root,
-
-    /// External Hub（通过 USB 连接）
-    External(ExternalHubInfo),
-}
-
-/// External Hub 信息
-pub struct ExternalHubInfo {
-    /// Hub 描述符
-    descriptor: HubDescriptor,
-
-    /// 设备地址
-    device_address: u8,
-
-    /// 状态变化端点
-    status_change_endpoint: bool,
-}
-
-impl ExternalHubInfo {
-    pub fn new(
-        descriptor: HubDescriptor,
-        device_address: u8,
-        status_change_endpoint: bool,
-    ) -> Self {
-        Self {
-            descriptor,
-            device_address,
-            status_change_endpoint,
-        }
-    }
-
-    pub fn descriptor(&self) -> &HubDescriptor {
-        &self.descriptor
-    }
-
-    pub fn device_address(&self) -> u8 {
-        self.device_address
-    }
-
-    pub fn has_status_endpoint(&self) -> bool {
-        self.status_change_endpoint
+    async fn get_hub_descriptor(&mut self) -> Result<HubDescriptor, USBError> {
+        let mut buf = [0u8; 256];
+        let len = self
+            .data
+            .dev
+            .ep_ctrl()
+            .get_descriptor(
+                usb_if::descriptor::DescriptorType::HUB,
+                0,
+                self.data.dev.lang_id().into(),
+                &mut buf,
+            )
+            .await?;
+        HubDescriptor::from_bytes(&buf[..len])
+            .ok_or(USBError::Other(anyhow!("Failed to parse hub descriptor")))
     }
 }
 

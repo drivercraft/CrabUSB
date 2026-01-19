@@ -21,4 +21,4 @@ pub mod manager;
 
 // 重新导出常用类型
 pub use event::{HubEvent, HubEventHandler, HubId, HubStatusChange};
-pub use manager::{HubDevice, HubKind, HubManager, Port, PortState};
+pub use manager::{HubDevice, HubManager, Port, PortState};

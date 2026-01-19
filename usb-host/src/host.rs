@@ -1,10 +1,10 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use usb_if::descriptor::{Class, HubSpeed};
+use usb_if::descriptor::{Class, DescriptorType, HubSpeed};
 
 use crate::backend::ty::*;
 use crate::err::Result;
-use crate::hub::HubManager;
+use crate::hub::{HubManager, event::HubId, manager::HubDevice};
 use crate::{Mmio, backend::BackendOp};
 
 pub use super::backend::{
@@ -58,7 +58,9 @@ impl USBHost {
 
         for dev in self.backend.probe_devices().await? {
             let info = DeviceInfo { inner: dev };
-            if let Class::Hub(speed) = info.descriptor().class() {
+            if let Class::Hub(speed) = info.descriptor().class()
+                && cfg!(not(feature = "libusb"))
+            {
                 let mut hub_infos = self.probe_handle_hub(info, speed).await?;
                 out.append(&mut hub_infos);
             } else {
@@ -76,9 +78,45 @@ impl USBHost {
     ) -> Result<Vec<DeviceInfo>> {
         debug!("Found hub: {:?}, speed: {:?}", info, speed);
 
-        // TODO: 实现完整的 Hub 枚举
-        // 暂时返回空设备列表，跳过 Hub 的子设备枚举
-        Ok(Vec::new())
+        // 待处理的 Hub 栈，用于支持多级 Hub
+        let mut hub_stack: Vec<HubStack> = vec![];
+
+        hub_stack.push(HubStack {
+            info,
+            hub_speed: speed,
+            parent_hub: None,
+            depth: 0,
+        });
+
+        // 最终返回的非 Hub 设备列表
+        let mut non_hub_devices = Vec::new();
+
+        // 循环处理栈中的 Hub
+        while let Some(stack) = hub_stack.pop() {
+            debug!(
+                "Processing hub at depth {}, parent: {:?}",
+                stack.depth,
+                if let Some(id) = stack.parent_hub {
+                    format!("HubId {:#x}", id)
+                } else {
+                    "Root".into()
+                }
+            );
+
+            // 打开 Hub 设备
+            let device = match self.open_device(&stack.info).await {
+                Ok(dev) => dev,
+                Err(e) => {
+                    warn!("Failed to open hub device: {:?}", e);
+                    continue;
+                }
+            };
+
+            let mut device = HubDevice::new(stack.parent_hub, stack.depth, device);
+            device.init().await?;
+        }
+
+        Ok(non_hub_devices)
     }
 
     pub fn create_event_handler(&mut self) -> EventHandler {
@@ -91,6 +129,19 @@ impl USBHost {
         let mut device: Device = device.into();
         device.init().await?;
         Ok(device)
+    }
+}
+
+struct HubStack {
+    info: DeviceInfo,
+    hub_speed: HubSpeed,
+    parent_hub: Option<HubId>,
+    depth: u8,
+}
+
+impl HubStack {
+    fn is_root(&self) -> bool {
+        self.parent_hub.is_none()
     }
 }
 
