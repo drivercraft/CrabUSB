@@ -77,14 +77,24 @@ impl Endpoint {
             },
             Err(_e) => Err(TransferError::Other("Transfer failed".into())),
         }?;
-        t.transfer_len = c.trb_transfer_length() as usize;
-        if matches!(t.direction, Direction::In) && t.buffer_len > 0 {
-            trace!(
-                "Preparing read all for transfer at addr {:#x}, len {}",
-                t.buffer_addr, t.transfer_len
-            );
-            t.dma_slice().prepare_read_all();
+
+        // xHCI 规范：trb_transfer_length 字段根据端点方向有不同的含义
+        // - IN 端点（设备到主机）：表示未传输的剩余字节数
+        // - OUT 端点（主机到设备）：表示实际传输的字节数
+        if matches!(t.direction, Direction::In) {
+            // 对于 IN 端点，实际传输长度 = 请求长度 - 剩余长度
+            t.transfer_len = t
+                .buffer_len
+                .saturating_sub(c.trb_transfer_length() as usize);
+
+            if t.transfer_len > 0 {
+                t.dma_slice().prepare_read_all();
+            }
+        } else {
+            // 对于 OUT 端点，trb_transfer_length 就是实际传输长度
+            t.transfer_len = c.trb_transfer_length() as usize;
         }
+        trace!("Transfer data length: {}", t.transfer_len);
         Ok(t)
     }
 
