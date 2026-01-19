@@ -28,13 +28,7 @@
 use alloc::{boxed::Box, vec::Vec};
 use futures::future::LocalBoxFuture;
 
-use crate::{
-    descriptor::{DeviceDescriptor, ConfigurationDescriptor},
-    err::USBError,
-    transfer::ControlSetup,
-};
-
-use super::{DeviceInfo, Device};
+use super::USBError;
 
 // ============================================================================
 // 基础 Hub 接口
@@ -60,12 +54,17 @@ pub trait Hub: Send + 'static {
     ///
     /// # Safety
     /// 调用者必须确保 port_index < num_ports()
-    fn port(&mut self, port_index: u8) -> Result<Box<dyn HubPortOps>, USBError>;
+    ///
+    /// TODO: 暂时返回具体类型，不使用 dyn HubPortOps
+    /// 等待 async trait 稳定后再改为 trait object
+    fn port_status(&mut self, port_index: u8) -> Result<PortStatus, USBError>;
 
     /// 获取所有端口的当前状态
     ///
     /// 用于设备枚举和状态监控
-    fn port_status_all(&mut self) -> LocalBoxFuture<'_, Result<Vec<PortStatus>, USBError>>;
+    ///
+    /// TODO: 暂时改为同步方法
+    fn port_status_all(&mut self) -> Result<Vec<PortStatus>, USBError>;
 
     /// 获取 Hub 特性
     fn hub_characteristics(&self) -> HubCharacteristics;
@@ -83,7 +82,9 @@ pub trait Hub: Send + 'static {
     ///
     /// # Safety
     /// 必须在适当的上下文中调用（中断或任务上下文）
-    unsafe fn handle_event(&mut self) -> LocalBoxFuture<'_, Result<(), USBError>>;
+    ///
+    /// TODO: 暂时改为同步方法
+    unsafe fn handle_event(&mut self) -> Result<(), USBError>;
 }
 
 /// Hub 端口操作接口
@@ -244,7 +245,10 @@ pub enum MemoryBarrierType {
 /// 所有操作都通过 USB Control 传输完成。
 ///
 /// 参照 Linux `drivers/usb/core/hub.c`。
-pub trait ExternalHub: Hub + Device {
+///
+/// TODO: 暂时注释掉 Device trait 约束，等 Device trait 定义后再添加
+pub trait ExternalHub: Hub {
+    /* + Device */
     /// 获取 Hub 设备地址
     fn device_address(&self) -> u8;
 
@@ -256,13 +260,15 @@ pub trait ExternalHub: Hub + Device {
     /// 发送 Hub 类请求
     ///
     /// 参照 USB 2.0 规范 11.24 (Hub Class Requests)。
+    ///
+    /// TODO: 暂时改为同步方法
     fn hub_control(
         &mut self,
         request: HubRequest,
         value: u16,
         index: u16,
         data: &mut [u8],
-    ) -> LocalBoxFuture<'_, Result<usize, USBError>>;
+    ) -> Result<usize, USBError>;
 
     /// 获取 Transaction Translator (TT) 信息
     ///
@@ -456,9 +462,10 @@ impl From<u8> for DeviceSpeed {
 /// 中断 IN 端点
 ///
 /// 用于 External Hub 的状态变化报告。
+///
+/// TODO: 暂时改为同步方法
 pub trait EndpointInterruptIn: Send + 'static {
-    fn submit<'a>(&mut self, data: &'a mut [u8])
-        -> LocalBoxFuture<'a, Result<usize, USBError>>;
+    fn submit(&mut self, data: &mut [u8]) -> Result<usize, USBError>;
 }
 
 // ============================================================================
