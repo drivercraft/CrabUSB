@@ -8,11 +8,13 @@ args = [
   "-device", "qemu-xhci,id=xhci",
 
   # Level 1 Hub
-  "-device", "usb-hub,bus=xhci.0,id=hub1",
+  "-device", "usb-hub,bus=xhci.0,port=1",
 
-  # 测试设备（自动连接到 Hub 端口）
-  "-device", "usb-kbd",
-  "-device", "usb-mouse",
+  "-drive",
+  "if=none,id=stick,format=raw,file=test.img",
+
+  "-device",
+  "usb-storage,bus=xhci.0,port=1.4,drive=stick",
 ]
 
 fail_regex = []
