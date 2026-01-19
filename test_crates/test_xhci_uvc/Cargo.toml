@@ -8,8 +8,7 @@ version = "0.1.0"
 
 [dependencies]
 crab-usb = {workspace = true}
-log = {version = "0.4", features = ["max_level_info"]}
-# log = "0.4"
+log = "0.4"
 crab-uvc = {workspace = true}
 futures = {workspace = true, features = ["alloc"]}
 
