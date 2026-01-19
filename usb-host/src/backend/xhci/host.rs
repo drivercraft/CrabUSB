@@ -642,6 +642,7 @@ impl EventHandler {
                     let slot_id = c.slot_id();
                     let ep_id = c.endpoint_id();
                     let ptr = c.trb_pointer();
+
                     unsafe {
                         self.transfer_result_handler
                             .set_finished(slot_id, ep_id, ptr.into(), c)
