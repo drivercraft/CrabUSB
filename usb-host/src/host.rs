@@ -76,7 +76,9 @@ impl USBHost {
     ) -> Result<Vec<DeviceInfo>> {
         debug!("Found hub: {:?}, speed: {:?}", info, speed);
 
-        todo!()
+        // TODO: 实现完整的 Hub 枚举
+        // 暂时返回空设备列表，跳过 Hub 的子设备枚举
+        Ok(Vec::new())
     }
 
     pub fn create_event_handler(&mut self) -> EventHandler {
