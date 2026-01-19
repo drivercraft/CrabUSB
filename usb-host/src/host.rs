@@ -1,8 +1,10 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use usb_if::descriptor::{Class, HubSpeed};
 
 use crate::backend::ty::*;
 use crate::err::Result;
+use crate::hub::HubManager;
 use crate::{Mmio, backend::BackendOp};
 
 pub use super::backend::{
@@ -18,6 +20,7 @@ pub use crate::device::{Device, DeviceInfo};
 /// USB 主机控制器
 pub struct USBHost {
     backend: Box<dyn BackendOp>,
+    hubs: HubManager,
 }
 
 impl USBHost {
@@ -41,6 +44,7 @@ impl USBHost {
     pub(crate) fn new(backend: impl BackendOp) -> Self {
         Self {
             backend: Box::new(backend),
+            hubs: HubManager::new(),
         }
     }
 
@@ -50,12 +54,29 @@ impl USBHost {
     }
 
     pub async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>> {
-        self.backend.probe_devices().await.map(|infos| {
-            infos
-                .into_iter()
-                .map(|info| DeviceInfo { inner: info })
-                .collect()
-        })
+        let mut out = vec![];
+
+        for dev in self.backend.probe_devices().await? {
+            let info = DeviceInfo { inner: dev };
+            if let Class::Hub(speed) = info.descriptor().class() {
+                let mut hub_infos = self.probe_handle_hub(info, speed).await?;
+                out.append(&mut hub_infos);
+            } else {
+                out.push(info);
+            }
+        }
+
+        Ok(out)
+    }
+
+    async fn probe_handle_hub(
+        &mut self,
+        info: DeviceInfo,
+        speed: HubSpeed,
+    ) -> Result<Vec<DeviceInfo>> {
+        debug!("Found hub: {:?}, speed: {:?}", info, speed);
+
+        todo!()
     }
 
     pub fn create_event_handler(&mut self) -> EventHandler {
