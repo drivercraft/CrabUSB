@@ -32,6 +32,7 @@ impl DescriptorType {
     pub const DEVICE_CAPABILITY: Self = Self(0x10);
     pub const SUPERSPEED_USB_ENDPOINT_COMPANION: Self = Self(0x30);
     pub const SUPERSPEEDPLUS_ISOCHRONOUS_ENDPOINT_COMPANION: Self = Self(0x31);
+    pub const HUB: Self = Self(0x29);
 }
 
 impl From<u8> for DescriptorType {
