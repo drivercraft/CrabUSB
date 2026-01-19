@@ -61,8 +61,14 @@ impl USBHost {
             if let Class::Hub(speed) = info.descriptor().class()
                 && cfg!(not(feature = "libusb"))
             {
-                let mut hub_infos = self.probe_handle_hub(info, speed).await?;
-                out.append(&mut hub_infos);
+                if let Some((config, interface)) = HubDevice::is_hub(&info) {
+                    let mut hub_infos = self
+                        .probe_handle_hub(info, speed, config, interface)
+                        .await?;
+                    out.append(&mut hub_infos);
+                } else {
+                    out.push(info);
+                }
             } else {
                 out.push(info);
             }
@@ -75,6 +81,8 @@ impl USBHost {
         &mut self,
         info: DeviceInfo,
         speed: HubSpeed,
+        config: u8,
+        interface: u8,
     ) -> Result<Vec<DeviceInfo>> {
         debug!("Found hub: {:?}, speed: {:?}", info, speed);
 
@@ -85,6 +93,8 @@ impl USBHost {
             info,
             hub_speed: speed,
             parent_hub: None,
+            config,
+            interface,
             depth: 0,
         });
 
@@ -112,7 +122,13 @@ impl USBHost {
                 }
             };
 
-            let mut device = HubDevice::new(stack.parent_hub, stack.depth, device);
+            let mut device = HubDevice::new(
+                stack.parent_hub,
+                stack.depth,
+                device,
+                stack.config,
+                stack.interface,
+            );
             device.init().await?;
         }
 
@@ -136,6 +152,8 @@ struct HubStack {
     info: DeviceInfo,
     hub_speed: HubSpeed,
     parent_hub: Option<HubId>,
+    config: u8,
+    interface: u8,
     depth: u8,
 }
 

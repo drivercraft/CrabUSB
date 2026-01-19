@@ -34,6 +34,60 @@ pub enum HubRequest {
     GetHubDescriptor16, // USB 3.0+
 }
 
+const USB_MAXCHILDREN: usize = 31;
+const DEVICE_BITMAP_BYTES: usize = (USB_MAXCHILDREN + 1).div_ceil(8);
+
+#[derive(Clone, Copy)]
+#[allow(non_snake_case)]
+#[repr(C, packed)]
+pub struct UsbHubDescriptor {
+    pub bDescLength: u8,
+    pub bDescriptorType: u8,
+    pub bNbrPorts: u8,
+    wHubCharacteristics: u16,
+    pub bPwrOn2PwrGood: u8,
+    pub bHubContrCurrent: u8,
+    pub u: HubDescriptorVariant,
+}
+
+impl UsbHubDescriptor {
+    pub fn hub_characteristics(&self) -> u16 {
+        u16::from_le(self.wHubCharacteristics)
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(C, packed)]
+pub union HubDescriptorVariant {
+    pub hs: HighSpeedHubDescriptorTail,
+    pub ss: SuperSpeedHubDescriptorTail,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+pub struct HighSpeedHubDescriptorTail {
+    pub device_removable: [u8; DEVICE_BITMAP_BYTES],
+    pub port_pwr_ctrl_mask: [u8; DEVICE_BITMAP_BYTES],
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+pub struct SuperSpeedHubDescriptorTail {
+    pub bHubHdrDecLat: u8,
+    wHubDelay: u16,
+    device_removable: u16,
+}
+
+impl SuperSpeedHubDescriptorTail {
+    pub fn hub_delay(&self) -> u16 {
+        u16::from_le(self.wHubDelay)
+    }
+    pub fn device_removable(&self) -> u16 {
+        u16::from_le(self.device_removable)
+    }
+}
+
 /// Transaction Translator 信息
 ///
 /// 用于高速 Hub 与低速/全速设备的通信。
@@ -297,7 +351,7 @@ impl HubCharacteristics {
     ///
     /// 参照 USB 2.0 规范图 11-16。
     pub fn from_descriptor(value: u16) -> Self {
-        let power_switching = match (value & 0x03) {
+        let power_switching = match value & 0x03 {
             0x01 => PowerSwitchingMode::Ganged,
             0x02 => PowerSwitchingMode::Individual,
             _ => PowerSwitchingMode::AlwaysPower,
@@ -374,9 +428,15 @@ mod tests {
             0x09, // bDescLength = 9
             0x29, // bDescriptorType = 0x29 (Hub)
             0x04, // bNbrPorts = 4
-            0x00, 0x12, // wHubCharacteristics = 0x1200
+            0x12, 0x00, // wHubCharacteristics = 0x0012 (little-endian)
+            // Bits 1:0 = 10b -> Individual power switching
+            // Bit 2 = 0 -> Not a compound device
+            // Bit 3 = 1 -> Individual over-current protection
+            // Bit 4 = 0 -> No port indicators
             0x32, // bPwrOn2PwrGood = 50 * 2ms = 100ms
             0x64, // bHubContrCurrent = 100mA
+            0x00, // DeviceRemovable (端口 0-7 位图)
+            0x00, // Reserved
         ];
 
         let desc = HubDescriptor::from_bytes(&data).expect("Failed to parse");
