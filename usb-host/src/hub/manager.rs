@@ -206,13 +206,6 @@ impl HubDevice {
 
         self.data.dev.claim_interface(self.interface, 0).await?;
 
-        // TODO: 实现端口电源开启（Linux: hub_power_on）
-        // 注意：QEMU 等模拟环境可能不支持 SetPortFeature 命令
-        // 需要添加超时机制避免卡死
-
-        // TODO: 实现端口状态检测（Linux: hub_init_func2/3）
-        // 需要轮询端口状态变化，检测设备连接
-
         // 标记 Hub 为运行状态
         self.data.state = HubState::Running;
         debug!("Hub initialized with {} ports", self.data.num_ports);
@@ -294,6 +287,12 @@ impl HubDevice {
         }
 
         Err(USBError::Other(anyhow!("Hub get descriptor failed")))
+    }
+
+    pub fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>, USBError> {
+        // TODO: 实现端口状态检测（Linux: hub_init_func2/3）
+        // 需要轮询端口状态变化，检测设备连接
+        Ok(vec![])
     }
 }
 

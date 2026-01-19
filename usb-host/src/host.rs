@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use usb_if::descriptor::{Class, DescriptorType, HubSpeed};
+use usb_if::descriptor::{Class, HubSpeed};
 
 use crate::backend::ty::*;
 use crate::err::Result;
@@ -130,6 +130,26 @@ impl USBHost {
                 stack.interface,
             );
             device.init().await?;
+
+            let devices = device.probe_devices()?;
+            for dev in devices {
+                if let Class::Hub(speed) = dev.descriptor().class() {
+                    if let Some((config, interface)) = HubDevice::is_hub(&dev) {
+                        hub_stack.push(HubStack {
+                            info: dev,
+                            hub_speed: speed,
+                            parent_hub: Some(device.id()),
+                            config,
+                            interface,
+                            depth: stack.depth + 1,
+                        });
+                    } else {
+                        non_hub_devices.push(dev);
+                    }
+                } else {
+                    non_hub_devices.push(dev);
+                }
+            }
         }
 
         Ok(non_hub_devices)
