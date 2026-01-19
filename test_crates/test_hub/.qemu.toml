@@ -7,14 +7,12 @@ args = [
   # xHCI 控制器
   "-device", "qemu-xhci,id=xhci",
 
-  # Level 1 Hub (连接到 xHCI 端口 1)
-  "-device", "usb-hub,bus=xhci.0,port=1.0,id=hub1",
+  # Level 1 Hub
+  "-device", "usb-hub,bus=xhci.0,id=hub1",
 
-  # 测试设备连接到 Hub
-  "-device", "usb-kbd,bus=xhci.0.1-hub.0,port=1",
-  "-device", "usb-mouse,bus=xhci.0.1-hub.0,port=2",
-  "-device", "usb-storage,bus=xhci.0.1-hub.0,port=3,drive=stick",
-  "-drive", "if=none,id=stick,format=raw,file=test.img",
+  # 测试设备（自动连接到 Hub 端口）
+  "-device", "usb-kbd",
+  "-device", "usb-mouse",
 ]
 
 fail_regex = []
