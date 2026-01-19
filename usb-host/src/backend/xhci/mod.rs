@@ -5,6 +5,8 @@ pub(crate) mod device;
 mod endpoint;
 mod event;
 pub(crate) mod host;
+pub(crate) mod hub;
+pub(crate) mod port;
 mod reg;
 mod ring;
 mod sync;
