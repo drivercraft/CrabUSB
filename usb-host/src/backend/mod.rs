@@ -17,6 +17,7 @@ pub(crate) mod ty;
 
 define_int_type!(Dci, u8);
 define_int_type!(PortId, usize);
+define_int_type!(DeviceId, u32);
 
 impl Dci {
     pub const CTRL: Self = Self(1);
