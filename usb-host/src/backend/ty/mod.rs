@@ -30,6 +30,7 @@ pub(crate) trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
 /// USB 设备特征（高层抽象）
 pub(crate) trait DeviceOp: Send + Any + 'static {
     fn backend_name(&self) -> &str;
+    fn parent_port_id(&self) -> Option<u8>;
     fn descriptor(&self) -> &DeviceDescriptor;
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
 

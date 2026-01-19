@@ -511,6 +511,10 @@ impl DeviceOp for Device {
         "xhci"
     }
 
+    fn parent_port_id(&self) -> Option<u8> {
+        Some(self.port_id.raw() as u8)
+    }
+
     fn descriptor(&self) -> &DeviceDescriptor {
         &self.desc
     }

@@ -77,10 +77,11 @@ impl Endpoint {
             },
             Err(_e) => Err(TransferError::Other("Transfer failed".into())),
         }?;
+        t.transfer_len = c.trb_transfer_length() as usize;
         if matches!(t.direction, Direction::In) && t.buffer_len > 0 {
+            trace!("Preparing read all for transfer at addr {:#x}, len {}", t.buffer_addr, t.transfer_len);
             t.dma_slice().prepare_read_all();
         }
-        t.transfer_len = c.trb_transfer_length() as usize;
         Ok(t)
     }
 
