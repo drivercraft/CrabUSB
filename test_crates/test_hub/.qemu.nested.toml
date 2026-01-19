@@ -1,0 +1,33 @@
+# QEMU USB Hub 多层嵌套测试配置 (2-3 级)
+args = [
+  "-nographic",
+  "-cpu", "cortex-a53",
+  "-usb",
+
+  # xHCI 控制器 (Root Hub)
+  "-device", "qemu-xhci,id=xhci",
+
+  # Level 1 Hub (连接到 xHCI 端口 1)
+  "-device", "usb-hub,bus=xhci.0,port=1.0,id=hub1",
+
+  # Level 2 Hub (连接到 hub1 端口 2)
+  "-device", "usb-hub,bus=xhci.0.1-hub.0,port=2,id=hub2",
+
+  # Level 3 Hub (连接到 hub2 端口 3)
+  "-device", "usb-hub,bus=xhci.0.1-hub.0.2-hub.0,port=3,id=hub3",
+
+  # 设备连接到不同层级
+  # 连接到 hub1 端口 1
+  "-device", "usb-kbd,bus=xhci.0.1-hub.0,port=1",
+
+  # 连接到 hub2 端口 1
+  "-device", "usb-mouse,bus=xhci.0.1-hub.0.2-hub.0,port=1",
+
+  # 连接到 hub3 端口 1
+  "-device", "usb-tablet,bus=xhci.0.1-hub.0.2-hub.0.3-hub.0,port=1",
+]
+
+fail_regex = []
+success_regex = []
+to_bin = true
+uefi = false

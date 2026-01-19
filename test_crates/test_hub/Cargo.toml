@@ -1,0 +1,25 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "test_hub"
+publish = false
+repository.workspace = true
+version = "0.1.0"
+
+[dependencies]
+crab-usb = {workspace = true}
+log = {version = "0.4", features = ["max_level_info"]}
+futures = {workspace = true, features = ["alloc"]}
+
+[dev-dependencies]
+bare-test = {workspace = true}
+byte-unit = {version = "5.1.6", default-features = false, features = ["byte"]}
+pcie = "0.2"
+spin_on = "0.1.1"
+
+[build-dependencies]
+bare-test-macros = "0.2"
+
+[[test]]
+harness = false
+name = "test"
