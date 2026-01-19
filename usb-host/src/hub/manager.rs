@@ -5,13 +5,12 @@
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::vec::Vec;
-use core::ops::RangeInclusive;
 
 use usb_if::{
     descriptor::{Class, EndpointType},
     host::{
         ControlSetup, USBError,
-        hub::{HubDescriptor, PortStatus, UsbHubDescriptor},
+        hub::{HubDescriptor, PortStatus},
     },
     transfer::{Recipient, Request, RequestType},
 };
@@ -195,16 +194,17 @@ impl HubDevice {
 
         // 第二阶段：获取 Hub 描述符（带重试）
         let descriptor = self.get_hub_descriptor().await?;
-
-        if descriptor.bNbrPorts == 0 {
+        self.data.descriptor = Some(descriptor);
+        if self.hub_descriptor().bNbrPorts == 0 {
             return Err(USBError::Other(anyhow!("Hub has zero ports")));
         }
-
-        self.data.num_ports = descriptor.bNbrPorts;
+        self.data.num_ports = self.hub_descriptor().bNbrPorts;
 
         // 第三阶段：初始化端口状态（参考 Linux hub_activate）
         // 初始化所有端口为 Disconnected 状态
-        self.data.ports = (1..=descriptor.bNbrPorts).map(Port::new).collect();
+        self.data.ports = (1..=self.data.num_ports).map(Port::new).collect();
+
+        self.data.dev.claim_interface(self.interface, 0).await?;
 
         // TODO: 实现端口电源开启（Linux: hub_power_on）
         // 注意：QEMU 等模拟环境可能不支持 SetPortFeature 命令
@@ -213,12 +213,14 @@ impl HubDevice {
         // TODO: 实现端口状态检测（Linux: hub_init_func2/3）
         // 需要轮询端口状态变化，检测设备连接
 
-        // self.data.descriptor = Some(descriptor);
-
         // 标记 Hub 为运行状态
         self.data.state = HubState::Running;
         debug!("Hub initialized with {} ports", self.data.num_ports);
         Ok(())
+    }
+
+    fn hub_descriptor(&self) -> &HubDescriptor {
+        self.data.descriptor.as_ref().unwrap()
     }
 
     /// 获取 Hub 描述符（参考 Linux 内核实现）
@@ -229,7 +231,7 @@ impl HubDevice {
     /// - 最多重试 3 次
     /// - 使用小缓冲区（USB 2.0 Hub 描述符可变长）
     /// - QEMU 等模拟环境可能不支持，使用默认值
-    async fn get_hub_descriptor(&mut self) -> Result<UsbHubDescriptor, USBError> {
+    async fn get_hub_descriptor(&mut self) -> Result<HubDescriptor, USBError> {
         const DT_SS_HUB: u16 = 0x0a;
         const DT_HUB: u16 = 0x9;
 
@@ -241,7 +243,7 @@ impl HubDevice {
             size = 12;
         } else {
             dtype = DT_HUB;
-            size = size_of::<UsbHubDescriptor>();
+            size = size_of::<HubDescriptor>();
         }
 
         let mut buff = vec![0u8; size];
@@ -266,7 +268,7 @@ impl HubDevice {
                 )
                 .await;
 
-            let desc = unsafe { *(buff.as_ptr() as *const UsbHubDescriptor) };
+            let desc = unsafe { *(buff.as_ptr() as *const HubDescriptor) };
 
             match result {
                 Ok(act_size) => {
