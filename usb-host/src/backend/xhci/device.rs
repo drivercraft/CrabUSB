@@ -5,6 +5,7 @@ use alloc::{sync::Arc, vec::Vec};
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
+use usb_if::descriptor::{Class, DeviceDescriptorBase};
 use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,
@@ -19,13 +20,13 @@ use crate::hub::DeviceAddressInfo;
 use crate::{
     Xhci,
     backend::{
-        Dci, PortId,
+        Dci,
         ty::{
             DeviceInfoOp, DeviceOp,
             ep::{EndpointBase, EndpointControl},
         },
         xhci::{
-            SlotId, append_port_to_route_string,
+            SlotId,
             context::ContextData,
             endpoint::{Endpoint, EndpointDescriptorExt},
             parse_default_max_packet_size_from_port_speed,
@@ -110,8 +111,11 @@ impl Device {
         self.ctrl_ep = Some(EndpointControl::new(ep));
         self.address(host, info).await?;
         // self.dump_device_out();
-        let max_packet_size = self.control_max_packet_size().await?;
-        trace!("Max packet size: {max_packet_size}");
+        let base = self.get_device_descriptor_base().await?;
+
+        // let max_packet_size = self.control_max_packet_size().await?;
+        // trace!("Max packet size: {max_packet_size}");
+        self.evaluate_context(base).await?;
         self.get_configuration().await?;
         self.read_descriptor().await?;
 
@@ -119,6 +123,51 @@ impl Device {
             let config_desc = self.ep_ctrl().get_configuration_descriptor(i).await?;
             self.config_desc.push(config_desc);
         }
+
+        Ok(())
+    }
+
+    async fn evaluate_context(&mut self, desc: DeviceDescriptorBase) -> Result {
+        // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
+        // 对于控制端点，这是直接的字节数值，不需要解码
+        let packet_size = if desc.max_packet_size_0 == 0 {
+            8u8
+        } else {
+            desc.max_packet_size_0
+        } as u16;
+
+        let is_hub;
+
+        if let Class::Hub(speed) = desc.class() {
+            is_hub = true;
+            info!("Device is a hub with speed: {:?}", speed);
+        } else {
+            is_hub = false;
+        }
+
+        let dci = Dci::CTRL;
+        self.ctx.update_input(|input| {
+            input.control_mut().set_add_context_flag(1);
+            if is_hub {
+                input.device_mut().slot_mut().set_hub();
+            } else {
+                input.device_mut().slot_mut().clear_hub();
+            }
+            let endpoint = input.device_mut().endpoint_mut(dci.as_usize());
+            endpoint.set_max_packet_size(packet_size);
+        });
+
+        mb();
+
+        debug!("Evaluating context for slot {}", self.id.as_u8());
+        let _result = self
+            .cmd
+            .cmd_request(command::Allowed::EvaluateContext(
+                *command::EvaluateContext::default()
+                    .set_slot_id(self.id.into())
+                    .set_input_context_pointer(self.ctx.input_bus_addr()),
+            ))
+            .await?;
 
         Ok(())
     }
@@ -223,27 +272,39 @@ impl Device {
         Ok(())
     }
 
-    async fn control_max_packet_size(&mut self) -> Result<u16> {
-        trace!("control_fetch_control_point_packet_size");
-
+    async fn get_device_descriptor_base(&mut self) -> Result<DeviceDescriptorBase> {
         let mut data = alloc::vec![0u8; 8];
 
         self.ep_ctrl()
             .get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
             .await?;
 
-        // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
-        // 对于控制端点，这是直接的字节数值，不需要解码
-        let packet_size = data
-            .get(7) // bMaxPacketSize0 在设备描述符的第8个字节（索引7）
-            .map(|&len| if len == 0 { 8u8 } else { len })
-            .unwrap_or(8);
+        let desc = unsafe { *(data.as_ptr() as *const DeviceDescriptorBase) };
 
-        trace!("data@{:p}: {data:?}", data.as_ptr());
-        trace!("Device descriptor bMaxPacketSize0: {packet_size} bytes");
-
-        Ok(packet_size as _)
+        Ok(desc)
     }
+
+    // async fn control_max_packet_size(&mut self) -> Result<u16> {
+    //     trace!("control_fetch_control_point_packet_size");
+
+    //     let mut data = alloc::vec![0u8; 8];
+
+    //     self.ep_ctrl()
+    //         .get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
+    //         .await?;
+
+    //     // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
+    //     // 对于控制端点，这是直接的字节数值，不需要解码
+    //     let packet_size = data
+    //         .get(7) // bMaxPacketSize0 在设备描述符的第8个字节（索引7）
+    //         .map(|&len| if len == 0 { 8u8 } else { len })
+    //         .unwrap_or(8);
+
+    //     trace!("data@{:p}: {data:?}", data.as_ptr());
+    //     trace!("Device descriptor bMaxPacketSize0: {packet_size} bytes");
+
+    //     Ok(packet_size as _)
+    // }
 
     async fn get_configuration(&mut self) -> Result<u8> {
         let val = self.ep_ctrl().get_configuration().await?;

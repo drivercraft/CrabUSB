@@ -104,6 +104,11 @@ impl ContextData {
             control_context.set_add_context_flag(0);
         });
     }
+
+    pub fn update_input(&mut self, f: impl FnOnce(&mut dyn InputHandler)) {
+        self.input_perper_modify();
+        self.with_input(f);
+    }
 }
 
 impl DeviceContextList {

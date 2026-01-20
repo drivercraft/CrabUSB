@@ -47,6 +47,24 @@ impl From<DescriptorType> for u8 {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct DeviceDescriptorBase {
+    pub length: u8,
+    pub descriptor_type: u8,
+    pub usb_version: u16,
+    pub class: u8,
+    pub subclass: u8,
+    pub protocol: u8,
+    pub max_packet_size_0: u8,
+}
+
+impl DeviceDescriptorBase {
+    pub fn class(&self) -> Class {
+        Class::from_class_and_subclass(self.class, self.subclass, self.protocol)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceDescriptor {
     pub usb_version: u16,
