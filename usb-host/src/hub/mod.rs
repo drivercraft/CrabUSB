@@ -16,9 +16,11 @@
 //!     └── Event Queue (无锁事件队列)
 //! ```
 
+pub mod device;
 pub mod event;
 pub mod manager;
 
 // 重新导出常用类型
+pub use device::{HubDevice, HubState, Port, PortState};
 pub use event::{HubEvent, HubEventHandler, HubId, HubStatusChange};
-pub use manager::{HubDevice, HubManager, Port, PortState};
+pub use manager::HubManager;
