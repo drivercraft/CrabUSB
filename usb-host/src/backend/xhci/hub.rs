@@ -140,6 +140,7 @@ pub enum HubState {
     Suspended,
 }
 
+
 impl XhciRootHub {
     /// 创建新的 xHCI Root Hub
     pub fn new(reg: XhciRegisters) -> Result<Self, USBError> {

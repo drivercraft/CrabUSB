@@ -5,9 +5,10 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::time::Duration;
+use futures::FutureExt;
 
 use usb_if::{
-    descriptor::{Class, EndpointType},
+    descriptor::{Class, ConfigurationDescriptor, DeviceDescriptor, EndpointType},
     host::{
         ControlSetup, USBError,
         hub::{DeviceSpeed, HubDescriptor, PortFeature, PortStatus, PortStatusChange},
@@ -16,7 +17,11 @@ use usb_if::{
 };
 
 use super::event::HubId;
-use crate::{Device, DeviceInfo, backend::DeviceId};
+use crate::{
+    Device, DeviceInfo,
+    backend::{DeviceId, ty::HubOp},
+    hub::DeviceAddressInfo,
+};
 
 // Hub 枚举常量 (参照 Linux 内核)
 
@@ -42,8 +47,7 @@ const SET_ADDRESS_SETTLING_TIME: u64 = 10;
 ///
 /// 表示一个 Hub 设备（Root Hub 或 External Hub）。
 pub struct HubDevice {
-    config: u8,
-    interface: u8,
+    settings: HubSettings,
     data: Box<Inner>,
 }
 
@@ -57,23 +61,39 @@ struct Inner {
     /// 端口列表
     pub ports: Vec<Port>,
 
-    pub parent_hub: Option<HubId>,
-
-    /// 层级深度（Root Hub = 0）
-    pub depth: u8,
-
     pub dev: Device,
 
     pub descriptor: HubDescriptor,
 }
 
+pub struct HubSettings {
+    pub config_value: u8,
+    pub interface_number: u8,
+    pub alt_setting: u8,
+}
+
+impl HubOp for HubDevice {
+    fn reset(&mut self) -> Result<(), USBError> {
+        todo!()
+    }
+
+    fn changed_ports<'a>(
+        &'a mut self,
+    ) -> futures::future::BoxFuture<'a, Result<Vec<DeviceAddressInfo>, USBError>> {
+        self.changed_ports().boxed()
+    }
+}
+
 impl HubDevice {
     /// returns (config_value, interface_number) if the device is a hub
-    pub fn is_hub(info: &DeviceInfo) -> Option<(u8, u8)> {
-        if !matches!(info.descriptor().class(), Class::Hub(_)) {
+    pub fn is_hub(
+        desc: &DeviceDescriptor,
+        configs: &[ConfigurationDescriptor],
+    ) -> Option<HubSettings> {
+        if !matches!(desc.class(), Class::Hub(_)) {
             return None;
         }
-        let Some(config) = info.configurations().get(0) else {
+        let Some(config) = configs.first() else {
             warn!("Hub device has no configurations");
             return None;
         };
@@ -94,7 +114,11 @@ impl HubDevice {
                     continue;
                 }
 
-                return Some((config.configuration_value, interface.interface_number));
+                return Some(HubSettings {
+                    config_value: config.configuration_value,
+                    interface_number: interface.interface_number,
+                    alt_setting: alt.alternate_setting,
+                });
             }
         }
 
@@ -102,26 +126,38 @@ impl HubDevice {
     }
 
     /// 创建新的 Hub 设备
-    pub async fn new(
-        parent_hub: Option<HubId>,
-        depth: u8,
-        dev: Device,
-        config: u8,
-        interface: u8,
-    ) -> Result<Self, USBError> {
+    pub async fn new(dev: Device, settings: HubSettings) -> Result<Self, USBError> {
         Ok(Self {
-            config,
-            interface,
+            settings,
             data: Box::new(Inner {
                 state: HubState::Uninitialized,
                 num_ports: 0,
                 ports: vec![],
-                parent_hub,
-                depth,
+
                 dev,
                 descriptor: unsafe { core::mem::zeroed() },
             }),
         })
+    }
+
+    pub async fn changed_ports(&mut self) -> Result<Vec<DeviceAddressInfo>, USBError> {
+        let mut changed_ports = vec![];
+
+        // for port in &mut self.data.ports {
+        //     let (status, change) = self.get_port_status(port.index).await?;
+
+        //     if change.connection_changed {
+        //         changed_ports.push(DeviceAddressInfo {
+        //             route_string: todo!(),
+        //             root_port_id: todo!(),
+        //             port_speed: todo!(),
+        //         });
+        //     }
+
+        //     port.status = status;
+        // }
+
+        Ok(changed_ports)
     }
 
     pub fn id(&self) -> HubId {
@@ -145,7 +181,17 @@ impl HubDevice {
         // 初始化所有端口为 Disconnected 状态
         self.data.ports = (1..=self.data.num_ports).map(Port::new).collect();
 
-        self.data.dev.claim_interface(self.interface, 0).await?;
+        self.data
+            .dev
+            .set_configuration(self.settings.config_value)
+            .await?;
+
+        debug!("Set configuration to {}", self.settings.config_value);
+
+        self.data
+            .dev
+            .claim_interface(self.settings.interface_number, self.settings.alt_setting)
+            .await?;
 
         // 标记 Hub 为运行状态
         self.data.state = HubState::Running;

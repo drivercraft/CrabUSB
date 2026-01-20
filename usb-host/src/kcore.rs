@@ -1,4 +1,8 @@
-use alloc::{boxed::Box, collections::btree_map::BTreeMap, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    vec::Vec,
+};
 
 use futures::{FutureExt, future::BoxFuture};
 use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
@@ -9,12 +13,20 @@ use crate::{
         BackendOp, CoreOp,
         ty::{DeviceInfoOp, DeviceOp, HubOp},
     },
+    hub::{HubDevice, RouteString},
 };
 
 pub struct Core {
     pub(crate) backend: Box<dyn CoreOp>,
     root_hub: Box<dyn HubOp>,
+    device_hubs: Vec<Box<dyn HubOp>>,
     inited_devices: BTreeMap<usize, Box<dyn DeviceOp>>,
+}
+
+struct ProbStack<'a> {
+    route_string: RouteString,
+    hub: &'a mut Box<dyn HubOp>,
+    port_id: Option<usize>,
 }
 
 impl Core {
@@ -24,6 +36,7 @@ impl Core {
             backend: Box::new(backend),
             root_hub,
             inited_devices: BTreeMap::new(),
+            device_hubs: vec![],
         }
     }
 
@@ -31,25 +44,48 @@ impl Core {
         &mut self,
     ) -> Result<alloc::vec::Vec<Box<dyn crate::backend::ty::DeviceInfoOp>>, usb_if::host::Error>
     {
-        let mut out = vec![];
-        let changed_ports = self.root_hub.changed_ports().await?;
-        for addr_info in changed_ports {
-            let device = self.backend.new_addressed_device(addr_info).await?;
-            let device_id = device.id();
-
-            let device_info = Box::new(DeviceInfo::new(
-                device_id,
-                device.descriptor().clone(),
-                device.configuration_descriptors(),
-            )) as _;
-
-            self.inited_devices.insert(device_id, device);
-
-            out.push(device_info);
-        }
+        let mut out: Vec<Box<dyn DeviceInfoOp>> = Vec::new();
+        let mut stack: VecDeque<ProbStack> = VecDeque::new();
+        stack.push_back(ProbStack {
+            route_string: RouteString::follow_root(),
+            hub: &mut self.root_hub,
+            port_id: None,
+        });
 
         Ok(out)
     }
+
+    // async fn probe_hub(
+    //     backend: &mut Box<dyn CoreOp>,
+    //     hub: &mut Box<dyn HubOp>,
+    //     info_list: &mut Vec<Box<dyn DeviceInfoOp>>,
+    //     dev_list: &mut Vec<Box<dyn DeviceOp>>,
+    // ) -> Result<(), usb_if::host::Error> {
+    //     let changed_ports = hub.changed_ports().await?;
+    //     let mut stack = VecDeque::new();
+
+    //     for addr_info in changed_ports {
+    //         let device = backend.new_addressed_device(addr_info).await?;
+    //         let device_id = device.id();
+
+    //         if let Some(hub) =
+    //             HubDevice::is_hub(device.descriptor(), device.configuration_descriptors())
+    //         {
+    //             let mut hub = HubDevice::new(device.into(), hub).await?;
+    //             hub.init().await?;
+    //             stack.push_back((device_id, hub));
+    //         } else {
+    //             let device_info = Box::new(DeviceInfo::new(
+    //                 device_id,
+    //                 device.descriptor().clone(),
+    //                 device.configuration_descriptors(),
+    //             )) as _;
+    //             info_list.push(device_info);
+    //             dev_list.push(device);
+    //         }
+    //     }
+    //     Ok(())
+    // }
 }
 
 impl BackendOp for Core {
