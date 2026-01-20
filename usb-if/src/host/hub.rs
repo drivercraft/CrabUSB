@@ -30,6 +30,25 @@ pub enum HubRequest {
     GetHubDescriptor16, // USB 3.0+
 }
 
+/// 端口特性选择器
+///
+/// 参照 USB 2.0 规范表 11-17。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortFeature {
+    Connection = 0,
+    Enable = 1,
+    Suspend = 2,
+    OverCurrent = 3,
+    Reset = 4,
+    Power = 8,
+    LowSpeed = 9,
+    CConnection = 16,  // 清除连接变化
+    CEnable = 17,      // 清除使能变化
+    CSuspend = 18,     // 清除挂起变化
+    COverCurrent = 19, // 清除过流变化
+    CReset = 20,       // 清除复位完成
+}
+
 const USB_MAXCHILDREN: usize = 31;
 const DEVICE_BITMAP_BYTES: usize = (USB_MAXCHILDREN + 1).div_ceil(8);
 
