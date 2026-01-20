@@ -662,6 +662,10 @@ impl BackendOp for Dwc {
             _dwc: self.dwc_regs.clone(),
         })
     }
+
+    fn root_hub(&mut self) -> Box<dyn super::ty::HubOp> {
+        self.xhci.root_hub()
+    }
 }
 
 impl Deref for Dwc {

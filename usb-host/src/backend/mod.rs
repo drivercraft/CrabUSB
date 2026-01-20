@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use futures::future::{BoxFuture, LocalBoxFuture};
 use usb_if::host::USBError;
 
-use crate::backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp};
+use crate::backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp, HubOp};
 
 pub mod dwc;
 #[cfg(libusb)]
@@ -46,4 +46,6 @@ pub(crate) trait BackendOp: Send + Any + 'static {
     ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
 
     fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
+
+    fn root_hub(&mut self) -> Box<dyn HubOp>;
 }

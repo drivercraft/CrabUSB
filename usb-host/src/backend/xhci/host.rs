@@ -14,6 +14,7 @@ use xhci::{
 };
 
 use super::Device;
+use super::hub::XhciRootHub;
 use super::reg::{MemMapper, XhciRegisters};
 use crate::backend::{
     ty::{Event, EventHandlerOp},
@@ -22,6 +23,7 @@ use crate::backend::{
         context::{DeviceContextList, ScratchpadBufferArray},
         device::DeviceInfo,
         event::{EventRing, EventRingInfo},
+        hub::PortChangeWaker,
     },
 };
 use crate::{
@@ -47,6 +49,7 @@ pub struct Xhci {
     port_status: Vec<ProtStaus>,
     inited_devices: BTreeMap<SlotId, Device>,
     pub(crate) transfer_result_handler: TransferResultHandler,
+    root_hub: Option<XhciRootHub>,
 }
 
 unsafe impl Send for Xhci {}
@@ -66,7 +69,10 @@ impl Xhci {
         let event_ring = EventRing::new(dma_mask)?;
         let event_ring_info = event_ring.info();
 
+        let root_hub = XhciRootHub::new(reg.clone())?;
+
         let transfer_result_handler = TransferResultHandler::new(reg_shared.clone());
+        let ports = root_hub.waker();
 
         Ok(Xhci {
             reg: reg_shared,
@@ -79,7 +85,9 @@ impl Xhci {
                 cmd_finished,
                 event_ring,
                 transfer_result_handler,
+                ports,
             )),
+            root_hub: Some(root_hub),
             event_ring_info,
             scratchpad_buf_arr: None,
             port_status: vec![],
@@ -125,7 +133,7 @@ impl Xhci {
         self.wait_for_running().await;
 
         self.enable_irq();
-        self.reset_ports().await;
+        // self.reset_ports().await;
 
         Ok(())
     }
@@ -190,6 +198,14 @@ impl BackendOp for Xhci {
             Ok(Box::new(device) as Box<dyn DeviceOp>)
         }
         .boxed()
+    }
+
+    fn root_hub(&mut self) -> Box<dyn crate::backend::ty::HubOp> {
+        Box::new(
+            self.root_hub
+                .take()
+                .expect("Root hub can only be taken once"),
+        )
     }
 }
 
@@ -488,41 +504,41 @@ impl Xhci {
             .write_volatile_at(0, doorbell::Register::default());
     }
 
-    async fn reset_ports(&mut self) {
-        let mut regs = self.reg.write();
-        let port_len = regs.port_register_set.len();
-        debug!("Resetting {} ports", port_len);
-        // Enable port power for all ports
-        for i in 0..port_len {
-            let portsc = regs.port_register_set.read_volatile_at(i).portsc;
-            if !portsc.port_power() {
-                regs.port_register_set.update_volatile_at(i, |port| {
-                    port.portsc.set_port_power();
-                });
-            }
-        }
+    // async fn reset_ports(&mut self) {
+    //     let mut regs = self.reg.write();
+    //     let port_len = regs.port_register_set.len();
+    //     debug!("Resetting {} ports", port_len);
+    //     // Enable port power for all ports
+    //     for i in 0..port_len {
+    //         let portsc = regs.port_register_set.read_volatile_at(i).portsc;
+    //         if !portsc.port_power() {
+    //             regs.port_register_set.update_volatile_at(i, |port| {
+    //                 port.portsc.set_port_power();
+    //             });
+    //         }
+    //     }
 
-        for i in 0..port_len {
-            self.port_status.push(ProtStaus::Uninit);
-            regs.port_register_set.update_volatile_at(i, |port| {
-                port.portsc.set_0_port_enabled_disabled();
-                port.portsc.set_port_reset();
-            });
-        }
+    //     for i in 0..port_len {
+    //         self.port_status.push(ProtStaus::Uninit);
+    //         regs.port_register_set.update_volatile_at(i, |port| {
+    //             port.portsc.set_0_port_enabled_disabled();
+    //             port.portsc.set_port_reset();
+    //         });
+    //     }
 
-        debug!("Waiting for reset ...");
+    //     debug!("Waiting for reset ...");
 
-        for i in 0..port_len {
-            // 等待复位完成
-            SpinWhile::new(|| {
-                let port_reg = regs.port_register_set.read_volatile_at(i);
-                port_reg.portsc.port_reset()
-            })
-            .await;
-        }
+    //     for i in 0..port_len {
+    //         // 等待复位完成
+    //         SpinWhile::new(|| {
+    //             let port_reg = regs.port_register_set.read_volatile_at(i);
+    //             port_reg.portsc.port_reset()
+    //         })
+    //         .await;
+    //     }
 
-        info!("All ports reset completed");
-    }
+    //     info!("All ports reset completed");
+    // }
 
     fn need_init_port_idxs(&self) -> impl Iterator<Item = usize> {
         (0..self.reg.read().port_register_set.len()).filter(move |&i| {
@@ -592,6 +608,7 @@ pub struct EventHandler {
     cmd_finished: Finished<CommandCompletion>,
     event_ring: UnsafeCell<EventRing>,
     transfer_result_handler: TransferResultHandler,
+    ports: PortChangeWaker,
 }
 
 unsafe impl Send for EventHandler {}
@@ -603,12 +620,14 @@ impl EventHandler {
         cmd_finished: Finished<CommandCompletion>,
         event_ring: EventRing,
         transfer_result_handler: TransferResultHandler,
+        ports: PortChangeWaker,
     ) -> Self {
         Self {
             reg: UnsafeCell::new(reg),
             cmd_finished,
             event_ring: UnsafeCell::new(event_ring),
             transfer_result_handler,
+            ports,
         }
     }
 
@@ -634,6 +653,16 @@ impl EventHandler {
                     self.cmd_finished.set_finished(addr.into(), c);
                 }
                 Allowed::PortStatusChange(st) => {
+                    debug!("Port {} status change event", st.port_id());
+                    let idx = (st.port_id() - 1) as usize;
+                    let port_id = st.port_id();
+                    self.reg()
+                        .port_register_set
+                        .update_volatile_at(idx, |port| {
+                            self.ports.set_port_changed(port_id);
+                            port.portsc.clear_connect_status_change();
+                        });
+
                     event = Event::PortChange {
                         port: st.port_id() as _,
                     };

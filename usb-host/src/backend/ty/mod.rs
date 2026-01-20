@@ -9,6 +9,9 @@ use crate::{backend::ty::ep::EndpointControl, err::USBError};
 // pub mod hub;
 pub mod ep;
 pub mod transfer;
+mod hub;
+
+pub use hub::*;
 
 #[derive(Debug, Clone)]
 pub enum Event {

@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(feature = "libusb", windows, unix)), no_std)]
+#![cfg_attr(not(any(windows, unix)), no_std)]
 #![feature(iterator_try_collect)]
 
 #[macro_use]

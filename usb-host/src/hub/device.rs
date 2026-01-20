@@ -64,7 +64,7 @@ struct Inner {
 
     pub dev: Device,
 
-    pub descriptor: Option<HubDescriptor>,
+    pub descriptor: HubDescriptor,
 }
 
 impl HubDevice {
@@ -102,14 +102,14 @@ impl HubDevice {
     }
 
     /// 创建新的 Hub 设备
-    pub fn new(
+    pub async fn new(
         parent_hub: Option<HubId>,
         depth: u8,
         dev: Device,
         config: u8,
         interface: u8,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, USBError> {
+        Ok(Self {
             config,
             interface,
             data: Box::new(Inner {
@@ -119,9 +119,9 @@ impl HubDevice {
                 parent_hub,
                 depth,
                 dev,
-                descriptor: None,
+                descriptor: unsafe { core::mem::zeroed() },
             }),
-        }
+        })
     }
 
     pub fn id(&self) -> HubId {
@@ -133,14 +133,9 @@ impl HubDevice {
     }
 
     pub async fn init(&mut self) -> Result<(), USBError> {
-        // 第一阶段：设备初始化（参考 Linux hub_configure 前半部分）
-        self.data.dev.init().await?;
-
-        self.data.dev.set_configuration(self.config).await?;
-
         // 第二阶段：获取 Hub 描述符（带重试）
         let descriptor = self.get_hub_descriptor().await?;
-        self.data.descriptor = Some(descriptor);
+        self.data.descriptor = descriptor;
         if self.hub_descriptor().bNbrPorts == 0 {
             return Err(USBError::Other(anyhow!("Hub has zero ports")));
         }
@@ -159,7 +154,7 @@ impl HubDevice {
     }
 
     fn hub_descriptor(&self) -> &HubDescriptor {
-        self.data.descriptor.as_ref().unwrap()
+        &self.data.descriptor
     }
 
     /// 获取 Hub 描述符（参考 Linux 内核实现）

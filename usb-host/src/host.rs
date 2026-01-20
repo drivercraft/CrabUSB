@@ -4,7 +4,7 @@ use usb_if::descriptor::{Class, HubSpeed};
 
 use crate::backend::ty::*;
 use crate::err::Result;
-use crate::hub::{HubDevice, HubId, HubManager};
+use crate::hub::{HubDevice, HubId};
 use crate::{Mmio, backend::BackendOp};
 
 pub use super::backend::{
@@ -20,7 +20,7 @@ pub use crate::device::{Device, DeviceInfo};
 /// USB 主机控制器
 pub struct USBHost {
     backend: Box<dyn BackendOp>,
-    hubs: HubManager,
+    root_hub: Option<Box<dyn HubOp>>,
 }
 
 impl USBHost {
@@ -34,44 +34,53 @@ impl USBHost {
 
     #[cfg(libusb)]
     pub fn new_libusb() -> Result<USBHost> {
-        let host = USBHost::new(crate::backend::libusb::Libusb::new());
+        let host = USBHost::new_user(crate::backend::libusb::Libusb::new());
         Ok(host)
     }
 }
 
 impl USBHost {
-    /// 创建新的 USB 主机控制器
-    pub(crate) fn new(backend: impl BackendOp) -> Self {
+    pub(crate) fn new(mut backend: impl BackendOp) -> Self {
+        let root_hub = backend.root_hub();
         Self {
             backend: Box::new(backend),
-            hubs: HubManager::new(),
+            root_hub: Some(root_hub),
+        }
+    }
+
+    #[cfg(libusb)]
+    pub(crate) fn new_user(backend: impl BackendOp) -> Self {
+        Self {
+            backend: Box::new(backend),
+            root_hub: None,
         }
     }
 
     /// 初始化主机控制器
     pub async fn init(&mut self) -> Result<()> {
-        self.backend.init().await
+        self.backend.init().await?;
+        if let Some(root_hub) = &mut self.root_hub {
+            root_hub.reset()?;
+        }
+        Ok(())
     }
 
     pub async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>> {
         let mut out = vec![];
 
-        for dev in self.backend.probe_devices().await? {
-            let info = DeviceInfo { inner: dev };
-            if let Class::Hub(speed) = info.descriptor().class()
-                && cfg!(not(feature = "libusb"))
-            {
-                if let Some((config, interface)) = HubDevice::is_hub(&info) {
-                    let mut hub_infos = self
-                        .probe_handle_hub(info, speed, config, interface)
-                        .await?;
-                    out.append(&mut hub_infos);
-                } else {
-                    out.push(info);
-                }
-            } else {
-                out.push(info);
+        if let Some(root_hub) = &mut self.root_hub {
+            let changed_ports = root_hub.changed_ports().await?;
+            if !changed_ports.is_empty() {
+                debug!("Root hub changed ports: {:?}", changed_ports);
             }
+        } else {
+            out = self
+                .backend
+                .probe_devices()
+                .await?
+                .into_iter()
+                .map(|dev| DeviceInfo { inner: dev })
+                .collect();
         }
 
         Ok(out)
@@ -128,7 +137,8 @@ impl USBHost {
                 device,
                 stack.config,
                 stack.interface,
-            );
+            )
+            .await?;
             device.init().await?;
 
             let devices = device.probe_devices()?;

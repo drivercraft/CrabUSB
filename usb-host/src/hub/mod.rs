@@ -1,26 +1,88 @@
-//! USB Hub 管理模块
-//!
-//! 提供 Root Hub 和 External Hub 的管理功能，包括：
-//! - Hub 设备发现和枚举
-//! - 端口状态管理
-//! - 设备连接/断开事件处理
-//! - 多级 Hub 嵌套支持
-//!
-//! # 架构
-//!
-//! ```text
-//! HubManager
-//!     ├── HubDevice (Root Hub / External Hub)
-//!     │   ├── Port[] (端口列表)
-//!     │   └── State (Hub 状态)
-//!     └── Event Queue (无锁事件队列)
-//! ```
-
 pub mod device;
 pub mod event;
-pub mod manager;
+
+use core::fmt::Debug;
 
 // 重新导出常用类型
-pub use device::{HubDevice, HubState, Port, PortState};
-pub use event::{HubEvent, HubEventHandler, HubId, HubStatusChange};
-pub use manager::HubManager;
+pub use device::HubDevice;
+pub use event::HubId;
+
+#[derive(Debug, Clone)]
+pub struct DeviceAddressInfo {
+    pub route_string: RouteString,
+    pub port_speed: u8,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct RouteString(u32);
+
+impl RouteString {
+    /// 创建新的 Route String
+    pub fn root() -> Self {
+        Self(0)
+    }
+
+    pub fn root_port(port: u8) -> Self {
+        let mut rs = Self::root();
+        rs.push_hub(port);
+        rs
+    }
+
+    /// 获取 Route String 的原始值
+    pub fn raw(&self) -> u32 {
+        self.0
+    }
+
+    pub fn push_hub(&mut self, hub_port: u8) {
+        assert!(hub_port <= 15);
+        let mut target_depth = None;
+        for depth in 1..=5 {
+            let shift = (depth - 1) * 4;
+            let port = (self.0 >> shift) & 0x0F;
+            if port == 0 {
+                target_depth = Some(depth);
+                break;
+            }
+        }
+
+        let depth = target_depth.expect("route string is full");
+        let shift = (depth - 1) * 4;
+        let mask = 0x0F << shift;
+        self.0 = (self.0 & !mask) | (((hub_port as u32) & 0x0F) << shift);
+    }
+
+    pub fn route_port_ids(&self) -> impl Iterator<Item = u8> + '_ {
+        (0..5).filter_map(move |depth| {
+            let port = ((self.0 >> (depth * 4)) & 0x0F) as u8;
+            if port == 0 { None } else { Some(port) }
+        })
+    }
+}
+
+impl Debug for RouteString {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut iter = self.route_port_ids();
+        if let Some(first) = iter.next() {
+            write!(f, "{first}")?;
+            for port in iter {
+                write!(f, ".{port}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RouteString;
+
+    #[test]
+    fn test_route_string() {
+        let mut rs = RouteString::root();
+        rs.push_hub(3);
+        rs.push_hub(5);
+        rs.push_hub(2);
+        assert_eq!(rs.raw(), 0b0010_0101_0011);
+        assert_eq!(format!("{:?}", rs), "3.5.2");
+    }
+}
