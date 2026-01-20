@@ -74,7 +74,7 @@ pub struct HubSettings {
 
 impl HubOp for HubDevice {
     fn reset(&mut self) -> Result<(), USBError> {
-        todo!()
+        Ok(())
     }
 
     fn changed_ports<'a>(
