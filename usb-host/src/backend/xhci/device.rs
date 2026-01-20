@@ -71,7 +71,7 @@ impl Device {
 
         Ok(Self {
             id: slot_id,
-            // port_id: port,
+
             ctx,
             bell,
             ctrl_ep: None,
@@ -186,8 +186,6 @@ impl Device {
             "ctrl ring: {ctrl_ring_addr:x?}, port speed: {port_speed}, max packet size: {max_packet_size}, route string: {route_string}"
         );
 
-        // let ring_cycle_bit = self.ctrl_ep.cycle;
-
         // 1. Allocate an Input Context data structure (6.2.5) and initialize all fields to
         // ‘0’.
         self.ctx.with_empty_input(|input| {
@@ -283,28 +281,6 @@ impl Device {
 
         Ok(desc)
     }
-
-    // async fn control_max_packet_size(&mut self) -> Result<u16> {
-    //     trace!("control_fetch_control_point_packet_size");
-
-    //     let mut data = alloc::vec![0u8; 8];
-
-    //     self.ep_ctrl()
-    //         .get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
-    //         .await?;
-
-    //     // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
-    //     // 对于控制端点，这是直接的字节数值，不需要解码
-    //     let packet_size = data
-    //         .get(7) // bMaxPacketSize0 在设备描述符的第8个字节（索引7）
-    //         .map(|&len| if len == 0 { 8u8 } else { len })
-    //         .unwrap_or(8);
-
-    //     trace!("data@{:p}: {data:?}", data.as_ptr());
-    //     trace!("Device descriptor bMaxPacketSize0: {packet_size} bytes");
-
-    //     Ok(packet_size as _)
-    // }
 
     async fn get_configuration(&mut self) -> Result<u8> {
         let val = self.ep_ctrl().get_configuration().await?;

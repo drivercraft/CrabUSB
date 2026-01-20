@@ -5,6 +5,7 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::{
     cell::UnsafeCell,
+    hint::spin_loop,
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -185,6 +186,11 @@ impl XhciRootHub {
             .await;
 
             debug!("Port {} reset complete", id);
+            debug!(
+                "Port {} status: \r\n {:?}",
+                id,
+                self.reg.port_register_set.read_volatile_at(i).portsc
+            );
 
             self.ports_mut()[i].state = PortState::Reseted;
         }
@@ -205,10 +211,13 @@ impl XhciRootHub {
         for &id in &reseted {
             let i = (id - 1) as usize;
             let port_reg = self.reg.port_register_set.read_volatile_at(i);
+            if !port_reg.portsc.current_connect_status() || !port_reg.portsc.port_enabled_disabled()
+            {
+                continue;
+            }
             let speed = port_reg.portsc.port_speed();
-
             debug!("Port {} device connected at speed {:?}", id, speed);
-
+            debug!("Port {} : \r\n {:?}", id, port_reg.portsc);
             self.ports_mut()[i].state = PortState::Probed;
 
             out.push(DeviceAddressInfo {
