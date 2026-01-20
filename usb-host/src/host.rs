@@ -4,7 +4,7 @@ use usb_if::descriptor::{Class, HubSpeed};
 
 use crate::backend::ty::*;
 use crate::err::Result;
-use crate::hub::{HubManager, event::HubId, manager::HubDevice};
+use crate::hub::{HubDevice, HubId, HubManager};
 use crate::{Mmio, backend::BackendOp};
 
 pub use super::backend::{
@@ -32,7 +32,7 @@ impl USBHost {
         Ok(USBHost::new(Dwc::new(params)?))
     }
 
-    #[cfg(feature = "libusb")]
+    #[cfg(libusb)]
     pub fn new_libusb() -> Result<USBHost> {
         let host = USBHost::new(crate::backend::libusb::Libusb::new());
         Ok(host)
