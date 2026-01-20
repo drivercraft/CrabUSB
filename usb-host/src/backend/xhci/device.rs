@@ -115,6 +115,8 @@ impl Device {
 
         // let max_packet_size = self.control_max_packet_size().await?;
         // trace!("Max packet size: {max_packet_size}");
+        debug!("Device Descriptor Base: {:#x?}", base);
+
         self.evaluate_context(base).await?;
         self.get_configuration().await?;
         self.read_descriptor().await?;

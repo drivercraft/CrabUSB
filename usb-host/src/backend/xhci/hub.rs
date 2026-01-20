@@ -168,28 +168,25 @@ impl XhciRootHub {
         let uninited = self
             .ports()
             .iter()
-            .filter(|port| {
-                matches!(port.state, PortState::Uninit)
-                    && port.changed.swap(false, Ordering::SeqCst)
-            })
+            .filter(|port| matches!(port.state, PortState::Uninit))
             .map(|p| p.port_id)
             .collect::<Vec<_>>();
 
         for &id in &uninited {
             debug!("Waiting for port {id} reset ...");
             let i = (id - 1) as usize;
-            // 等待复位完成
-            SpinWhile::new(|| {
-                let port_reg = self.reg.port_register_set.read_volatile_at(i);
-                port_reg.portsc.port_reset()
-            })
-            .await;
 
-            debug!("Port {} reset complete", id);
+            let port = self.reg.port_register_set.read_volatile_at(i).portsc;
+
+            if port.port_reset() {
+                continue;
+            }
+
             debug!(
-                "Port {} status: \r\n {:?}",
+                "Port {} reset complete, enable={}, connect={}",
                 id,
-                self.reg.port_register_set.read_volatile_at(i).portsc
+                port.port_enabled_disabled(),
+                port.current_connect_status()
             );
 
             self.ports_mut()[i].state = PortState::Reseted;
