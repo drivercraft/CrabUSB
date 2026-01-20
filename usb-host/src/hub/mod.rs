@@ -10,7 +10,7 @@ pub use event::HubId;
 #[derive(Debug, Clone)]
 pub struct DeviceAddressInfo {
     pub route_string: RouteString,
-    pub port_id: u8,
+    pub root_port_id: u8,
     pub port_speed: u8,
 }
 
@@ -19,23 +19,13 @@ pub struct RouteString(u32);
 
 impl RouteString {
     /// 创建新的 Route String
-    pub fn root() -> Self {
+    pub fn follow_root() -> Self {
         Self(0)
-    }
-
-    pub fn root_port(port: u8) -> Self {
-        let mut rs = Self::root();
-        rs.push_hub(port);
-        rs
     }
 
     /// 获取 Route String 的原始值
     pub fn raw(&self) -> u32 {
         self.0
-    }
-
-    pub fn root_port_id(&self) -> u8 {
-        (self.0 & 0x0F) as u8
     }
 
     pub fn push_hub(&mut self, hub_port: u8) {
@@ -79,15 +69,17 @@ impl Debug for RouteString {
 
 #[cfg(test)]
 mod tests {
+
     use super::RouteString;
 
     #[test]
     fn test_route_string() {
-        let mut rs = RouteString::root();
+        let mut rs = RouteString::follow_root();
         rs.push_hub(3);
         rs.push_hub(5);
         rs.push_hub(2);
         assert_eq!(rs.raw(), 0b0010_0101_0011);
         assert_eq!(format!("{:?}", rs), "3.5.2");
+        println!("raw: {:#x}", rs.0);
     }
 }

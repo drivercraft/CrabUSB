@@ -161,11 +161,11 @@ impl Device {
             let slot_context = input.device_mut().slot_mut();
             slot_context.clear_multi_tt();
             slot_context.clear_hub();
-            // slot_context.set_route_string(route_string); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
-            slot_context.set_route_string(append_port_to_route_string(0, 0));
+            slot_context.set_route_string(route_string); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
+            // slot_context.set_route_string(append_port_to_route_string(0, 0));
             slot_context.set_context_entries(1);
             slot_context.set_max_exit_latency(0);
-            slot_context.set_root_hub_port_number(info.route_string.root_port_id()); //todo: to use port number
+            slot_context.set_root_hub_port_number(info.root_port_id);
             slot_context.set_number_of_ports(0);
             slot_context.set_parent_hub_slot_id(0);
             slot_context.set_tt_think_time(0);

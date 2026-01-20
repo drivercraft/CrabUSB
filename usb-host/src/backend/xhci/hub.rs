@@ -212,8 +212,8 @@ impl XhciRootHub {
             self.ports_mut()[i].state = PortState::Probed;
 
             out.push(DeviceAddressInfo {
-                route_string: RouteString::root_port(id),
-                port_id: id,
+                route_string: RouteString::follow_root(),
+                root_port_id: id,
                 port_speed: speed,
             });
         }
