@@ -10,6 +10,7 @@ pub use event::HubId;
 #[derive(Debug, Clone)]
 pub struct DeviceAddressInfo {
     pub route_string: RouteString,
+    pub port_id: u8,
     pub port_speed: u8,
 }
 
@@ -31,6 +32,10 @@ impl RouteString {
     /// 获取 Route String 的原始值
     pub fn raw(&self) -> u32 {
         self.0
+    }
+
+    pub fn root_port_id(&self) -> u8 {
+        (self.0 & 0x0F) as u8
     }
 
     pub fn push_hub(&mut self, hub_port: u8) {

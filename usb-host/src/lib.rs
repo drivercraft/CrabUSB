@@ -22,6 +22,7 @@ pub mod device;
 pub mod err;
 mod host;
 pub(crate) mod hub;
+mod kcore;
 pub(crate) mod queue;
 
 pub use backend::ty::Event;

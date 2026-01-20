@@ -93,6 +93,6 @@ impl BackendOp for Libusb {
     }
 
     fn create_event_handler(&mut self) -> Box<dyn super::ty::EventHandlerOp> {
-        panic!("Libusb does not have event handler support");
+        unimplemented!("Libusb does not need an event handler")
     }
 }

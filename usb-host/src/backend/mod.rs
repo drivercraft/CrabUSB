@@ -6,7 +6,10 @@ use alloc::vec::Vec;
 use futures::future::{BoxFuture, LocalBoxFuture};
 use usb_if::host::USBError;
 
-use crate::backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp, HubOp};
+use crate::{
+    backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp, HubOp},
+    hub::DeviceAddressInfo,
+};
 
 pub mod dwc;
 #[cfg(libusb)]
@@ -36,9 +39,8 @@ pub(crate) trait BackendOp: Send + Any + 'static {
     fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>>;
 
     /// 探测已连接的设备
-    fn probe_devices<'a>(
-        &'a mut self,
-    ) -> BoxFuture<'a, Result<Vec<Box<dyn DeviceInfoOp>>, USBError>>;
+    fn device_list<'a>(&'a mut self)
+    -> BoxFuture<'a, Result<Vec<Box<dyn DeviceInfoOp>>, USBError>>;
 
     fn open_device<'a>(
         &'a mut self,
@@ -46,6 +48,18 @@ pub(crate) trait BackendOp: Send + Any + 'static {
     ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
 
     fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
+}
+
+pub(crate) trait CoreOp: Send + 'static {
+    /// 初始化后端
+    fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>>;
 
     fn root_hub(&mut self) -> Box<dyn HubOp>;
+
+    fn new_addressed_device<'a>(
+        &'a mut self,
+        addr: DeviceAddressInfo,
+    ) -> BoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
+
+    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
 }

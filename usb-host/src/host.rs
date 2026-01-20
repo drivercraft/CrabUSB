@@ -2,9 +2,10 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use usb_if::descriptor::{Class, HubSpeed};
 
-use crate::backend::ty::*;
+use crate::backend::{CoreOp, ty::*};
 use crate::err::Result;
 use crate::hub::{HubDevice, HubId};
+use crate::kcore::*;
 use crate::{Mmio, backend::BackendOp};
 
 pub use super::backend::{
@@ -20,7 +21,6 @@ pub use crate::device::{Device, DeviceInfo};
 /// USB 主机控制器
 pub struct USBHost {
     backend: Box<dyn BackendOp>,
-    root_hub: Option<Box<dyn HubOp>>,
 }
 
 impl USBHost {
@@ -40,11 +40,10 @@ impl USBHost {
 }
 
 impl USBHost {
-    pub(crate) fn new(mut backend: impl BackendOp) -> Self {
-        let root_hub = backend.root_hub();
+    pub(crate) fn new(backend: impl CoreOp) -> Self {
+        let b = Core::new(backend);
         Self {
-            backend: Box::new(backend),
-            root_hub: Some(root_hub),
+            backend: Box::new(b),
         }
     }
 
@@ -52,38 +51,23 @@ impl USBHost {
     pub(crate) fn new_user(backend: impl BackendOp) -> Self {
         Self {
             backend: Box::new(backend),
-            root_hub: None,
         }
     }
 
     /// 初始化主机控制器
     pub async fn init(&mut self) -> Result<()> {
         self.backend.init().await?;
-        if let Some(root_hub) = &mut self.root_hub {
-            root_hub.reset()?;
-        }
         Ok(())
     }
 
     pub async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>> {
-        let mut out = vec![];
-
-        if let Some(root_hub) = &mut self.root_hub {
-            let changed_ports = root_hub.changed_ports().await?;
-            if !changed_ports.is_empty() {
-                debug!("Root hub changed ports: {:?}", changed_ports);
-            }
-        } else {
-            out = self
-                .backend
-                .probe_devices()
-                .await?
-                .into_iter()
-                .map(|dev| DeviceInfo { inner: dev })
-                .collect();
+        let device_infos = self.backend.device_list().await?;
+        let mut devices = Vec::new();
+        for dev in device_infos {
+            let dev_info = DeviceInfo { inner: dev };
+            devices.push(dev_info);
         }
-
-        Ok(out)
+        Ok(devices)
     }
 
     async fn probe_handle_hub(

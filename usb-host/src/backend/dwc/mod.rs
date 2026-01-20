@@ -15,6 +15,7 @@ use tock_registers::interfaces::*;
 use usb_if::DeviceSpeed;
 pub use usb_if::DrMode;
 
+use crate::backend::CoreOp;
 use crate::backend::dwc::reg::GEVNTSIZ;
 use crate::{
     Mmio, Xhci,
@@ -638,22 +639,39 @@ impl Dwc {
     }
 }
 
-impl BackendOp for Dwc {
+// impl BackendOp for Dwc {
+//     fn init(&mut self) -> futures::future::BoxFuture<'_, Result<()>> {
+//         self._init().boxed()
+//     }
+
+//     fn device_list(
+//         &mut self,
+//     ) -> futures::future::BoxFuture<'_, Result<Vec<Box<dyn super::ty::DeviceInfoOp>>>> {
+//         self.xhci.device_list()
+//     }
+
+//     fn open_device<'a>(
+//         &'a mut self,
+//         dev: &'a dyn super::ty::DeviceInfoOp,
+//     ) -> futures::future::LocalBoxFuture<'a, Result<Box<dyn super::ty::DeviceOp>>> {
+//         self.xhci.open_device(dev)
+//     }
+
+//     fn create_event_handler(&mut self) -> Box<dyn super::ty::EventHandlerOp> {
+//         Box::new(DwcEventHandler {
+//             xhci: self.xhci.create_event_handler(),
+//             _dwc: self.dwc_regs.clone(),
+//         })
+//     }
+// }
+
+impl CoreOp for Dwc {
     fn init(&mut self) -> futures::future::BoxFuture<'_, Result<()>> {
         self._init().boxed()
     }
 
-    fn probe_devices(
-        &mut self,
-    ) -> futures::future::BoxFuture<'_, Result<Vec<Box<dyn super::ty::DeviceInfoOp>>>> {
-        self.xhci.probe_devices()
-    }
-
-    fn open_device<'a>(
-        &'a mut self,
-        dev: &'a dyn super::ty::DeviceInfoOp,
-    ) -> futures::future::LocalBoxFuture<'a, Result<Box<dyn super::ty::DeviceOp>>> {
-        self.xhci.open_device(dev)
+    fn root_hub(&mut self) -> Box<dyn super::ty::HubOp> {
+        self.xhci.root_hub()
     }
 
     fn create_event_handler(&mut self) -> Box<dyn super::ty::EventHandlerOp> {
@@ -663,8 +681,11 @@ impl BackendOp for Dwc {
         })
     }
 
-    fn root_hub(&mut self) -> Box<dyn super::ty::HubOp> {
-        self.xhci.root_hub()
+    fn new_addressed_device<'a>(
+        &'a mut self,
+        addr: crate::hub::DeviceAddressInfo,
+    ) -> futures::future::BoxFuture<'a, Result<Box<dyn super::ty::DeviceOp>>> {
+        self.xhci.new_addressed_device(addr)
     }
 }
 

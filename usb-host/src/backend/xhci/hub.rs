@@ -8,8 +8,8 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use futures::task::AtomicWaker;
 use futures::{FutureExt, future::LocalBoxFuture};
+use futures::{future::BoxFuture, task::AtomicWaker};
 use usb_if::host::{USBError, hub::PortStatusChange};
 
 use crate::{
@@ -96,7 +96,7 @@ impl XhciRootHub {
 }
 
 impl HubOp for XhciRootHub {
-    fn changed_ports(&mut self) -> LocalBoxFuture<'_, Result<Vec<DeviceAddressInfo>, USBError>> {
+    fn changed_ports(&mut self) -> BoxFuture<'_, Result<Vec<DeviceAddressInfo>, USBError>> {
         self._changed_ports().boxed()
     }
 
@@ -213,6 +213,7 @@ impl XhciRootHub {
 
             out.push(DeviceAddressInfo {
                 route_string: RouteString::root_port(id),
+                port_id: id,
                 port_speed: speed,
             });
         }
