@@ -102,13 +102,27 @@ impl Device {
         debug!("Device Descriptor Base: {:#x?}", base);
 
         self.setup_max_packet(base).await?;
-        self.get_configuration().await?;
+
+        // 读取当前配置（应该返回 0，表示未配置）
+        let current_config = self.get_configuration().await?;
+        debug!("Current configuration value: {}", current_config);
+
         self.read_descriptor().await?;
 
+        // 读取所有配置描述符
         for i in 0..self.desc.num_configurations {
             let config_desc = self.ep_ctrl().get_configuration_descriptor(i).await?;
             self.config_desc.push(config_desc);
         }
+
+        // 设置配置为第一个配置（大多数设备只有一个配置）
+        // 参考 USB 2.0 规范第 9.1.1 节和 u-boot 的 usb_set_configure_device
+        if !self.config_desc.is_empty() {
+            let config_value = self.config_desc[0].configuration_value;
+            debug!("Setting device configuration to {}", config_value);
+            self.set_configuration(config_value).await?;
+        }
+
         debug!("device descriptor ok");
         Ok(())
     }
@@ -150,7 +164,6 @@ impl Device {
     }
 
     async fn address(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
-        trace!("Addressing device with ID: {}", self.id.as_u8());
         let port_speed = info.port_speed;
         let max_packet_size = parse_default_max_packet_size_from_port_speed(port_speed);
         let route_string = info.route_string.raw();
@@ -158,8 +171,15 @@ impl Device {
         let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
         // ctrl dci
         let dci = 1;
-        trace!(
-            "ctrl ring: {ctrl_ring_addr:x?}, port speed: {port_speed}, max packet size: {max_packet_size}, route string: {route_string}"
+        debug!(
+            r#"Address device {:?} 
+    root port: {}
+    route string: {route_string}
+    parent_hub_slot_id: {}
+    ctrl ring: {ctrl_ring_addr:x?}
+    port speed: {port_speed}
+    max packet size: {max_packet_size}"#,
+            self.id, info.root_port_id, info.parent_hub_slot_id
         );
 
         // 1. Allocate an Input Context data structure (6.2.5) and initialize all fields to
@@ -189,7 +209,7 @@ impl Device {
             slot_context.set_max_exit_latency(0);
             slot_context.set_root_hub_port_number(info.root_port_id);
             slot_context.set_number_of_ports(0);
-            slot_context.set_parent_hub_slot_id(0);
+            slot_context.set_parent_hub_slot_id(info.parent_hub_slot_id);
             slot_context.set_tt_think_time(0);
             slot_context.set_interrupter_target(0);
             slot_context.set_speed(port_speed);
@@ -274,7 +294,7 @@ impl Device {
             let c = input.control_mut();
             c.set_configuration_value(configuration_value);
         });
-
+        self.evaluate().await?;
         debug!("Device configuration set to {configuration_value}");
         Ok(())
     }

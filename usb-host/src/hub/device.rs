@@ -372,7 +372,7 @@ impl HubDevice {
 
         let status = u16::from_le_bytes([buffer[0], buffer[1]]);
         let change = u16::from_le_bytes([buffer[2], buffer[3]]);
-
+        trace!("Hub raw status: 0x{:04x}, change: 0x{:04x}", status, change);
         Ok(HubStatus { status, change })
     }
 

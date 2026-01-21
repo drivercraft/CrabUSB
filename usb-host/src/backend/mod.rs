@@ -67,5 +67,6 @@ pub(crate) trait CoreOp: Send + 'static {
 pub struct DeviceAddressInfo {
     pub route_string: RouteString,
     pub root_port_id: u8,
+    pub parent_hub_slot_id: u8,
     pub port_speed: u8,
 }
