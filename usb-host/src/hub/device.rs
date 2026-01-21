@@ -66,11 +66,9 @@ pub struct HubSettings {
 }
 
 impl HubOp for HubDevice {
-    fn init(&mut self) -> Result<(), USBError> {
-        Ok(())
+    fn init(&mut self) -> BoxFuture<'_, Result<(), USBError>> {
+        self.configure().boxed()
     }
-
-    fn setup<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>> {}
 
     fn changed_ports<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<PortChangeInfo>, USBError>> {
         self.changed_ports().boxed()
@@ -213,10 +211,13 @@ impl HubDevice {
         self.data.dev.descriptor().protocol == 3
     }
 
-    pub async fn init(&mut self) -> Result<(), USBError> {
+    pub async fn configure(&mut self) -> Result<(), USBError> {
         // 第二阶段：获取 Hub 描述符（带重试）
+        debug!("Configuring hub device...");
         let descriptor = self.get_hub_descriptor().await?;
+
         self.data.descriptor = descriptor;
+
         if self.hub_descriptor().bNbrPorts == 0 {
             return Err(USBError::from("Hub has zero ports"));
         }
@@ -226,17 +227,17 @@ impl HubDevice {
         // 初始化所有端口为 Disconnected 状态
         self.data.ports = (1..=self.data.num_ports).map(Port::new).collect();
 
-        self.data
-            .dev
-            .set_configuration(self.settings.config_value)
-            .await?;
+        // self.data
+        //     .dev
+        //     .set_configuration(self.settings.config_value)
+        //     .await?;
 
-        debug!("Set configuration to {}", self.settings.config_value);
+        // debug!("Set configuration to {}", self.settings.config_value);
 
-        self.data
-            .dev
-            .claim_interface(self.settings.interface_number, self.settings.alt_setting)
-            .await?;
+        // self.data
+        //     .dev
+        //     .claim_interface(self.settings.interface_number, self.settings.alt_setting)
+        //     .await?;
 
         // 标记 Hub 为运行状态
         self.data.state = HubState::Running;
@@ -253,76 +254,49 @@ impl HubDevice {
     }
 
     /// 获取 Hub 描述符（参考 Linux 内核实现）
-    ///
-    /// Linux 内核位置: drivers/usb/core/hub.c:get_hub_descriptor()
-    ///
-    /// 重试策略:
-    /// - 最多重试 3 次
-    /// - 使用小缓冲区（USB 2.0 Hub 描述符可变长）
-    /// - QEMU 等模拟环境可能不支持，使用默认值
     async fn get_hub_descriptor(&mut self) -> Result<HubDescriptor, USBError> {
+        let mut buff = vec![0u8; 4]; // Hub 描述符最小长度
+        self.read_hub_descriptor_raw(&mut buff).await?;
+        let desc_len = buff[0] as usize;
+        trace!("Hub descriptor length from initial read: {}", desc_len);
+
+        let mut full_buff = vec![0u8; desc_len];
+
+        self.read_hub_descriptor_raw(&mut full_buff).await?;
+
+        let desc = unsafe { *(full_buff.as_ptr() as *const HubDescriptor) };
+        Ok(desc)
+    }
+
+    async fn read_hub_descriptor_raw(&mut self, buff: &mut [u8]) -> Result<(), USBError> {
         const DT_SS_HUB: u16 = 0x0a;
         const DT_HUB: u16 = 0x9;
+        const TYPE_CLASS: u16 = 1 << 5;
 
-        let dtype;
-        let size;
-
-        if self.is_superspeed() {
-            dtype = DT_SS_HUB;
-            size = 12;
+        let dtype = if self.is_superspeed() {
+            DT_SS_HUB
         } else {
-            dtype = DT_HUB;
-            size = size_of::<HubDescriptor>();
-        }
+            DT_HUB
+        } | TYPE_CLASS;
 
-        let mut buff = vec![0u8; size];
+        let n = self
+            .data
+            .dev
+            .ep_ctrl()
+            .control_in(
+                ControlSetup {
+                    request_type: RequestType::Class,
+                    recipient: Recipient::Device,
+                    request: Request::GetDescriptor,
+                    value: dtype << 8,
+                    index: 0,
+                },
+                buff,
+            )
+            .await?;
+        trace!("Hub raw descriptor read {n} bytes");
 
-        const MAX_RETRIES: u8 = 3;
-
-        // 参考 Linux 的重试机制
-        for attempt in 1..=MAX_RETRIES {
-            let result = self
-                .data
-                .dev
-                .ep_ctrl()
-                .control_in(
-                    ControlSetup {
-                        request_type: RequestType::Class,
-                        recipient: Recipient::Device,
-                        request: Request::GetDescriptor,
-                        value: dtype << 8,
-                        index: 0,
-                    },
-                    &mut buff,
-                )
-                .await;
-
-            let desc = unsafe { *(buff.as_ptr() as *const HubDescriptor) };
-
-            match result {
-                Ok(act_size) => {
-                    if self.is_superspeed() {
-                        if act_size == 12 {
-                            return Ok(desc);
-                        }
-                    } else if act_size >= 9 {
-                        let size = 7 + desc.bNbrPorts / 8 + 1;
-                        if (act_size as u8) < size {
-                            return Err(USBError::from("Hub descriptor size error"));
-                        }
-                        return Ok(desc);
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to get hub descriptor on attempt {}: {:?}",
-                        attempt, e
-                    );
-                }
-            }
-        }
-
-        Err(USBError::from("Hub get descriptor failed"))
+        Ok(())
     }
 
     // ========== 端口状态获取方法 ==========

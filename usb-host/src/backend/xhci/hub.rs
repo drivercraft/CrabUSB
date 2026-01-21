@@ -91,30 +91,29 @@ impl HubOp for XhciRootHub {
         self._changed_ports().boxed()
     }
 
-    fn init(&mut self) -> Result<(), USBError> {
-        debug!("Resetting all ports of xHCI Root Hub");
+    fn init(&mut self) -> BoxFuture<'_, Result<(), USBError>> {
+        async {
+            debug!("Resetting all ports of xHCI Root Hub");
 
-        for idx in 0..self.reg.port_register_set.len() {
-            self.reg.port_register_set.update_volatile_at(idx, |reg| {
-                if !reg.portsc.port_power() {
-                    trace!("Powering on port {}", idx + 1);
-                    reg.portsc.set_port_power();
-                }
-            });
+            for idx in 0..self.reg.port_register_set.len() {
+                self.reg.port_register_set.update_volatile_at(idx, |reg| {
+                    if !reg.portsc.port_power() {
+                        trace!("Powering on port {}", idx + 1);
+                        reg.portsc.set_port_power();
+                    }
+                });
+            }
+
+            for idx in 0..self.reg.port_register_set.len() {
+                self.reg.port_register_set.update_volatile_at(idx, |reg| {
+                    reg.portsc.set_0_port_enabled_disabled();
+                    reg.portsc.set_port_reset();
+                });
+            }
+
+            Ok(())
         }
-
-        for idx in 0..self.reg.port_register_set.len() {
-            self.reg.port_register_set.update_volatile_at(idx, |reg| {
-                reg.portsc.set_0_port_enabled_disabled();
-                reg.portsc.set_port_reset();
-            });
-        }
-
-        Ok(())
-    }
-
-    fn setup<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>> {
-        async move { Ok(()) }.boxed()
+        .boxed()
     }
 }
 

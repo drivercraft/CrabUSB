@@ -49,8 +49,8 @@ pub enum PortFeature {
     CReset = 20,       // 清除复位完成
 }
 
-const USB_MAXCHILDREN: usize = 31;
-const DEVICE_BITMAP_BYTES: usize = (USB_MAXCHILDREN + 1).div_ceil(8);
+const USB_MAXCHILDREN: usize = 8;
+const DEVICE_BITMAP_BYTES: usize = (USB_MAXCHILDREN + 1 + 7).div_ceil(8);
 
 #[derive(Clone, Copy)]
 #[allow(non_snake_case)]
