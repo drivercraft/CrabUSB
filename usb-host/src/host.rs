@@ -1,10 +1,8 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use usb_if::descriptor::{Class, HubSpeed};
 
 use crate::backend::{CoreOp, ty::*};
 use crate::err::Result;
-use crate::hub::{HubDevice, HubId};
 use crate::kcore::*;
 use crate::{Mmio, backend::BackendOp};
 
@@ -80,21 +78,6 @@ impl USBHost {
         let mut device: Device = device.into();
         device.init().await?;
         Ok(device)
-    }
-}
-
-struct HubStack {
-    info: DeviceInfo,
-    hub_speed: HubSpeed,
-    parent_hub: Option<HubId>,
-    config: u8,
-    interface: u8,
-    depth: u8,
-}
-
-impl HubStack {
-    fn is_root(&self) -> bool {
-        self.parent_hub.is_none()
     }
 }
 

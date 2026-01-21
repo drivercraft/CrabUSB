@@ -1,12 +1,10 @@
 pub mod device;
-pub mod event;
 
 use core::fmt::Debug;
 
 use alloc::boxed::Box;
 // 重新导出常用类型
 pub use device::HubDevice;
-pub use event::HubId;
 use id_arena::Id;
 
 #[derive(Debug, Clone)]

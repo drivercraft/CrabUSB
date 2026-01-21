@@ -16,9 +16,8 @@ use usb_if::{
     transfer::{Recipient, Request, RequestType},
 };
 
-use super::event::HubId;
 use crate::{
-    Device, DeviceInfo,
+    Device,
     backend::{DeviceId, ty::HubOp},
     hub::DeviceAddressInfo,
 };
@@ -158,10 +157,6 @@ impl HubDevice {
         // }
 
         Ok(changed_ports)
-    }
-
-    pub fn id(&self) -> HubId {
-        self.data.as_ref() as *const Inner as usize as HubId
     }
 
     pub fn is_superspeed(&self) -> bool {
@@ -510,50 +505,6 @@ impl HubDevice {
 
         warn!("Port {} reset timeout", port_index);
         Err(USBError::Timeout)
-    }
-
-    pub fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>, USBError> {
-        // ========================================================================
-        // External Hub 设备枚举架构说明
-        // ========================================================================
-        //
-        // **当前限制**：
-        // External Hub 端口上的设备枚举需要底层 USB 控制器（xHCI）支持。
-        // HubDevice 只能通过 Hub 特定请求（GetPortStatus、SetPortFeature）
-        // 来管理端口状态，但无法直接完成设备枚举流程。
-        //
-        // **设备枚举需要的操作**：
-        // 1. 端口复位 ✅ HubDevice 可以通过 SetPortFeature(Reset) 实现
-        // 2. 地址分配 ❌ 需要控制器 Enable Slot 命令
-        // 3. 获取描述符 ❌ 需要通过控制端点与设备通信
-        // 4. 配置设置 ❌ 需要控制器端点管理
-        //
-        // **正确的架构**：
-        // - Hub 层：端口状态监控、复位、防抖动检测
-        // - Controller 层：设备枚举、地址分配、端点管理
-        //
-        // **实现方案**：
-        // 方案 1：由 Host/Controller 层监听 Hub 端口状态变化，
-        //         触发设备枚举（类似 Linux 的 hub_event）
-        //
-        // 方案 2：扩展 HubDevice 接口，提供端口状态回调，
-        //         由 Host 层完成枚举
-        //
-        // 方案 3：为每个 Hub 端口创建虚拟 xHCI 端口映射，
-        //         复用现有枚举流程（复杂度高）
-        //
-        // **当前状态**：
-        // - Root Hub 枚举：xHCI::_probe_devices() 已实现
-        // - External Hub 枚举：需要架构扩展
-        //
-        // **相关代码**：
-        // - usb-host/src/backend/xhci/host.rs: _probe_devices()
-        // - usb-host/src/host.rs: probe_handle_hub()
-        // ========================================================================
-
-        // 暂时返回空列表
-        // 完整实现需要架构调整或端口事件系统支持
-        Ok(vec![])
     }
 }
 
