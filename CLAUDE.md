@@ -28,9 +28,12 @@ CrabUSB/
 ├── usb-host/           # 主机驱动核心实现 (crab-usb)
 │   └── src/
 │       ├── backend/    # 后端实现
-│       │   ├── xhci/   # xHCI 硬件驱动
-│       │   └── libusb/ # libusb 用户空间后端 (libusb feature)
-│       ├── common/     # 通用设备管理
+│       │   ├── xhci/   # xHCI 硬件驱动 (标准 USB3 主机控制器)
+│       │   ├── dwc/    # DWC3 控制器驱动 (RK3588 等平台)
+│       │   ├── libusb/ # libusb 用户空间后端 (libusb feature)
+│       │   └── ty/     # 后端操作 trait 定义 (HubOp, DeviceOp 等)
+│       ├── hub/        # Hub 设备管理和路由 (RouteString)
+│       ├── device/     # 设备抽象层
 │       └── osal.rs     # OS 抽象层 (Kernel trait)
 ├── usb-if/             # USB 接口定义和类型
 │   └── src/
@@ -42,8 +45,13 @@ CrabUSB/
 │   └── hid/keyboard/   # HID 键盘设备
 ├── test_crates/        # 测试用例
 │   ├── test_xhci_uvc/  # xHCI UVC 测试 (aarch64-none)
+│   ├── test_hub/       # Hub 多层枚举测试 (aarch64-none)
 │   ├── test_libusb_uvc/# libusb UVC 测试
 │   └── test_libusb/    # libusb 基础测试
+├── docs/               # 架构文档
+│   ├── HUB_ARCHITECTURE.md   # Hub 架构设计
+│   ├── design.md             # 异步模型设计
+│   └── rockchip/             # RK3588 平台相关文档
 └── utils/
     └── uvc-frame-parser/ # UVC 帧解析工具
 ```
@@ -52,19 +60,33 @@ CrabUSB/
 
 - `usb-if`: 定义跨后端的统一接口，所有后端必须实现这些 trait
 - `usb-host/backend`: 后端实现，xHCI 用于生产环境，libusb 用于开发测试
+- `usb-host/hub`: Hub 设备管理，支持 Root Hub 和 External Hub 统一接口
 - `usb-device`: 设备类驱动，UVC 是最复杂的实现（视频流捕获）
-- `test_crates`: 验证功能，UVC 测试覆盖从格式协商到视频流捕获的完整流程
+- `test_crates`: 验证功能，包括 UVC 测试和 Hub 多层枚举测试
+
+**最近新增功能 (2024-2025)**:
+
+- Hub 支持：完整的 Root Hub 和 External Hub 架构，支持多层 Hub 枚举
+- DWC3 控制器：RK3588 平台支持，包括 USB3 PHY 和 USB2 PHY 驱动
+- 事件处理：改进的事件处理机制，支持 libusb 事件处理线程
 
 ## 必须遵守
 
 修改完代码后，确保 `cargo check -p crab-usb --test test --target aarch64-unknown-none-softfloat` 可以通过，
 执行 `cargo fmt --all` 保持代码风格一致。
 
+**注意诊断警告**: 修改代码后应检查 IDE 诊断信息，清理未使用的导入、变量和死代码。主要问题包括：
+
+- `reg.rs`: 未使用的文档注释（宏生成的项不支持外部文档）
+- `grf.rs`: 多个未使用的关联项和结构体
+- `context.rs`: 未使用的方法 `update_input`
+- `consts.rs`: 多个未使用的常量
+- `mod.rs`: 未使用的导入 `BackendOp`
+
 ### 依赖管理
 
 - **workspace dependencies**: 在根 `Cargo.toml` 中统一定义版本
 - **常用依赖**:
-
   - `futures` (default-features = false): 异步原语
   - `thiserror` (default-features = false): 错误派生
   - `log`: 日志记录
@@ -74,10 +96,36 @@ CrabUSB/
 
 - **查询文档**: 使用 `context7` MCP 服务器查询依赖库的使用方法
 
-**主线内核**: `/home/zhourui/linux-la64`
 **QEMU**: `/home/zhourui/opensource/qemu-10.1.0`
 
-**注意**: RK3588 的某些寄存器和配置与主线内核不同，需要参考 Orange Pi 的特定实现。
+### RK3588 平台特定说明
+
+**参考路径**:
+
+- **主线内核**: `/home/zhourui/linux-la64`
+- **U-Boot**: `/home/zhourui/opensource/proj_usb/u-boot-orangepi`
+- **Orange Pi 内核**: `/home/zhourui/orangepi-build/kernel/orange-pi-6.1-rk35xx`
+
+**关键文档**:
+
+- `docs/rockchip/rk3588.md`: RK3588 USB3 Host 控制器依赖分析（寄存器、时钟、复位、电源域）
+- `docs/rockchip/u_boot_comparison.md`: U-Boot DWC3 驱动对比
+- `docs/rockchip/rk3588_phy_register_analysis.md`: PHY 寄存器分析
+
+**DWC3 控制器特性**:
+
+- 寄存器基地址: `0xfc400000` (USB3OTG1)
+- USB3 PHY 基地址: `0xfed90000` (USBDP PHY)
+- USB2 PHY 基地址: `0xfd5d8000`
+- 需要 GRF (General Register Files) 配置
+- 支持的最大速度: USB 3.0 SuperSpeed
+
+**PHY 初始化关键点**:
+
+1. USB2 PHY 必须先初始化并输出 UTMI 480MHz 时钟
+2. USBDP PHY 依赖 UTMI 时钟才能正常工作
+3. 必须按顺序解除复位：init → cmn → lane → pcs_apb → pma_apb
+4. GRF 配置需要使用写使能位格式 (Bit[31:16] 为使能, Bit[15:0] 为数据)
 
 ## 常用开发命令
 
@@ -89,6 +137,9 @@ cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat -- -c
 
 # 运行特定测试 (例如 uboot 测试)
 cargo test --package test_xhci_uvc --test test --target aarch64-unknown-none-softfloat -- --show-output uboot
+
+# Hub 多层枚举测试 (RK3588 DWC3 平台)
+cargo test --package test_hub --test test --target aarch64-unknown-none-softfloat -- --show-output test_all
 
 # libusb 后端测试 (需要 libudev-dev)
 cargo test -p crab-usb --features libusb --test test
@@ -110,12 +161,23 @@ cargo run -p uvc-frame-parser -- -l target/uvc.log -o target/output
 `usb-host/src/backend/` 提供了硬件抽象:
 
 - **xHCI**: 直接硬件访问，用于嵌入式系统和 OS 内核
-
   - `mod.rs`: `Xhci` 结构体实现 `usb_if::host::Controller` trait
   - `ring/`: TRB 环形管理，核心异步机制
   - `event.rs`: 事件处理和中断管理
   - `context.rs`: 设备上下文管理
   - `endpoint.rs`: 端点管理
+  - `hub.rs`: Root Hub 实现
+
+- **DWC3**: DesignWare USB3 DRD 控制器 (RK3588 等平台)
+  - `mod.rs`: `Dwc` 结构体封装 xHCI 主机控制器
+  - `udphy/`: USB3.0 Combo PHY (USBDP PHY) 驱动
+  - `usb2phy.rs`: USB2 PHY 驱动 (RK3588 特定调优)
+  - `grf.rs`: GRF (General Register Files) 配置
+  - **关键特性**:
+    - DWC3 在 Host 模式下实际使用 xHCI 寄存器 (0x0000-0x7fff)
+    - 全局寄存器区域 (0xc100-0xcfff) 包含 DWC3 特定配置
+    - 需要正确的 PHY 初始化顺序：USB2 PHY → USBDP PHY → DWC3 → xHCI
+    - 参考 `docs/rockchip/rk3588.md` 了解完整的依赖关系
 
 - **libusb**: 用户空间后端，用于开发和测试
   - 需要 `libusb` feature 启用
@@ -124,6 +186,10 @@ cargo run -p uvc-frame-parser -- -l target/uvc.log -o target/output
     - **端点地址**: 必须保留完整的 `bEndpointAddress`（包括方向位 bit 7），不能截断为 `& 0x0F`
     - **ISO transfer**: `libusb_alloc_transfer()` 第一个参数是 `iso_packets` 数量，ISO 传输必须传入正确的 packet 数
     - **控制传输 buffer**: 异步控制传输需要特殊布局 - `[8字节setup包] [数据区]`，必须使用 `temp_buff` 来保存
+
+- **ty/**: 后端操作 trait 定义
+  - `hub.rs`: `HubOp` trait - Hub 设备统一接口
+  - 其他 trait: `DeviceInfoOp`, `DeviceOp`, `EventHandlerOp`
 
 ### 2. USB 接口层 (usb-if)
 
@@ -198,6 +264,51 @@ pub mod endpoint {
     }
 }
 ```
+
+### 7. Hub 架构 (重要!)
+
+CrabUSB 实现了完整的 Root Hub 和 External Hub 支持，使用统一的 `HubOp` trait 接口。
+
+**核心概念**:
+
+- **Root Hub**: Host Controller 内部的 Hub，通过寄存器直接访问
+- **External Hub**: USB 总线上的 Hub 设备，通过 USB Control 传输访问
+- **RouteString**: 32位路由字符串，记录从 Root Hub 到设备的完整路径（最多 5 层）
+
+**RouteString 格式**:
+
+```
+Bits [19:16] - Hub 5 端口号
+Bits [15:12] - Hub 4 端口号
+Bits [11:8]  - Hub 3 端口号
+Bits [7:4]   - Hub 2 端口号
+Bits [3:0]   - Hub 1 端口号
+```
+
+**Hub 层次示例**:
+
+```
+Root Hub (Port 2)
+  └─ External Hub 1 (Port 3)
+      └─ External Hub 2 (Port 1)
+          └─ Device
+RouteString = 0x00021
+Root Hub Port = 0x2
+```
+
+**相关文件**:
+
+- `usb-host/src/hub/mod.rs`: Hub 核心结构和 RouteString 实现
+- `usb-host/src/hub/device.rs`: HubDevice 实现 HubOp trait
+- `usb-host/src/backend/xhci/hub.rs`: xHCI Root Hub 实现
+- `usb-host/src/backend/ty/hub.rs`: HubOp trait 定义
+- `docs/HUB_ARCHITECTURE.md`: 完整的 Hub 架构设计文档
+
+**使用场景**:
+
+- 多层 Hub 枚举（支持最多 5 层）
+- 设备热插拔处理
+- 端口状态监控和变化通知
 
 ## 开发注意事项
 
@@ -282,10 +393,50 @@ cargo run -p test_libusb_uvc
 - 启用 `log` crate 的 debug 级别日志
 - 使用 `bare-test` 框架进行裸机测试
 - 检查 `test_crates/` 中的示例用法
+- 使用 QEMU aarch64 进行 xHCI 测试，无需真实硬件
+- 查看 `docs/` 目录下的架构文档和平台特定文档
+
+### 代码阅读指南
+
+**理解异步流程**:
+
+1. 从 `usb-if/src/host/` 开始，了解 trait 定义
+2. 查看 `usb-host/src/backend/xhci/` 了解 xHCI 实现
+3. 研究 `ring.rs` 理解 TRB 环形机制
+4. 阅读 `test_crates/` 中的测试用例了解使用方式
+
+**理解 Hub 枚举**:
+
+1. 阅读 `docs/HUB_ARCHITECTURE.md` 了解架构设计
+2. 查看 `usb-host/src/hub/mod.rs` 了解 RouteString 实现
+3. 研究 `usb-host/src/backend/ty/hub.rs` 了解 HubOp trait
+4. 运行 `test_hub` 测试查看实际枚举流程
+
+**理解 RK3588 平台**:
+
+1. 阅读 `docs/rockchip/rk3588.md` 了解完整的依赖关系
+2. 查看 `usb-host/src/backend/dwc/mod.rs` 了解 DWC3 初始化
+3. 研究 `usb-host/src/backend/dwc/udphy/` 和 `usb2phy.rs` 了解 PHY 配置
+4. 对比 U-Boot 源码验证初始化顺序
 
 ### 常见陷阱与解决方案
 
-#### 1. libusb 控制传输 Stall
+#### 1. DWC3 PHY 寄存器不可写 (RK3588)
+
+**症状**: `GUSB3PIPECTL` 和 `GUSB2PHYCFG` 寄存器读取为 0x00000000，写入无效
+
+**原因**: PHY 初始化顺序不正确，或 UTMI 480MHz 时钟未启动
+
+**解决**:
+
+1. 确保正确的初始化顺序：
+   ```
+   USB2 PHY 初始化 → USBDP PHY 初始化 → DWC3 配置 → xHCI HCRST
+   ```
+2. 在 xHCI HCRST 之前清除 `GUSB2PHYCFG.suspendusb20` (bit[6])
+3. 参考 `docs/rockchip/rk3588.md` 了解完整的依赖关系
+
+#### 2. libusb 控制传输 Stall
 
 **症状**: PROBE/COMMIT 请求返回 Stall 错误
 
@@ -303,7 +454,7 @@ let temp_buff = vec![0u8; 8 + data_len]; // setup + 数据
 libusb_fill_control_setup(buffer, ...); // 填充 buffer[0..8]
 ```
 
-#### 2. ISO 传输崩溃 (dump core)
+#### 3. ISO 传输崩溃 (dump core)
 
 **症状**: 程序在 ISO 传输时崩溃
 
@@ -319,7 +470,7 @@ let iso_packets = match &transfer.kind {
 let trans_ptr = unsafe { libusb_alloc_transfer(iso_packets) };
 ```
 
-#### 3. 端点地址错误导致传输失败
+#### 4. 端点地址错误导致传输失败
 
 **症状**: libusb 无法识别端点，传输失败
 
@@ -333,22 +484,4 @@ address: ep_desc.bEndpointAddress & 0x0F
 
 // ✅ 正确
 address: ep_desc.bEndpointAddress
-```
-
-#### 4. 类型推断错误
-
-**症状**: `the trait bound '&str: Into<anyhow::Error> is not satisfied`
-
-**原因**: 在 no_std 环境中使用 `anyhow!` 宏或 `USBError::Other("...".into())`
-
-**解决**: 显式使用 `USBError::from()`:
-
-```rust
-// ❌ 错误
-USBError::Other("message".into())
-anyhow!("message").into()
-
-// ✅ 正确
-USBError::from("message")
-"message".into()  // 如果上下文类型明确
 ```

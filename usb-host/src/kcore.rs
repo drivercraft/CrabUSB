@@ -45,11 +45,6 @@ impl Core {
             let addr_infos = self.hub_changed_ports(id).await?;
 
             for addr_info in addr_infos {
-                debug!(
-                    "Found device at hub {:?}, port {}",
-                    id, addr_info.root_port_id
-                );
-
                 let route_string = if let Some(route) = &self.hubs.get(id).unwrap().route_string {
                     let mut rs = *route;
                     rs.push_hub(addr_info.port_id);
@@ -57,6 +52,10 @@ impl Core {
                 } else {
                     RouteString::follow_root()
                 };
+
+                let port_path = route_string.to_port_path_string(addr_info.root_port_id);
+
+                info!("Found device at port={port_path}");
 
                 let info = DeviceAddressInfo {
                     root_port_id: addr_info.root_port_id,
@@ -71,15 +70,14 @@ impl Core {
                 if let Some(hub_settings) =
                     HubDevice::is_hub(device.descriptor(), device.configuration_descriptors())
                 {
-                    info!("Found hub device at hub {:?}", id);
-
+                    info!("Device({port_path}) is a hub, creating HubDevice instance");
                     let device_inner: Device = device.into();
 
                     let mut hub_device =
                         HubDevice::new(device_inner, hub_settings, addr_info.root_port_id).await?;
                     hub_device.init().await?;
                     let mut hub = Hub::new(Box::new(hub_device), Some(route_string));
-                    hub.setup(id);
+                    hub.parent = Some(id);
                     let hub_id = self.hubs.alloc(hub);
                     is_have_new_hub = true;
 

@@ -98,12 +98,9 @@ impl Device {
         self.address(host, info).await?;
         // self.dump_device_out();
         let base = self.get_device_descriptor_base().await?;
-
-        // let max_packet_size = self.control_max_packet_size().await?;
-        // trace!("Max packet size: {max_packet_size}");
         debug!("Device Descriptor Base: {:#x?}", base);
 
-        self.evaluate_context(base).await?;
+        self.setup_max_packet(base).await?;
         self.get_configuration().await?;
         self.read_descriptor().await?;
 
@@ -111,41 +108,13 @@ impl Device {
             let config_desc = self.ep_ctrl().get_configuration_descriptor(i).await?;
             self.config_desc.push(config_desc);
         }
-
+        debug!("device descriptor ok");
         Ok(())
     }
 
-    async fn evaluate_context(&mut self, desc: DeviceDescriptorBase) -> Result {
-        // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
-        // 对于控制端点，这是直接的字节数值，不需要解码
-        let packet_size = if desc.max_packet_size_0 == 0 {
-            8u8
-        } else {
-            desc.max_packet_size_0
-        } as u16;
-
-        let is_hub;
-
-        if let Class::Hub(speed) = desc.class() {
-            is_hub = true;
-            info!("Device is a hub with speed: {:?}", speed);
-        } else {
-            is_hub = false;
-        }
-
-        let dci = Dci::CTRL;
-        self.ctx.with_input(|input| {
-            if is_hub {
-                input.device_mut().slot_mut().set_hub();
-            } else {
-                input.device_mut().slot_mut().clear_hub();
-            }
-            let endpoint = input.device_mut().endpoint_mut(dci.as_usize());
-            endpoint.set_max_packet_size(packet_size);
-        });
-
+    async fn evaluate(&mut self) -> Result {
+        self.ctx.input_clean_change();
         mb();
-
         debug!("Evaluating context for slot {}", self.id.as_u8());
         let _result = self
             .cmd
@@ -155,6 +124,40 @@ impl Device {
                     .set_input_context_pointer(self.ctx.input_bus_addr()),
             ))
             .await?;
+        debug!("Evaluate context ok");
+        Ok(())
+    }
+
+    async fn setup_max_packet(&mut self, desc: DeviceDescriptorBase) -> Result {
+        // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
+        // 对于控制端点，这是直接的字节数值，不需要解码
+        let packet_size = if desc.max_packet_size_0 == 0 {
+            8u8
+        } else {
+            desc.max_packet_size_0
+        } as u16;
+
+        // let is_hub;
+
+        // if let Class::Hub(speed) = desc.class() {
+        //     is_hub = true;
+        //     info!("Device is a hub with speed: {:?}", speed);
+        // } else {
+        //     is_hub = false;
+        // }
+
+        let dci = Dci::CTRL;
+        self.ctx.with_input(|input| {
+            // if is_hub {
+            //     input.device_mut().slot_mut().set_hub();
+            // } else {
+            //     input.device_mut().slot_mut().clear_hub();
+            // }
+            let endpoint = input.device_mut().endpoint_mut(dci.as_usize());
+            endpoint.set_max_packet_size(packet_size);
+        });
+
+        self.evaluate().await?;
 
         Ok(())
     }
@@ -315,7 +318,7 @@ impl Device {
 
     async fn setup_all_endpoints(&mut self, interface: u8, alternate: u8) -> Result {
         let mut max_dci = 1;
-        self.ctx.input_perper_modify();
+        self.ctx.input_clean_change();
         self.eps.clear();
 
         for desc in self

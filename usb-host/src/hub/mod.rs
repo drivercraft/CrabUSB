@@ -52,6 +52,14 @@ impl RouteString {
             if port == 0 { None } else { Some(port) }
         })
     }
+
+    pub fn to_port_path_string(self, root_hub_port: u8) -> String {
+        let mut parts = vec![root_hub_port.to_string()];
+        for port in self.route_port_ids() {
+            parts.push(port.to_string());
+        }
+        parts.join(".")
+    }
 }
 
 impl Debug for RouteString {
@@ -74,10 +82,6 @@ pub struct Hub {
     pub backend: Box<dyn crate::backend::ty::HubOp>,
 }
 impl Hub {
-    pub fn setup(&mut self, parent: Id<Hub>) {
-        self.parent = Some(parent);
-    }
-
     pub fn new(
         backend: Box<dyn crate::backend::ty::HubOp>,
         route_string: Option<RouteString>,

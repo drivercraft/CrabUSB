@@ -112,6 +112,10 @@ impl HubOp for XhciRootHub {
 
         Ok(())
     }
+
+    fn setup<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>> {
+        async move { Ok(()) }.boxed()
+    }
 }
 
 impl XhciRootHub {

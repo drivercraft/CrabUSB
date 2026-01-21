@@ -8,5 +8,6 @@ use crate::hub::PortChangeInfo;
 
 pub trait HubOp: Send + 'static + Any {
     fn init(&mut self) -> Result<(), USBError>;
+    fn setup<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>>;
     fn changed_ports<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<PortChangeInfo>, USBError>>;
 }

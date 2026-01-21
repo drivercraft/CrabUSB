@@ -70,6 +70,8 @@ impl HubOp for HubDevice {
         Ok(())
     }
 
+    fn setup<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>> {}
+
     fn changed_ports<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<PortChangeInfo>, USBError>> {
         self.changed_ports().boxed()
     }
@@ -239,6 +241,10 @@ impl HubDevice {
         // 标记 Hub 为运行状态
         self.data.state = HubState::Running;
         debug!("Hub initialized with {} ports", self.data.num_ports);
+        Ok(())
+    }
+
+    async fn config(&mut self) -> Result<(), USBError> {
         Ok(())
     }
 
