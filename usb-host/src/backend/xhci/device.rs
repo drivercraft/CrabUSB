@@ -518,8 +518,8 @@ impl DeviceOp for Device {
         let ep = self.eps.remove(&desc.dci().into());
         ep.ok_or(USBError::NotFound)
     }
-    
-    fn update_hub(&mut self, params: crate::backend::ty::HubParams) -> BoxFuture<'_, std::result::Result<(), USBError>> {
+
+    fn update_hub(&mut self, params: crate::backend::ty::HubParams) -> BoxFuture<'_, Result<()>> {
         todo!()
     }
 }
