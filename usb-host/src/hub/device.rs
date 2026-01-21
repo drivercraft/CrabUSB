@@ -343,8 +343,7 @@ impl HubDevice {
     }
 
     async fn hub_power_on(&mut self) -> Result<(), USBError> {
-        for port_idx in 0..self.data.num_ports {
-            let port_id = port_idx + 1;
+        for port_id in 1..=self.data.num_ports {
             self.set_port_feature(port_id, PortFeature::Power).await?;
             debug!("Powered on port {}", port_id);
         }
@@ -406,6 +405,11 @@ impl HubDevice {
         // 解析端口状态和变化
         let status_raw = u16::from_le_bytes([buffer[0], buffer[1]]);
         let change_raw = u16::from_le_bytes([buffer[2], buffer[3]]);
+
+        trace!(
+            "Port {} raw status: 0x{:04x}, change: 0x{:04x}",
+            port_id, status_raw, change_raw
+        );
 
         Ok((
             self.parse_port_status(status_raw),
@@ -481,7 +485,7 @@ impl HubDevice {
     /// 清除端口特性
     async fn clear_port_feature(
         &mut self,
-        port_index: u8,
+        port_id: u8,
         feature: PortFeature,
     ) -> Result<(), USBError> {
         self.data
@@ -493,7 +497,7 @@ impl HubDevice {
                     recipient: Recipient::Other,
                     request: Request::ClearFeature,
                     value: feature as u16,
-                    index: port_index as u16,
+                    index: port_id as u16,
                 },
                 &[],
             )
