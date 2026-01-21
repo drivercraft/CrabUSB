@@ -5,6 +5,7 @@ use alloc::{sync::Arc, vec::Vec};
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
+use usb_if::descriptor::{Class, DeviceDescriptorBase};
 use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,
@@ -14,17 +15,18 @@ use usb_if::{
 };
 use xhci::ring::trb::command;
 
+use crate::backend::DeviceAddressInfo;
 use crate::backend::xhci::cmd::CommandRing;
 use crate::{
     Xhci,
     backend::{
-        Dci, PortId,
+        Dci,
         ty::{
-            DeviceInfoOp, DeviceOp,
+            DeviceOp,
             ep::{EndpointBase, EndpointControl},
         },
         xhci::{
-            SlotId, append_port_to_route_string,
+            SlotId,
             context::ContextData,
             endpoint::{Endpoint, EndpointDescriptorExt},
             parse_default_max_packet_size_from_port_speed,
@@ -35,48 +37,8 @@ use crate::{
     err::Result,
 };
 
-#[derive(Debug, Clone)]
-pub struct DeviceInfo {
-    slot_id: SlotId,
-    desc: DeviceDescriptor,
-    config_desc: Vec<ConfigurationDescriptor>,
-}
-
-impl DeviceInfo {
-    pub fn new(
-        slot_id: SlotId,
-        desc: DeviceDescriptor,
-        config_desc: &[ConfigurationDescriptor],
-    ) -> Self {
-        Self {
-            slot_id,
-            desc,
-            config_desc: config_desc.to_vec(),
-        }
-    }
-
-    pub fn slot_id(&self) -> SlotId {
-        self.slot_id
-    }
-}
-
-impl DeviceInfoOp for DeviceInfo {
-    fn backend_name(&self) -> &str {
-        "xhci"
-    }
-
-    fn descriptor(&self) -> &DeviceDescriptor {
-        &self.desc
-    }
-
-    fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
-        &self.config_desc
-    }
-}
-
 pub struct Device {
     id: SlotId,
-    port_id: PortId,
     ctx: ContextData,
     desc: DeviceDescriptor,
     ctrl_ep: Option<EndpointControl>,
@@ -91,7 +53,7 @@ pub struct Device {
 }
 
 impl Device {
-    pub(crate) async fn new(host: &mut Xhci, port: PortId) -> Result<Self> {
+    pub(crate) async fn new(host: &mut Xhci) -> Result<Self> {
         let slot_id = host.device_slot_assignment().await?;
         debug!("Slot {slot_id} assigned");
         let is_64 = host.is_64bit_ctx();
@@ -103,12 +65,11 @@ impl Device {
         let ctx = host.dev_mut()?.new_ctx(slot_id, is_64, dma_mask)?;
         let bell = host.new_slot_bell(slot_id);
         let bell = Arc::new(Mutex::new(bell));
-        let port_speed = host.port_speed(port);
+        // let port_speed = host.port_speed(port);
         let desc = unsafe { core::mem::zeroed() };
 
         Ok(Self {
             id: slot_id,
-            port_id: port,
             ctx,
             bell,
             ctrl_ep: None,
@@ -117,14 +78,10 @@ impl Device {
             transfer_result_handler: host.transfer_result_handler.clone(),
             current_config_value: None,
             config_desc: vec![],
-            port_speed,
+            port_speed: 0,
             eps: BTreeMap::new(),
             cmd: host.cmd.clone(),
         })
-    }
-
-    pub fn slot_id(&self) -> SlotId {
-        self.id
     }
 
     fn new_ep(&mut self, dci: Dci) -> Result<Endpoint> {
@@ -135,21 +92,18 @@ impl Device {
         Ok(ep)
     }
 
-    pub fn descriptor(&self) -> &DeviceDescriptor {
-        &self.desc
-    }
-
-    pub fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
-        &self.config_desc
-    }
-
-    pub(crate) async fn init(&mut self, host: &mut Xhci) -> Result {
+    pub(crate) async fn init(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
         let ep = self.new_ep(Dci::CTRL)?;
         self.ctrl_ep = Some(EndpointControl::new(ep));
-        self.address(host).await?;
+        self.address(host, info).await?;
         // self.dump_device_out();
-        let max_packet_size = self.control_max_packet_size().await?;
-        trace!("Max packet size: {max_packet_size}");
+        let base = self.get_device_descriptor_base().await?;
+
+        // let max_packet_size = self.control_max_packet_size().await?;
+        // trace!("Max packet size: {max_packet_size}");
+        debug!("Device Descriptor Base: {:#x?}", base);
+
+        self.evaluate_context(base).await?;
         self.get_configuration().await?;
         self.read_descriptor().await?;
 
@@ -161,12 +115,55 @@ impl Device {
         Ok(())
     }
 
-    async fn address(&mut self, host: &mut Xhci) -> Result {
-        trace!("Addressing device with ID: {}", self.id.as_u8());
-        let port_speed = host.port_speed(self.port_id);
-        let max_packet_size = parse_default_max_packet_size_from_port_speed(port_speed);
+    async fn evaluate_context(&mut self, desc: DeviceDescriptorBase) -> Result {
+        // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
+        // 对于控制端点，这是直接的字节数值，不需要解码
+        let packet_size = if desc.max_packet_size_0 == 0 {
+            8u8
+        } else {
+            desc.max_packet_size_0
+        } as u16;
 
-        let route_string = append_port_to_route_string(0, 0);
+        let is_hub;
+
+        if let Class::Hub(speed) = desc.class() {
+            is_hub = true;
+            info!("Device is a hub with speed: {:?}", speed);
+        } else {
+            is_hub = false;
+        }
+
+        let dci = Dci::CTRL;
+        self.ctx.with_input(|input| {
+            if is_hub {
+                input.device_mut().slot_mut().set_hub();
+            } else {
+                input.device_mut().slot_mut().clear_hub();
+            }
+            let endpoint = input.device_mut().endpoint_mut(dci.as_usize());
+            endpoint.set_max_packet_size(packet_size);
+        });
+
+        mb();
+
+        debug!("Evaluating context for slot {}", self.id.as_u8());
+        let _result = self
+            .cmd
+            .cmd_request(command::Allowed::EvaluateContext(
+                *command::EvaluateContext::default()
+                    .set_slot_id(self.id.into())
+                    .set_input_context_pointer(self.ctx.input_bus_addr()),
+            ))
+            .await?;
+
+        Ok(())
+    }
+
+    async fn address(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
+        trace!("Addressing device with ID: {}", self.id.as_u8());
+        let port_speed = info.port_speed;
+        let max_packet_size = parse_default_max_packet_size_from_port_speed(port_speed);
+        let route_string = info.route_string.raw();
 
         let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
         // ctrl dci
@@ -174,8 +171,6 @@ impl Device {
         trace!(
             "ctrl ring: {ctrl_ring_addr:x?}, port speed: {port_speed}, max packet size: {max_packet_size}, route string: {route_string}"
         );
-
-        // let ring_cycle_bit = self.ctrl_ep.cycle;
 
         // 1. Allocate an Input Context data structure (6.2.5) and initialize all fields to
         // ‘0’.
@@ -202,7 +197,7 @@ impl Device {
             slot_context.set_route_string(route_string); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
             slot_context.set_context_entries(1);
             slot_context.set_max_exit_latency(0);
-            slot_context.set_root_hub_port_number(self.port_id.raw() as _); //todo: to use port number
+            slot_context.set_root_hub_port_number(info.root_port_id);
             slot_context.set_number_of_ports(0);
             slot_context.set_parent_hub_slot_id(0);
             slot_context.set_tt_think_time(0);
@@ -260,26 +255,16 @@ impl Device {
         Ok(())
     }
 
-    async fn control_max_packet_size(&mut self) -> Result<u16> {
-        trace!("control_fetch_control_point_packet_size");
-
+    async fn get_device_descriptor_base(&mut self) -> Result<DeviceDescriptorBase> {
         let mut data = alloc::vec![0u8; 8];
 
         self.ep_ctrl()
             .get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
             .await?;
 
-        // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
-        // 对于控制端点，这是直接的字节数值，不需要解码
-        let packet_size = data
-            .get(7) // bMaxPacketSize0 在设备描述符的第8个字节（索引7）
-            .map(|&len| if len == 0 { 8u8 } else { len })
-            .unwrap_or(8);
+        let desc = unsafe { *(data.as_ptr() as *const DeviceDescriptorBase) };
 
-        trace!("data@{:p}: {data:?}", data.as_ptr());
-        trace!("Device descriptor bMaxPacketSize0: {packet_size} bytes");
-
-        Ok(packet_size as _)
+        Ok(desc)
     }
 
     async fn get_configuration(&mut self) -> Result<u8> {
@@ -507,6 +492,10 @@ impl Device {
 }
 
 impl DeviceOp for Device {
+    fn id(&self) -> usize {
+        self.id.as_usize()
+    }
+
     fn backend_name(&self) -> &str {
         "xhci"
     }

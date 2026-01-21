@@ -56,6 +56,10 @@ impl Drop for DeviceInfo {
 }
 
 impl DeviceInfoOp for DeviceInfo {
+    fn id(&self) -> usize {
+        0
+    }
+
     fn backend_name(&self) -> &str {
         "libusb"
     }
@@ -244,6 +248,10 @@ impl Device {
 }
 
 impl DeviceOp for Device {
+    fn id(&self) -> usize {
+        unimplemented!("DeviceOp::id is not implemented for the libusb backend")
+    }
+
     fn backend_name(&self) -> &str {
         "libusb"
     }

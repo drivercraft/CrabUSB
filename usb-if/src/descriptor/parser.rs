@@ -746,6 +746,8 @@ pub fn decode_string_descriptor(data: &[u8]) -> Result<String, &'static str> {
 #[cfg(test)]
 mod test_concatenated {
     use super::parse_concatenated_config_descriptors;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     #[test]
     fn test_empty() {

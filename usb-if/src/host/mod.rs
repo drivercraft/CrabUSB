@@ -5,6 +5,8 @@ use crate::{
     transfer::{Recipient, Request, RequestType},
 };
 
+pub mod hub;
+
 #[derive(thiserror::Error, Debug)]
 pub enum USBError {
     #[error("Timeout")]
@@ -17,13 +19,19 @@ pub enum USBError {
     NotInitialized,
     #[error("Not found")]
     NotFound,
+    #[error("Invalid parameter")]
+    InvalidParameter,
     #[error("Slot limit reached")]
     SlotLimitReached,
     #[error("Configuration not set")]
     ConfigurationNotSet,
+    #[error("Not supported")]
+    NotSupported,
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }
+
+pub use USBError as Error;
 
 impl From<&str> for USBError {
     fn from(value: &str) -> Self {

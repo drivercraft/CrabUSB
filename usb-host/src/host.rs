@@ -1,8 +1,9 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::backend::ty::*;
+use crate::backend::{CoreOp, ty::*};
 use crate::err::Result;
+use crate::kcore::*;
 use crate::{Mmio, backend::BackendOp};
 
 pub use super::backend::{
@@ -29,16 +30,23 @@ impl USBHost {
         Ok(USBHost::new(Dwc::new(params)?))
     }
 
-    #[cfg(feature = "libusb")]
+    #[cfg(libusb)]
     pub fn new_libusb() -> Result<USBHost> {
-        let host = USBHost::new(crate::backend::libusb::Libusb::new());
+        let host = USBHost::new_user(crate::backend::libusb::Libusb::new());
         Ok(host)
     }
 }
 
 impl USBHost {
-    /// 创建新的 USB 主机控制器
-    pub(crate) fn new(backend: impl BackendOp) -> Self {
+    pub(crate) fn new(backend: impl CoreOp) -> Self {
+        let b = Core::new(backend);
+        Self {
+            backend: Box::new(b),
+        }
+    }
+
+    #[cfg(libusb)]
+    pub(crate) fn new_user(backend: impl BackendOp) -> Self {
         Self {
             backend: Box::new(backend),
         }
@@ -46,16 +54,18 @@ impl USBHost {
 
     /// 初始化主机控制器
     pub async fn init(&mut self) -> Result<()> {
-        self.backend.init().await
+        self.backend.init().await?;
+        Ok(())
     }
 
     pub async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>> {
-        self.backend.probe_devices().await.map(|infos| {
-            infos
-                .into_iter()
-                .map(|info| DeviceInfo { inner: info })
-                .collect()
-        })
+        let device_infos = self.backend.device_list().await?;
+        let mut devices = Vec::new();
+        for dev in device_infos {
+            let dev_info = DeviceInfo { inner: dev };
+            devices.push(dev_info);
+        }
+        Ok(devices)
     }
 
     pub fn create_event_handler(&mut self) -> EventHandler {

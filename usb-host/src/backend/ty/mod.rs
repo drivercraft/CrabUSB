@@ -8,7 +8,10 @@ use crate::{backend::ty::ep::EndpointControl, err::USBError};
 
 // pub mod hub;
 pub mod ep;
+mod hub;
 pub mod transfer;
+
+pub use hub::*;
 
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -22,6 +25,7 @@ pub(crate) trait EventHandlerOp: Send + Any + Sync + 'static {
 }
 
 pub(crate) trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
+    fn id(&self) -> usize;
     fn backend_name(&self) -> &str;
     fn descriptor(&self) -> &DeviceDescriptor;
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
@@ -29,6 +33,7 @@ pub(crate) trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
 
 /// USB 设备特征（高层抽象）
 pub(crate) trait DeviceOp: Send + Any + 'static {
+    fn id(&self) -> usize;
     fn backend_name(&self) -> &str;
     fn descriptor(&self) -> &DeviceDescriptor;
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];

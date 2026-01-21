@@ -1,7 +1,7 @@
-use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cell::UnsafeCell;
 use core::time::Duration;
-use futures::{FutureExt, future::LocalBoxFuture};
+use futures::{FutureExt, future::BoxFuture};
 use spin::RwLock;
 
 use mbarrier::mb;
@@ -14,21 +14,23 @@ use xhci::{
 };
 
 use super::Device;
+use super::hub::XhciRootHub;
 use super::reg::{MemMapper, XhciRegisters};
 use crate::backend::{
+    CoreOp,
     ty::{Event, EventHandlerOp},
     xhci::{
         SlotId,
         context::{DeviceContextList, ScratchpadBufferArray},
-        device::DeviceInfo,
         event::{EventRing, EventRingInfo},
+        hub::PortChangeWaker,
     },
 };
 use crate::{
     Mmio,
     backend::{
-        BackendOp,
-        ty::{DeviceInfoOp, DeviceOp},
+        DeviceAddressInfo,
+        ty::DeviceOp,
         xhci::{cmd::CommandRing, transfer::TransferResultHandler},
     },
     err::Result,
@@ -44,13 +46,41 @@ pub struct Xhci {
     event_handler: Option<EventHandler>,
     event_ring_info: EventRingInfo,
     scratchpad_buf_arr: Option<ScratchpadBufferArray>,
-    port_status: Vec<ProtStaus>,
-    inited_devices: BTreeMap<SlotId, Device>,
     pub(crate) transfer_result_handler: TransferResultHandler,
+    root_hub: Option<XhciRootHub>,
 }
 
 unsafe impl Send for Xhci {}
 unsafe impl Sync for Xhci {}
+
+impl CoreOp for Xhci {
+    fn root_hub(&mut self) -> Box<dyn crate::backend::ty::HubOp> {
+        Box::new(
+            self.root_hub
+                .take()
+                .expect("Root hub can only be taken once"),
+        )
+    }
+
+    fn init<'a>(&'a mut self) -> BoxFuture<'a, core::result::Result<(), USBError>> {
+        self._init().boxed()
+    }
+
+    fn new_addressed_device<'a>(
+        &'a mut self,
+        addr: DeviceAddressInfo,
+    ) -> BoxFuture<'a, Result<Box<dyn DeviceOp>>> {
+        self.new_device(addr).boxed()
+    }
+
+    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp> {
+        Box::new(
+            self.event_handler
+                .take()
+                .expect("Event handler can only be created once"),
+        )
+    }
+}
 
 impl Xhci {
     pub fn new(mmio: Mmio, dma_mask: usize) -> Result<Self> {
@@ -66,7 +96,10 @@ impl Xhci {
         let event_ring = EventRing::new(dma_mask)?;
         let event_ring_info = event_ring.info();
 
+        let root_hub = XhciRootHub::new(reg.clone())?;
+
         let transfer_result_handler = TransferResultHandler::new(reg_shared.clone());
+        let ports = root_hub.waker();
 
         Ok(Xhci {
             reg: reg_shared,
@@ -79,11 +112,11 @@ impl Xhci {
                 cmd_finished,
                 event_ring,
                 transfer_result_handler,
+                ports,
             )),
+            root_hub: Some(root_hub),
             event_ring_info,
             scratchpad_buf_arr: None,
-            port_status: vec![],
-            inited_devices: BTreeMap::new(),
         })
     }
 
@@ -125,75 +158,20 @@ impl Xhci {
         self.wait_for_running().await;
 
         self.enable_irq();
-        self.reset_ports().await;
+        // self.reset_ports().await;
 
         Ok(())
     }
 
-    async fn _probe_devices(&mut self) -> Result<Vec<Box<dyn DeviceInfoOp>>> {
-        for port_idx in self.need_init_port_idxs().collect::<Vec<usize>>() {
-            self.new_device(port_idx).await?;
-            self.port_status[port_idx] = ProtStaus::Inited;
-        }
-
-        Ok(self
-            .inited_devices
-            .values()
-            .map(|d| {
-                let desc = d.descriptor().clone();
-                Box::new(DeviceInfo::new(
-                    d.slot_id(),
-                    desc,
-                    d.configuration_descriptors(),
-                )) as Box<dyn DeviceInfoOp>
-            })
-            .collect())
+    async fn new_device(&mut self, info: DeviceAddressInfo) -> Result<Box<dyn DeviceOp>> {
+        debug!("New device on route {:?}", info.route_string);
+        let mut device = Device::new(self).await?;
+        device.init(self, &info).await?;
+        // let id = device.slot_id();
+        // self.inited_devices.insert(id, device);
+        Ok(Box::new(device))
     }
 
-    async fn _open_device(&mut self, dev: &DeviceInfo) -> Result<Device> {
-        self.inited_devices
-            .remove(&dev.slot_id())
-            .ok_or(USBError::NotFound)
-    }
-}
-
-impl BackendOp for Xhci {
-    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp> {
-        Box::new(
-            self.event_handler
-                .take()
-                .expect("Event handler can only be created once"),
-        )
-    }
-
-    fn init<'a>(&'a mut self) -> futures::future::BoxFuture<'a, Result<()>> {
-        self._init().boxed()
-    }
-
-    fn probe_devices<'a>(
-        &'a mut self,
-    ) -> futures::future::BoxFuture<'a, Result<Vec<Box<dyn crate::backend::ty::DeviceInfoOp>>>>
-    {
-        self._probe_devices().boxed()
-    }
-
-    fn open_device<'a>(
-        &'a mut self,
-        dev: &'a dyn crate::backend::ty::DeviceInfoOp,
-    ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>>> {
-        async move {
-            let dev_info = (dev as &dyn core::any::Any)
-                .downcast_ref::<DeviceInfo>()
-                .unwrap();
-
-            let device = self._open_device(dev_info).await?;
-            Ok(Box::new(device) as Box<dyn DeviceOp>)
-        }
-        .boxed()
-    }
-}
-
-impl Xhci {
     async fn init_ext_caps(&mut self) -> Result {
         let caps = self.extended_capabilities();
         debug!("Extended capabilities: {:?}", caps.len());
@@ -488,53 +466,6 @@ impl Xhci {
             .write_volatile_at(0, doorbell::Register::default());
     }
 
-    async fn reset_ports(&mut self) {
-        let mut regs = self.reg.write();
-        let port_len = regs.port_register_set.len();
-        debug!("Resetting {} ports", port_len);
-        // Enable port power for all ports
-        for i in 0..port_len {
-            let portsc = regs.port_register_set.read_volatile_at(i).portsc;
-            if !portsc.port_power() {
-                regs.port_register_set.update_volatile_at(i, |port| {
-                    port.portsc.set_port_power();
-                });
-            }
-        }
-
-        for i in 0..port_len {
-            self.port_status.push(ProtStaus::Uninit);
-            regs.port_register_set.update_volatile_at(i, |port| {
-                port.portsc.set_0_port_enabled_disabled();
-                port.portsc.set_port_reset();
-            });
-        }
-
-        debug!("Waiting for reset ...");
-
-        for i in 0..port_len {
-            // 等待复位完成
-            SpinWhile::new(|| {
-                let port_reg = regs.port_register_set.read_volatile_at(i);
-                port_reg.portsc.port_reset()
-            })
-            .await;
-        }
-
-        info!("All ports reset completed");
-    }
-
-    fn need_init_port_idxs(&self) -> impl Iterator<Item = usize> {
-        (0..self.reg.read().port_register_set.len()).filter(move |&i| {
-            let portsc = self.reg.read().port_register_set.read_volatile_at(i).portsc;
-            info!("Port {i} status: {portsc:#x?}");
-
-            portsc.port_enabled_disabled()
-                && portsc.current_connect_status()
-                && self.port_status[i] == ProtStaus::Uninit
-        })
-    }
-
     pub(crate) fn cmd_request(
         &mut self,
         trb: command::Allowed,
@@ -549,15 +480,6 @@ impl Xhci {
             .hccparams1
             .read_volatile()
             .context_size()
-    }
-
-    async fn new_device(&mut self, port_idx: usize) -> Result {
-        debug!("New device on port {port_idx}");
-        let mut device = Device::new(self, (port_idx + 1).into()).await?;
-        device.init(self).await?;
-        let id = device.slot_id();
-        self.inited_devices.insert(id, device);
-        Ok(())
     }
 
     pub(crate) fn new_slot_bell(&self, slot: SlotId) -> SlotBell {
@@ -592,6 +514,7 @@ pub struct EventHandler {
     cmd_finished: Finished<CommandCompletion>,
     event_ring: UnsafeCell<EventRing>,
     transfer_result_handler: TransferResultHandler,
+    ports: PortChangeWaker,
 }
 
 unsafe impl Send for EventHandler {}
@@ -603,12 +526,14 @@ impl EventHandler {
         cmd_finished: Finished<CommandCompletion>,
         event_ring: EventRing,
         transfer_result_handler: TransferResultHandler,
+        ports: PortChangeWaker,
     ) -> Self {
         Self {
             reg: UnsafeCell::new(reg),
             cmd_finished,
             event_ring: UnsafeCell::new(event_ring),
             transfer_result_handler,
+            ports,
         }
     }
 
@@ -634,6 +559,11 @@ impl EventHandler {
                     self.cmd_finished.set_finished(addr.into(), c);
                 }
                 Allowed::PortStatusChange(st) => {
+                    // debug!("Port {} status change event", st.port_id());
+                    // let idx = (st.port_id() - 1) as usize;
+                    let port_id = st.port_id();
+                    self.ports.set_port_changed(port_id);
+
                     event = Event::PortChange {
                         port: st.port_id() as _,
                     };
@@ -690,10 +620,4 @@ impl EventHandlerOp for EventHandler {
 
         res
     }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ProtStaus {
-    Uninit,
-    Inited,
 }

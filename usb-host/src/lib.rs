@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(feature = "libusb", windows, unix)), no_std)]
+#![cfg_attr(not(any(windows, unix)), no_std)]
 #![feature(iterator_try_collect)]
 
 #[macro_use]
@@ -21,6 +21,8 @@ pub(crate) mod backend;
 pub mod device;
 pub mod err;
 mod host;
+pub(crate) mod hub;
+mod kcore;
 pub(crate) mod queue;
 
 pub use backend::ty::Event;

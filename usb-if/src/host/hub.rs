@@ -1,222 +1,3 @@
-//! USB Hub 设备抽象
-//!
-//! 定义 Root Hub 和 External Hub 的共性接口。
-//!
-//! # 架构设计
-//!
-//! ```text
-//!     Hub (基础 trait)
-//!      ├─ 端口管理
-//!      ├─ 端口状态查询
-//!      └─ 描述符访问
-//!           │
-//!           ├──────────────┬──────────────┐
-//!           ▼              ▼              ▼
-//!     RootHub      ExternalHub    TransactionHub
-//!     (寄存器访问)   (USB 设备)     (通过传输)
-//! ```
-//!
-//! # Linux 对应关系
-//!
-//! | CrabUSB | Linux |
-//! |---------|-------|
-//! | `Hub` | `struct usb_hub` |
-//! | `PortOps` | `hub_port_*` functions |
-//! | `RootHub` | `struct usb_hcd` + rh_dev |
-//! | `ExternalHub` | `drivers/usb/core/hub.c` |
-
-use alloc::{boxed::Box, vec::Vec};
-use futures::future::LocalBoxFuture;
-
-use crate::{
-    descriptor::{DeviceDescriptor, ConfigurationDescriptor},
-    err::USBError,
-    transfer::ControlSetup,
-};
-
-use super::{DeviceInfo, Device};
-
-// ============================================================================
-// 基础 Hub 接口
-// ============================================================================
-
-/// Hub 设备基础接口
-///
-/// 定义 Root Hub 和 External Hub 的共性操作。
-/// 参照 USB 2.0 规范第 11 章和 Linux `struct usb_hub`。
-pub trait Hub: Send + 'static {
-    /// 获取 Hub 描述符
-    ///
-    /// 返回 Hub 的 Class 描述符（USB 2.0 规范 11.23.2.1）
-    fn hub_descriptor(&self) -> LocalBoxFuture<'_, Result<HubDescriptor, USBError>>;
-
-    /// 获取端口数量
-    ///
-    /// Root Hub: 从寄存器读取
-    /// External Hub: 从 Hub 描述符读取
-    fn num_ports(&self) -> u8;
-
-    /// 获取指定端口的操作接口
-    ///
-    /// # Safety
-    /// 调用者必须确保 port_index < num_ports()
-    fn port(&mut self, port_index: u8) -> Result<Box<dyn HubPortOps>, USBError>;
-
-    /// 获取所有端口的当前状态
-    ///
-    /// 用于设备枚举和状态监控
-    fn port_status_all(&mut self) -> LocalBoxFuture<'_, Result<Vec<PortStatus>, USBError>>;
-
-    /// 获取 Hub 特性
-    fn hub_characteristics(&self) -> HubCharacteristics;
-
-    /// 电源控制
-    ///
-    /// - Root Hub: 通常所有端口共享电源，无法单独控制
-    /// - External Hub: 可以根据描述符控制每个端口的电源
-    fn power_switching_mode(&self) -> PowerSwitchingMode;
-
-    /// 处理 Hub 事件
-    ///
-    /// - Root Hub: 由 Host Controller 中断触发
-    /// - External Hub: 通过状态变化端点接收
-    ///
-    /// # Safety
-    /// 必须在适当的上下文中调用（中断或任务上下文）
-    unsafe fn handle_event(&mut self) -> LocalBoxFuture<'_, Result<(), USBError>>;
-}
-
-/// Hub 端口操作接口
-///
-/// 定义单个端口的操作，参照 USB 2.0 规范 11.24。
-pub trait HubPortOps: Send + Sync {
-    /// 获取端口号
-    fn port_number(&self) -> u8;
-
-    /// 读取端口状态
-    ///
-    /// 返回端口的当前状态，参照 USB 2.0 规范表 11-21。
-    ///
-    /// # Safety
-    /// 调用者应确保在中断禁用或持有适当锁的情况下调用
-    unsafe fn read_status(&self) -> Result<PortStatus, USBError>;
-
-    /// 端口复位
-    ///
-    /// 参照 USB 2.0 规范 11.5.1.5。
-    /// 复位后，端口会进入 Enabled 状态。
-    ///
-    /// # 特殊情况
-    /// - Root Hub: 直接操作寄存器
-    /// - External Hub: 发送 SetPortFeature(PORT_RESET) 请求
-    async fn reset(&mut self) -> Result<(), USBError>;
-
-    /// 启用/禁用端口
-    ///
-    /// 参照 USB 2.0 规范 11.24.2.7。
-    async fn set_enable(&mut self, enable: bool) -> Result<(), USBError>;
-
-    /// 电源控制
-    ///
-    /// 控制端口的电源供应。
-    ///
-    /// - Root Hub: 通常无法单独控制（所有端口共享）
-    /// - External Hub: 根据 Hub 特性可能支持逐端口控制
-    async fn set_power(&mut self, power: bool) -> Result<(), USBError>;
-
-    /// 挂起/恢复
-    ///
-    /// 参照 USB 2.0 规范 11.5.1.8。
-    async fn set_suspend(&mut self, suspend: bool) -> Result<(), USBError>;
-
-    /// 清除端口状态变化标志
-    ///
-    /// 端口状态变化（连接、复位等）需要在处理后清除。
-    ///
-    /// # Safety
-    /// 必须在处理完变化后调用，避免丢失事件
-    unsafe fn clear_status_change(&mut self) -> Result<(), USBError>;
-
-    /// 检测连接的设备速度
-    ///
-    /// 返回端口连接设备的速度。
-    /// 如果没有设备连接，返回 None。
-    ///
-    /// - Root Hub: 从端口寄存器读取
-    /// - External Hub: 从状态读取
-    fn device_speed(&self) -> Option<DeviceSpeed>;
-
-    /// 检查是否是高速端口
-    ///
-    /// 用于确定是否需要 Transaction Translator (TT)。
-    fn is_high_speed(&self) -> bool;
-}
-
-// ============================================================================
-// Root Hub 特定接口
-// ============================================================================
-
-/// Root Hub 接口
-///
-/// Root Hub 是集成在 Host Controller 内的虚拟 Hub。
-/// 它直接访问控制器寄存器，不需要通过 USB 传输。
-///
-/// 参照 Linux `struct usb_hcd` 的根集线器实现。
-pub trait RootHub: Hub {
-    /// 获取 Host Controller 引用
-    ///
-    /// 用于访问底层硬件寄存器。
-    fn host_controller(&self) -> &dyn HostControllerOps;
-
-    /// 可变访问 Host Controller
-    fn host_controller_mut(&mut self) -> &mut dyn HostControllerOps;
-
-    /// 等待控制器运行完成
-    ///
-    /// Root Hub 初始化后需要等待 HCD 进入运行状态。
-    async fn wait_for_running(&mut self) -> Result<(), USBError>;
-
-    /// 重置所有端口
-    ///
-    /// Host Controller 初始化时调用。
-    fn reset_all_ports(&mut self) -> Result<(), USBError>;
-
-    /// 启用/禁用中断
-    ///
-    /// Root Hub 通常直接由 HCD 中断驱动。
-    fn enable_irq(&mut self) -> Result<(), USBError>;
-    fn disable_irq(&mut self) -> Result<(), USBError>;
-}
-
-/// Host Controller 操作接口
-///
-/// Root Hub 用于访问底层硬件的接口。
-pub trait HostControllerOps: Send + Sync {
-    /// 读取寄存器
-    ///
-    /// # Safety
-    /// 调用者必须确保寄存器有效
-    unsafe fn read_reg(&self, offset: usize, width: RegWidth) -> u64;
-
-    /// 写入寄存器
-    ///
-    /// # Safety
-    /// 调用者必须确保寄存器有效且值合法
-    unsafe fn write_reg(&self, offset: usize, width: RegWidth, value: u64);
-
-    /// 内存屏障
-    fn barrier(&self, barrier: MemoryBarrierType);
-
-    /// 获取 MMIO 基地址
-    fn mmio_base(&self) -> usize;
-
-    /// DMA 映射
-    unsafe fn dma_map(&self, virt_addr: usize, size: usize) -> Result<usize, USBError>;
-
-    /// DMA 解映射
-    unsafe fn dma_unmap(&self, phys_addr: usize, size: usize);
-}
-
 /// 寄存器宽度
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegWidth {
@@ -234,47 +15,6 @@ pub enum MemoryBarrierType {
     Full,
 }
 
-// ============================================================================
-// External Hub 特定接口
-// ============================================================================
-
-/// External Hub 接口
-///
-/// External Hub 是通过 USB 总线连接的独立 Hub 设备。
-/// 所有操作都通过 USB Control 传输完成。
-///
-/// 参照 Linux `drivers/usb/core/hub.c`。
-pub trait ExternalHub: Hub + Device {
-    /// 获取 Hub 设备地址
-    fn device_address(&self) -> u8;
-
-    /// 获取状态变化端点
-    ///
-    /// Hub 使用中断端点报告端口状态变化。
-    fn status_change_endpoint(&mut self) -> Result<Box<dyn EndpointInterruptIn>, USBError>;
-
-    /// 发送 Hub 类请求
-    ///
-    /// 参照 USB 2.0 规范 11.24 (Hub Class Requests)。
-    fn hub_control(
-        &mut self,
-        request: HubRequest,
-        value: u16,
-        index: u16,
-        data: &mut [u8],
-    ) -> LocalBoxFuture<'_, Result<usize, USBError>>;
-
-    /// 获取 Transaction Translator (TT) 信息
-    ///
-    /// 用于高速 Hub 与低速/全速设备通信。
-    fn tt_info(&self) -> Option<TtInfo>;
-
-    /// 检查是否需要 TT
-    ///
-    /// 如果 Hub 是高速的，且连接了低速/全速设备，需要 TT。
-    fn needs_tt(&self) -> bool;
-}
-
 /// Hub 类请求
 ///
 /// 参照 USB 2.0 规范表 11-15。
@@ -290,6 +30,79 @@ pub enum HubRequest {
     GetHubDescriptor16, // USB 3.0+
 }
 
+/// 端口特性选择器
+///
+/// 参照 USB 2.0 规范表 11-17。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortFeature {
+    Connection = 0,
+    Enable = 1,
+    Suspend = 2,
+    OverCurrent = 3,
+    Reset = 4,
+    Power = 8,
+    LowSpeed = 9,
+    CConnection = 16,  // 清除连接变化
+    CEnable = 17,      // 清除使能变化
+    CSuspend = 18,     // 清除挂起变化
+    COverCurrent = 19, // 清除过流变化
+    CReset = 20,       // 清除复位完成
+}
+
+const USB_MAXCHILDREN: usize = 31;
+const DEVICE_BITMAP_BYTES: usize = (USB_MAXCHILDREN + 1).div_ceil(8);
+
+#[derive(Clone, Copy)]
+#[allow(non_snake_case)]
+#[repr(C, packed)]
+pub struct HubDescriptor {
+    pub bDescLength: u8,
+    pub bDescriptorType: u8,
+    pub bNbrPorts: u8,
+    wHubCharacteristics: u16,
+    pub bPwrOn2PwrGood: u8,
+    pub bHubContrCurrent: u8,
+    pub u: HubDescriptorVariant,
+}
+
+impl HubDescriptor {
+    pub fn hub_characteristics(&self) -> u16 {
+        u16::from_le(self.wHubCharacteristics)
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(C, packed)]
+pub union HubDescriptorVariant {
+    pub hs: HighSpeedHubDescriptorTail,
+    pub ss: SuperSpeedHubDescriptorTail,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+pub struct HighSpeedHubDescriptorTail {
+    pub device_removable: [u8; DEVICE_BITMAP_BYTES],
+    pub port_pwr_ctrl_mask: [u8; DEVICE_BITMAP_BYTES],
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+pub struct SuperSpeedHubDescriptorTail {
+    pub bHubHdrDecLat: u8,
+    wHubDelay: u16,
+    device_removable: u16,
+}
+
+impl SuperSpeedHubDescriptorTail {
+    pub fn hub_delay(&self) -> u16 {
+        u16::from_le(self.wHubDelay)
+    }
+    pub fn device_removable(&self) -> u16 {
+        u16::from_le(self.device_removable)
+    }
+}
+
 /// Transaction Translator 信息
 ///
 /// 用于高速 Hub 与低速/全速设备的通信。
@@ -303,28 +116,6 @@ pub struct TtInfo {
 
     /// TT 端口数量
     pub num_ports: u8,
-}
-
-// ============================================================================
-// 共享数据结构
-// ============================================================================
-
-/// Hub 描述符
-///
-/// 参照 USB 2.0 规范 11.23.2.1。
-#[derive(Debug, Clone)]
-pub struct HubDescriptor {
-    /// 端口数量
-    pub num_ports: u8,
-
-    /// Hub 特性
-    pub characteristics: HubCharacteristics,
-
-    /// 电源开通到电源良好的时间（单位：2ms）
-    pub power_good_time: u8,
-
-    /// Hub 控制器电流（单位：mA）
-    pub hub_current: u8,
 }
 
 /// Hub 特性
@@ -450,18 +241,6 @@ impl From<u8> for DeviceSpeed {
 }
 
 // ============================================================================
-// 端点接口（复用）
-// ============================================================================
-
-/// 中断 IN 端点
-///
-/// 用于 External Hub 的状态变化报告。
-pub trait EndpointInterruptIn: Send + 'static {
-    fn submit<'a>(&mut self, data: &'a mut [u8])
-        -> LocalBoxFuture<'a, Result<usize, USBError>>;
-}
-
-// ============================================================================
 // 辅助函数
 // ============================================================================
 
@@ -470,7 +249,7 @@ impl HubCharacteristics {
     ///
     /// 参照 USB 2.0 规范图 11-16。
     pub fn from_descriptor(value: u16) -> Self {
-        let power_switching = match (value & 0x03) {
+        let power_switching = match value & 0x03 {
             0x01 => PowerSwitchingMode::Ganged,
             0x02 => PowerSwitchingMode::Individual,
             _ => PowerSwitchingMode::AlwaysPower,
@@ -538,5 +317,49 @@ mod tests {
         assert_eq!(original.compound_device, decoded.compound_device);
         assert_eq!(original.over_current_mode, decoded.over_current_mode);
         assert_eq!(original.port_indicators, decoded.port_indicators);
+    }
+
+    #[test]
+    fn test_hub_descriptor_from_bytes() {
+        // 测试数据：4 端口 Hub
+        let data = [
+            0x09, // bDescLength = 9
+            0x29, // bDescriptorType = 0x29 (Hub)
+            0x04, // bNbrPorts = 4
+            0x12, 0x00, // wHubCharacteristics = 0x0012 (little-endian)
+            // Bits 1:0 = 10b -> Individual power switching
+            // Bit 2 = 0 -> Not a compound device
+            // Bit 3 = 1 -> Individual over-current protection
+            // Bit 4 = 0 -> No port indicators
+            0x32, // bPwrOn2PwrGood = 50 * 2ms = 100ms
+            0x64, // bHubContrCurrent = 100mA
+            0x00, // DeviceRemovable (端口 0-7 位图)
+            0x00, // Reserved
+        ];
+
+        let desc = HubDescriptor::from_bytes(&data).expect("Failed to parse");
+
+        assert_eq!(desc.num_ports, 4);
+        assert_eq!(desc.power_good_time, 50);
+        assert_eq!(desc.hub_current, 100);
+
+        // 验证特性解析
+        assert!(matches!(
+            desc.characteristics.power_switching,
+            PowerSwitchingMode::Individual
+        ));
+    }
+
+    #[test]
+    fn test_hub_descriptor_invalid_length() {
+        let data = [0x09, 0x29]; // 太短
+        assert!(HubDescriptor::from_bytes(&data).is_none());
+    }
+
+    #[test]
+    fn test_hub_descriptor_invalid_type() {
+        let mut data = [0x09u8; 7];
+        data[1] = 0x01; // 错误的类型
+        assert!(HubDescriptor::from_bytes(&data).is_none());
     }
 }
