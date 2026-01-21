@@ -137,22 +137,8 @@ impl Device {
             desc.max_packet_size_0
         } as u16;
 
-        // let is_hub;
-
-        // if let Class::Hub(speed) = desc.class() {
-        //     is_hub = true;
-        //     info!("Device is a hub with speed: {:?}", speed);
-        // } else {
-        //     is_hub = false;
-        // }
-
         let dci = Dci::CTRL;
         self.ctx.with_input(|input| {
-            // if is_hub {
-            //     input.device_mut().slot_mut().set_hub();
-            // } else {
-            //     input.device_mut().slot_mut().clear_hub();
-            // }
             let endpoint = input.device_mut().endpoint_mut(dci.as_usize());
             endpoint.set_max_packet_size(packet_size);
         });
@@ -531,5 +517,9 @@ impl DeviceOp for Device {
     ) -> Result<EndpointBase> {
         let ep = self.eps.remove(&desc.dci().into());
         ep.ok_or(USBError::NotFound)
+    }
+    
+    fn update_hub(&mut self, params: crate::backend::ty::HubParams) -> BoxFuture<'_, std::result::Result<(), USBError>> {
+        todo!()
     }
 }

@@ -297,6 +297,13 @@ impl DeviceOp for Device {
         let ep = EndpointImpl::new(self.handle.clone(), desc.address);
         Ok(EndpointBase::new(ep))
     }
+
+    fn update_hub(
+        &mut self,
+        _params: crate::backend::ty::HubParams,
+    ) -> futures::future::BoxFuture<'_, std::result::Result<(), USBError>> {
+        unimplemented!("libusb does not need to update hub parameters")
+    }
 }
 
 fn libusb_device_desc_to_desc(

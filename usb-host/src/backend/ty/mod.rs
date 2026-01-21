@@ -56,7 +56,12 @@ pub(crate) trait DeviceOp: Send + Any + 'static {
         desc: &usb_if::descriptor::EndpointDescriptor,
     ) -> Result<ep::EndpointBase, USBError>;
 
-    fn update_hub(&mut self) -> BoxFuture<'_, Result<(), USBError>>;
-    
+    fn update_hub(&mut self, params: HubParams) -> BoxFuture<'_, Result<(), USBError>>;
+
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, USBError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct HubParams {
+    
 }
