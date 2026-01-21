@@ -15,8 +15,8 @@ use tock_registers::interfaces::*;
 use usb_if::DeviceSpeed;
 pub use usb_if::DrMode;
 
-use crate::backend::CoreOp;
 use crate::backend::dwc::reg::GEVNTSIZ;
+use crate::backend::{CoreOp, DeviceAddressInfo};
 use crate::{
     Mmio, Xhci,
     backend::{
@@ -683,7 +683,7 @@ impl CoreOp for Dwc {
 
     fn new_addressed_device<'a>(
         &'a mut self,
-        addr: crate::hub::DeviceAddressInfo,
+        addr: DeviceAddressInfo,
     ) -> futures::future::BoxFuture<'a, Result<Box<dyn super::ty::DeviceOp>>> {
         self.xhci.new_addressed_device(addr)
     }

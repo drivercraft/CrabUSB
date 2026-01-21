@@ -16,9 +16,20 @@ use xhci::{
 use super::Device;
 use super::hub::XhciRootHub;
 use super::reg::{MemMapper, XhciRegisters};
+use crate::backend::{
+    CoreOp,
+    ty::{Event, EventHandlerOp},
+    xhci::{
+        SlotId,
+        context::{DeviceContextList, ScratchpadBufferArray},
+        event::{EventRing, EventRingInfo},
+        hub::PortChangeWaker,
+    },
+};
 use crate::{
     Mmio,
     backend::{
+        DeviceAddressInfo,
         ty::DeviceOp,
         xhci::{cmd::CommandRing, transfer::TransferResultHandler},
     },
@@ -26,19 +37,6 @@ use crate::{
 };
 use crate::{backend::PortId, osal::SpinWhile};
 use crate::{backend::xhci::reg::SlotBell, queue::Finished};
-use crate::{
-    backend::{
-        CoreOp,
-        ty::{Event, EventHandlerOp},
-        xhci::{
-            SlotId,
-            context::{DeviceContextList, ScratchpadBufferArray},
-            event::{EventRing, EventRingInfo},
-            hub::PortChangeWaker,
-        },
-    },
-    hub::DeviceAddressInfo,
-};
 
 pub struct Xhci {
     pub(crate) reg: Arc<RwLock<XhciRegisters>>,
@@ -70,7 +68,7 @@ impl CoreOp for Xhci {
 
     fn new_addressed_device<'a>(
         &'a mut self,
-        addr: crate::hub::DeviceAddressInfo,
+        addr: DeviceAddressInfo,
     ) -> BoxFuture<'a, Result<Box<dyn DeviceOp>>> {
         self.new_device(addr).boxed()
     }

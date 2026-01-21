@@ -10,10 +10,10 @@ use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
 use crate::{
     Device,
     backend::{
-        BackendOp, CoreOp,
+        BackendOp, CoreOp, DeviceAddressInfo,
         ty::{DeviceInfoOp, DeviceOp, EventHandlerOp},
     },
-    hub::{DeviceAddressInfo, Hub, HubDevice},
+    hub::{Hub, HubDevice, PortChangeInfo, RouteString},
 };
 
 pub struct Core {
@@ -50,7 +50,21 @@ impl Core {
                     id, addr_info.root_port_id
                 );
 
-                let device = self.backend.new_addressed_device(addr_info.clone()).await?;
+                let route_string = if let Some(route) = &self.hubs.get(id).unwrap().route_string {
+                    let mut rs = *route;
+                    rs.push_hub(addr_info.port_id);
+                    rs
+                } else {
+                    RouteString::follow_root()
+                };
+
+                let info = DeviceAddressInfo {
+                    root_port_id: addr_info.root_port_id,
+                    route_string,
+                    port_speed: addr_info.port_speed,
+                };
+
+                let device = self.backend.new_addressed_device(info).await?;
 
                 let device_id = device.id();
 
@@ -61,18 +75,10 @@ impl Core {
 
                     let device_inner: Device = device.into();
 
-                    // 获取父 Hub 的 route_string 并添加当前 Hub 的端口位置
-                    let route_prefix = self.get_hub_route_string(id);
-
-                    let mut hub_device = HubDevice::new(
-                        device_inner,
-                        hub_settings,
-                        route_prefix,
-                        addr_info.root_port_id,
-                    )
-                    .await?;
+                    let mut hub_device =
+                        HubDevice::new(device_inner, hub_settings, addr_info.root_port_id).await?;
                     hub_device.init().await?;
-                    let mut hub = Hub::new(Box::new(hub_device), Some(route_prefix));
+                    let mut hub = Hub::new(Box::new(hub_device), Some(route_string));
                     hub.setup(id);
                     let hub_id = self.hubs.alloc(hub);
                     is_have_new_hub = true;
@@ -98,27 +104,9 @@ impl Core {
     async fn hub_changed_ports(
         &mut self,
         hub_id: Id<Hub>,
-    ) -> Result<Vec<DeviceAddressInfo>, usb_if::host::Error> {
+    ) -> Result<Vec<PortChangeInfo>, usb_if::host::Error> {
         let hub = self.hubs.get_mut(hub_id).expect("Hub id should be valid");
         hub.backend.changed_ports().await
-    }
-
-    /// 获取 Hub 的 route_string
-    fn get_hub_route_string(&self, id: Id<Hub>) -> crate::hub::RouteString {
-        let hub = self.hubs.get(id).expect("Hub id should be valid");
-        Self::get_hub_route_string_static(hub)
-    }
-
-    /// 获取 Hub 的 route_string（静态辅助方法）
-    fn get_hub_route_string_static(hub: &Hub) -> crate::hub::RouteString {
-        // 尝试获取 HubDevice 的 route_string
-        let any = hub.backend.as_any();
-        if let Some(device) = any.downcast_ref::<HubDevice>() {
-            return device.route_string();
-        }
-
-        // Root Hub 返回空 route_string
-        crate::hub::RouteString::follow_root()
     }
 
     async fn probe_devices(&mut self) -> Result<Vec<Box<dyn DeviceInfoOp>>, usb_if::host::Error> {
@@ -140,7 +128,7 @@ impl BackendOp for Core {
         async {
             self.backend.init().await?;
             let mut root_hub = Hub::new(self.backend.root_hub(), None);
-            root_hub.backend.reset()?;
+            root_hub.backend.init()?;
 
             let id = self.hubs.alloc(root_hub);
             self.root_hub = Some(id);

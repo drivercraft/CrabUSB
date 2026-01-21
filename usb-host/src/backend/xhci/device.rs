@@ -15,14 +15,14 @@ use usb_if::{
 };
 use xhci::ring::trb::command;
 
+use crate::backend::DeviceAddressInfo;
 use crate::backend::xhci::cmd::CommandRing;
-use crate::hub::DeviceAddressInfo;
 use crate::{
     Xhci,
     backend::{
         Dci,
         ty::{
-            DeviceInfoOp, DeviceOp,
+            DeviceOp,
             ep::{EndpointBase, EndpointControl},
         },
         xhci::{

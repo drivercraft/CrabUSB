@@ -13,7 +13,7 @@ use usb_if::host::USBError;
 
 use crate::{
     backend::{ty::HubOp, xhci::reg::XhciRegisters},
-    hub::{DeviceAddressInfo, RouteString},
+    hub::PortChangeInfo,
 };
 
 pub struct PortChangeWaker {
@@ -24,6 +24,7 @@ unsafe impl Send for PortChangeWaker {}
 unsafe impl Sync for PortChangeWaker {}
 
 impl PortChangeWaker {
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new(port_num: u8) -> Self {
         let mut ports = Vec::with_capacity(port_num as usize);
         for i in 0..port_num {
@@ -71,8 +72,6 @@ pub struct XhciRootHub {
     reg: XhciRegisters,
 
     ports: Arc<UnsafeCell<Vec<Port>>>,
-    /// Hub 状态
-    state: HubState,
 }
 
 unsafe impl Send for XhciRootHub {}
@@ -88,11 +87,11 @@ impl XhciRootHub {
 }
 
 impl HubOp for XhciRootHub {
-    fn changed_ports(&mut self) -> BoxFuture<'_, Result<Vec<DeviceAddressInfo>, USBError>> {
+    fn changed_ports(&mut self) -> BoxFuture<'_, Result<Vec<PortChangeInfo>, USBError>> {
         self._changed_ports().boxed()
     }
 
-    fn reset(&mut self) -> Result<(), USBError> {
+    fn init(&mut self) -> Result<(), USBError> {
         debug!("Resetting all ports of xHCI Root Hub");
 
         for idx in 0..self.reg.port_register_set.len() {
@@ -113,26 +112,6 @@ impl HubOp for XhciRootHub {
 
         Ok(())
     }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
-    }
-}
-
-/// Hub 状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HubState {
-    /// 未初始化
-    Uninitialized,
-
-    /// 初始化中
-    Initializing,
-
-    /// 运行中
-    Running,
-
-    /// 挂起
-    Suspended,
 }
 
 impl XhciRootHub {
@@ -141,11 +120,7 @@ impl XhciRootHub {
         let port_num = reg.port_register_set.len();
         let ports = PortChangeWaker::new(port_num as _).ports.clone();
 
-        Ok(Self {
-            reg,
-            ports,
-            state: HubState::Uninitialized,
-        })
+        Ok(Self { reg, ports })
     }
 
     pub fn waker(&self) -> PortChangeWaker {
@@ -154,7 +129,7 @@ impl XhciRootHub {
         }
     }
 
-    async fn _changed_ports(&mut self) -> Result<Vec<DeviceAddressInfo>, USBError> {
+    async fn _changed_ports(&mut self) -> Result<Vec<PortChangeInfo>, USBError> {
         self.handle_uninit().await?;
         self.handle_reseted().await
     }
@@ -190,7 +165,7 @@ impl XhciRootHub {
         Ok(())
     }
 
-    async fn handle_reseted(&mut self) -> Result<Vec<DeviceAddressInfo>, USBError> {
+    async fn handle_reseted(&mut self) -> Result<Vec<PortChangeInfo>, USBError> {
         let reseted = self
             .ports()
             .iter()
@@ -212,8 +187,8 @@ impl XhciRootHub {
             debug!("Port {} : \r\n {:?}", id, port_reg.portsc);
             self.ports_mut()[i].state = PortState::Probed;
 
-            out.push(DeviceAddressInfo {
-                route_string: RouteString::follow_root(),
+            out.push(PortChangeInfo {
+                // route_string: RouteString::follow_root(),
                 root_port_id: id,
                 port_id: id,
                 port_speed: speed,

@@ -8,8 +8,7 @@ pub use device::HubDevice;
 use id_arena::Id;
 
 #[derive(Debug, Clone)]
-pub struct DeviceAddressInfo {
-    pub route_string: RouteString,
+pub struct PortChangeInfo {
     pub root_port_id: u8,
     pub port_id: u8,
     pub port_speed: u8,

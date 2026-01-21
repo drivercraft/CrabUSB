@@ -5,7 +5,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::time::Duration;
-use futures::FutureExt;
+use futures::{FutureExt, future::BoxFuture};
 
 use usb_if::{
     descriptor::{Class, ConfigurationDescriptor, DeviceDescriptor, EndpointType},
@@ -19,7 +19,7 @@ use usb_if::{
 use crate::{
     Device,
     backend::{DeviceId, ty::HubOp},
-    hub::DeviceAddressInfo,
+    hub::PortChangeInfo,
 };
 
 // Hub 枚举常量 (参照 Linux 内核)
@@ -32,15 +32,6 @@ const HUB_DEBOUNCE_STEP: u64 = 25;
 
 /// 防抖动稳定时间 (100ms)
 const HUB_DEBOUNCE_STABLE: u64 = 100;
-
-/// 端口初始化重试次数
-const PORT_INIT_TRIES: u8 = 4;
-
-/// 获取描述符重试次数
-const GET_DESCRIPTOR_TRIES: u8 = 2;
-
-/// SET_ADDRESS 等待时间 (10ms)
-const SET_ADDRESS_SETTLING_TIME: u64 = 10;
 
 /// Hub 设备
 ///
@@ -64,9 +55,6 @@ struct Inner {
 
     pub descriptor: HubDescriptor,
 
-    /// Route String 前缀（从父 Hub 继承）
-    pub route_prefix: crate::hub::RouteString,
-
     /// Root Hub 端口 ID（如果这是外部 Hub）
     pub root_port_id: u8,
 }
@@ -78,18 +66,12 @@ pub struct HubSettings {
 }
 
 impl HubOp for HubDevice {
-    fn reset(&mut self) -> Result<(), USBError> {
+    fn init(&mut self) -> Result<(), USBError> {
         Ok(())
     }
 
-    fn changed_ports<'a>(
-        &'a mut self,
-    ) -> futures::future::BoxFuture<'a, Result<Vec<DeviceAddressInfo>, USBError>> {
+    fn changed_ports<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<PortChangeInfo>, USBError>> {
         self.changed_ports().boxed()
-    }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
     }
 }
 
@@ -138,7 +120,6 @@ impl HubDevice {
     pub async fn new(
         dev: Device,
         settings: HubSettings,
-        route_prefix: crate::hub::RouteString,
         root_port_id: u8,
     ) -> Result<Self, USBError> {
         Ok(Self {
@@ -149,13 +130,13 @@ impl HubDevice {
                 ports: vec![],
                 dev,
                 descriptor: unsafe { core::mem::zeroed() },
-                route_prefix,
+
                 root_port_id,
             }),
         })
     }
 
-    pub async fn changed_ports(&mut self) -> Result<Vec<DeviceAddressInfo>, USBError> {
+    pub async fn changed_ports(&mut self) -> Result<Vec<PortChangeInfo>, USBError> {
         let mut changed_ports = vec![];
 
         // 收集所有端口号，避免借用冲突
@@ -584,7 +565,7 @@ impl HubDevice {
         &mut self,
         port_index: u8,
         initial_status: &PortStatus,
-    ) -> Result<DeviceAddressInfo, USBError> {
+    ) -> Result<PortChangeInfo, USBError> {
         info!(
             "Handling connection on port {}, speed: {:?}",
             port_index, initial_status.speed
@@ -612,12 +593,8 @@ impl HubDevice {
 
         let port_id = port_index;
 
-        // 生成 DeviceAddressInfo
-        let mut route_string = self.data.route_prefix;
-        route_string.push_hub(port_id);
-
-        Ok(DeviceAddressInfo {
-            route_string,
+        Ok(PortChangeInfo {
+            // route_string,
             root_port_id: self.root_port_id(),
             port_id,
             port_speed,
@@ -668,11 +645,6 @@ impl HubDevice {
         }
     }
 
-    /// 获取 Hub 的 route_string 前缀
-    pub fn route_string(&self) -> crate::hub::RouteString {
-        self.data.route_prefix
-    }
-
     /// 获取 Hub 的 root_port_id
     pub fn root_port_id(&self) -> u8 {
         self.data.root_port_id
@@ -685,17 +657,8 @@ pub enum HubState {
     /// 未初始化
     Uninitialized,
 
-    /// 初始化中（stage: 1/2/3）
-    Initializing { stage: u8 },
-
     /// 运行中
     Running,
-
-    /// 挂起
-    Suspended,
-
-    /// 错误状态
-    Error(USBError),
 }
 
 /// 端口
@@ -749,24 +712,6 @@ impl Port {
 /// 端口状态机
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortState {
-    /// 断电
-    PoweredOff,
-
     /// 未连接
     Disconnected,
-
-    /// 复位中
-    Resetting,
-
-    /// 已使能
-    Enabled,
-
-    /// 挂起
-    Suspended,
-
-    /// 禁用
-    Disabled,
-
-    /// 过流
-    OverCurrent,
 }

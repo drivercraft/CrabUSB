@@ -8,7 +8,7 @@ use usb_if::host::USBError;
 
 use crate::{
     backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp, HubOp},
-    hub::DeviceAddressInfo,
+    hub::RouteString,
 };
 
 pub mod dwc;
@@ -62,4 +62,10 @@ pub(crate) trait CoreOp: Send + 'static {
     ) -> BoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
 
     fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
+}
+
+pub struct DeviceAddressInfo {
+    pub route_string: RouteString,
+    pub root_port_id: u8,
+    pub port_speed: u8,
 }
