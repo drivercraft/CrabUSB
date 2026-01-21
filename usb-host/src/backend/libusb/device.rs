@@ -249,7 +249,7 @@ impl Device {
 
 impl DeviceOp for Device {
     fn id(&self) -> usize {
-        0
+        unimplemented!("DeviceOp::id is not implemented for the libusb backend")
     }
 
     fn backend_name(&self) -> &str {
