@@ -5,7 +5,7 @@ use core::fmt::Debug;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 // 重新导出常用类型
-pub use device::HubDevice;
+pub use device::{HubDevice, PortState};
 use id_arena::Id;
 
 #[derive(Debug, Clone)]

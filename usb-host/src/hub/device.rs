@@ -147,65 +147,48 @@ impl HubDevice {
         let mut changed_ports = vec![];
 
         // 收集所有端口号，避免借用冲突
-        let port_indices: Vec<u8> = self.data.ports.iter().map(|p| p.index).collect();
 
-        for port_index in port_indices {
-            let (status, change) = self.get_port_status(port_index).await?;
+        for port_idx in 0..self.data.num_ports {
+            let port_id = port_idx + 1;
+            let (status, change) = self.get_port_status(port_id).await?;
+
+            debug!("Port {} status: {:?}", port_id, status);
 
             if change.connection_changed {
+                info!("Port {} enabled changed: {}", port_id, status.enabled);
+                // 清除连接变化标志
+                self.clear_port_feature(port_id, PortFeature::CConnection)
+                    .await?;
+            }
+
+            if status.connected && self.data.ports[port_idx as usize].state == PortState::Uninit {
                 info!(
                     "Port {} connection changed: connected={}, enabled={}",
-                    port_index, status.connected, status.enabled
+                    port_id, status.connected, status.enabled
                 );
 
-                // 清除连接变化标志
-                self.clear_port_feature(port_index, PortFeature::CConnection)
-                    .await?;
+                // 执行端口验证流程（参考 xHCI Root Hub）
+                let validation_result = self.handle_port_connection(port_id, &status).await?;
 
-                // 如果设备已连接，进行完整验证流程
-                if status.connected {
-                    // 执行端口验证流程（参考 xHCI Root Hub）
-                    let validation_result = self.handle_port_connection(port_index, &status).await;
+                self.data.ports[port_idx as usize].state = PortState::Probed;
 
-                    // 更新端口状态
-                    if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
-                        port.status = status;
-
-                        match validation_result {
-                            Ok(addr_info) => {
-                                changed_ports.push(addr_info);
-                            }
-                            Err(e) => {
-                                warn!("Port {} connection validation failed: {:?}", port_index, e);
-                                // 更新端口状态为 Disconnected
-                                port.state = PortState::Disconnected;
-                            }
-                        }
-                    }
-                } else {
-                    // 设备断开，更新端口状态
-                    if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
-                        port.status = status;
-                        port.state = PortState::Disconnected;
-                        port.connected_device = None;
-                    }
-                }
+                changed_ports.push(validation_result);
             }
 
             if change.enabled_changed {
-                info!("Port {} enabled changed: {}", port_index, status.enabled);
-                self.clear_port_feature(port_index, PortFeature::CEnable)
+                info!("Port {} enabled changed: {}", port_id, status.enabled);
+                self.clear_port_feature(port_id, PortFeature::CEnable)
                     .await?;
-                if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
+                if let Some(port) = self.data.ports.iter_mut().find(|p| p.id == port_id) {
                     port.status = status;
                 }
             }
 
             if change.reset_complete {
-                debug!("Port {} reset complete", port_index);
-                self.clear_port_feature(port_index, PortFeature::CReset)
+                debug!("Port {} reset complete", port_id);
+                self.clear_port_feature(port_id, PortFeature::CReset)
                     .await?;
-                if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
+                if let Some(port) = self.data.ports.iter_mut().find(|p| p.id == port_id) {
                     port.status = status;
                 }
             }
@@ -686,7 +669,7 @@ pub enum HubState {
 /// 端口
 pub struct Port {
     /// 端口号（1-based）
-    pub index: u8,
+    pub id: u8,
 
     /// 端口状态
     pub status: PortStatus,
@@ -705,7 +688,7 @@ impl Port {
     /// 创建新端口
     pub fn new(index: u8) -> Self {
         Self {
-            index,
+            id: index,
             status: PortStatus {
                 connected: false,
                 enabled: false,
@@ -724,16 +707,17 @@ impl Port {
                     over_current_changed: false,
                 },
             },
-            state: PortState::Disconnected,
+            state: PortState::Uninit,
             connected_device: None,
             tt_required: false,
         }
     }
 }
 
-/// 端口状态机
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PortState {
-    /// 未连接
-    Disconnected,
+    #[default]
+    Uninit,
+    Reseted,
+    Probed,
 }

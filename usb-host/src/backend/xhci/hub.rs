@@ -13,7 +13,7 @@ use usb_if::host::USBError;
 
 use crate::{
     backend::{ty::HubOp, xhci::reg::XhciRegisters},
-    hub::PortChangeInfo,
+    hub::{PortChangeInfo, PortState},
 };
 
 pub struct PortChangeWaker {
@@ -47,14 +47,6 @@ impl PortChangeWaker {
         ports[idx].changed.store(true, Ordering::Release);
         ports[idx].change_waker.wake();
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum PortState {
-    #[default]
-    Uninit,
-    Reseted,
-    Probed,
 }
 
 pub struct Port {
