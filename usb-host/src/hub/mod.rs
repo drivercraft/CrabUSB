@@ -3,9 +3,11 @@ pub mod event;
 
 use core::fmt::Debug;
 
+use alloc::boxed::Box;
 // 重新导出常用类型
 pub use device::HubDevice;
 pub use event::HubId;
+use id_arena::Id;
 
 #[derive(Debug, Clone)]
 pub struct DeviceAddressInfo {
@@ -64,6 +66,23 @@ impl Debug for RouteString {
             }
         }
         Ok(())
+    }
+}
+
+pub struct Hub {
+    pub parent: Option<Id<Hub>>,
+    pub backend: Box<dyn crate::backend::ty::HubOp>,
+}
+impl Hub {
+    pub fn setup(&mut self, parent: Id<Hub>) {
+        self.parent = Some(parent);
+    }
+
+    pub fn new(backend: Box<dyn crate::backend::ty::HubOp>) -> Self {
+        Self {
+            backend,
+            parent: None,
+        }
     }
 }
 
