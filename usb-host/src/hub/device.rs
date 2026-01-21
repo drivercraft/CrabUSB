@@ -239,6 +239,22 @@ impl HubDevice {
             self.data.num_ports, device_protocol, multi_tt, tt_think_time_ns
         );
 
+        let status = self.get_hub_status().await?;
+
+        debug!(
+            "local power source: {}",
+            if status.local_power_source() {
+                "lost (inactive)"
+            } else {
+                "good"
+            }
+        );
+
+        debug!(
+            "over current condition exists: {}",
+            if status.over_current() { "" } else { "no " }
+        );
+
         // 构造 HubParams
         let params = crate::backend::ty::HubParams {
             num_ports: self.data.num_ports,
@@ -255,6 +271,8 @@ impl HubDevice {
         // 第三阶段：初始化端口状态（参考 Linux hub_activate）
         // 初始化所有端口为 Disconnected 状态
         self.data.ports = (1..=self.data.num_ports).map(Port::new).collect();
+
+        self.hub_power_on().await?;
 
         // self.data
         //     .dev
@@ -324,6 +342,41 @@ impl HubDevice {
         Ok(())
     }
 
+    async fn hub_power_on(&mut self) -> Result<(), USBError> {
+        for port_idx in 0..self.data.num_ports {
+            let port_id = port_idx + 1;
+            self.set_port_feature(port_id, PortFeature::Power).await?;
+            debug!("Powered on port {}", port_id);
+        }
+
+        crate::osal::kernel::delay(Duration::from_millis(100));
+        Ok(())
+    }
+
+    async fn get_hub_status(&mut self) -> Result<HubStatus, USBError> {
+        let mut buffer = vec![0u8; size_of::<HubStatus>()];
+
+        self.data
+            .dev
+            .ep_ctrl()
+            .control_in(
+                ControlSetup {
+                    request_type: RequestType::Class,
+                    recipient: Recipient::Device,
+                    request: Request::GetStatus,
+                    value: 0,
+                    index: 0,
+                },
+                &mut buffer,
+            )
+            .await?;
+
+        let status = u16::from_le_bytes([buffer[0], buffer[1]]);
+        let change = u16::from_le_bytes([buffer[2], buffer[3]]);
+
+        Ok(HubStatus { status, change })
+    }
+
     // ========== 端口状态获取方法 ==========
 
     /// 获取端口状态 (参照 Linux usb_hub_port_status)
@@ -331,7 +384,7 @@ impl HubDevice {
     /// 返回: (端口状态, 状态变化标志)
     async fn get_port_status(
         &mut self,
-        port_index: u8,
+        port_id: u8,
     ) -> Result<(PortStatus, PortStatusChange), USBError> {
         let mut buffer = vec![0u8; 4]; // wPortStatus (2字节) + wPortChange (2字节)
 
@@ -344,7 +397,7 @@ impl HubDevice {
                     recipient: Recipient::Other, // Port
                     request: Request::GetStatus,
                     value: 0,
-                    index: port_index as u16,
+                    index: port_id as u16,
                 },
                 &mut buffer,
             )
@@ -720,4 +773,23 @@ pub enum PortState {
     Uninit,
     Reseted,
     Probed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+struct HubStatus {
+    status: u16,
+    change: u16,
+}
+
+impl HubStatus {
+    #[allow(dead_code)]
+    fn local_power_source(&self) -> bool {
+        (self.status & 0x0001) != 0
+    }
+
+    #[allow(dead_code)]
+    fn over_current(&self) -> bool {
+        (self.status & 0x0002) != 0
+    }
 }
