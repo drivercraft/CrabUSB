@@ -1,10 +1,7 @@
-use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cell::UnsafeCell;
 use core::time::Duration;
-use futures::{
-    FutureExt,
-    future::{BoxFuture, LocalBoxFuture},
-};
+use futures::{FutureExt, future::BoxFuture};
 use spin::RwLock;
 
 use mbarrier::mb;

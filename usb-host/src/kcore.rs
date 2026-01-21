@@ -61,7 +61,16 @@ impl Core {
 
                     let device_inner: Device = device.into();
 
-                    let mut hub_device = HubDevice::new(device_inner, hub_settings).await?;
+                    // 获取父 Hub 的 route_string 并添加当前 Hub 的端口位置
+                    let route_prefix = self.get_hub_route_string(id);
+
+                    let mut hub_device = HubDevice::new(
+                        device_inner,
+                        hub_settings,
+                        route_prefix,
+                        addr_info.root_port_id,
+                    )
+                    .await?;
                     hub_device.init().await?;
                     let mut hub = Hub::new(Box::new(hub_device));
                     hub.setup(id);
@@ -92,6 +101,24 @@ impl Core {
     ) -> Result<Vec<DeviceAddressInfo>, usb_if::host::Error> {
         let hub = self.hubs.get_mut(hub_id).expect("Hub id should be valid");
         hub.backend.changed_ports().await
+    }
+
+    /// 获取 Hub 的 route_string
+    fn get_hub_route_string(&self, id: Id<Hub>) -> crate::hub::RouteString {
+        let hub = self.hubs.get(id).expect("Hub id should be valid");
+        Self::get_hub_route_string_static(hub)
+    }
+
+    /// 获取 Hub 的 route_string（静态辅助方法）
+    fn get_hub_route_string_static(hub: &Hub) -> crate::hub::RouteString {
+        // 尝试获取 HubDevice 的 route_string
+        let any = hub.backend.as_any();
+        if let Some(device) = any.downcast_ref::<HubDevice>() {
+            return device.route_string();
+        }
+
+        // Root Hub 返回空 route_string
+        crate::hub::RouteString::follow_root()
     }
 
     async fn probe_devices(&mut self) -> Result<Vec<Box<dyn DeviceInfoOp>>, usb_if::host::Error> {

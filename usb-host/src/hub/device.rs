@@ -63,6 +63,12 @@ struct Inner {
     pub dev: Device,
 
     pub descriptor: HubDescriptor,
+
+    /// Route String 前缀（从父 Hub 继承）
+    pub route_prefix: crate::hub::RouteString,
+
+    /// Root Hub 端口 ID（如果这是外部 Hub）
+    pub root_port_id: u8,
 }
 
 pub struct HubSettings {
@@ -80,6 +86,10 @@ impl HubOp for HubDevice {
         &'a mut self,
     ) -> futures::future::BoxFuture<'a, Result<Vec<DeviceAddressInfo>, USBError>> {
         self.changed_ports().boxed()
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
     }
 }
 
@@ -125,16 +135,22 @@ impl HubDevice {
     }
 
     /// 创建新的 Hub 设备
-    pub async fn new(dev: Device, settings: HubSettings) -> Result<Self, USBError> {
+    pub async fn new(
+        dev: Device,
+        settings: HubSettings,
+        route_prefix: crate::hub::RouteString,
+        root_port_id: u8,
+    ) -> Result<Self, USBError> {
         Ok(Self {
             settings,
             data: Box::new(Inner {
                 state: HubState::Uninitialized,
                 num_ports: 0,
                 ports: vec![],
-
                 dev,
                 descriptor: unsafe { core::mem::zeroed() },
+                route_prefix,
+                root_port_id,
             }),
         })
     }
@@ -142,19 +158,70 @@ impl HubDevice {
     pub async fn changed_ports(&mut self) -> Result<Vec<DeviceAddressInfo>, USBError> {
         let mut changed_ports = vec![];
 
-        // for port in &mut self.data.ports {
-        //     let (status, change) = self.get_port_status(port.index).await?;
+        // 收集所有端口号，避免借用冲突
+        let port_indices: Vec<u8> = self.data.ports.iter().map(|p| p.index).collect();
 
-        //     if change.connection_changed {
-        //         changed_ports.push(DeviceAddressInfo {
-        //             route_string: todo!(),
-        //             root_port_id: todo!(),
-        //             port_speed: todo!(),
-        //         });
-        //     }
+        for port_index in port_indices {
+            let (status, change) = self.get_port_status(port_index).await?;
 
-        //     port.status = status;
-        // }
+            if change.connection_changed {
+                info!(
+                    "Port {} connection changed: connected={}, enabled={}",
+                    port_index, status.connected, status.enabled
+                );
+
+                // 清除连接变化标志
+                self.clear_port_feature(port_index, PortFeature::CConnection)
+                    .await?;
+
+                // 如果设备已连接，进行完整验证流程
+                if status.connected {
+                    // 执行端口验证流程（参考 xHCI Root Hub）
+                    let validation_result = self.handle_port_connection(port_index, &status).await;
+
+                    // 更新端口状态
+                    if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
+                        port.status = status;
+
+                        match validation_result {
+                            Ok(addr_info) => {
+                                changed_ports.push(addr_info);
+                            }
+                            Err(e) => {
+                                warn!("Port {} connection validation failed: {:?}", port_index, e);
+                                // 更新端口状态为 Disconnected
+                                port.state = PortState::Disconnected;
+                            }
+                        }
+                    }
+                } else {
+                    // 设备断开，更新端口状态
+                    if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
+                        port.status = status;
+                        port.state = PortState::Disconnected;
+                        port.connected_device = None;
+                    }
+                }
+            }
+
+            if change.enabled_changed {
+                info!("Port {} enabled changed: {}", port_index, status.enabled);
+                self.clear_port_feature(port_index, PortFeature::CEnable)
+                    .await?;
+                if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
+                    port.status = status;
+                }
+            }
+
+            if change.reset_complete {
+                debug!("Port {} reset complete", port_index);
+                self.clear_port_feature(port_index, PortFeature::CReset)
+                    .await?;
+                if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
+                    port.status = status;
+                }
+            }
+        }
 
         Ok(changed_ports)
     }
@@ -168,7 +235,7 @@ impl HubDevice {
         let descriptor = self.get_hub_descriptor().await?;
         self.data.descriptor = descriptor;
         if self.hub_descriptor().bNbrPorts == 0 {
-            return Err(USBError::Other(anyhow!("Hub has zero ports")));
+            return Err(USBError::from("Hub has zero ports"));
         }
         self.data.num_ports = self.hub_descriptor().bNbrPorts;
 
@@ -254,7 +321,7 @@ impl HubDevice {
                     } else if act_size >= 9 {
                         let size = 7 + desc.bNbrPorts / 8 + 1;
                         if (act_size as u8) < size {
-                            return Err(USBError::Other(anyhow!("Hub descripoter size error")));
+                            return Err(USBError::from("Hub descriptor size error"));
                         }
                         return Ok(desc);
                     }
@@ -268,7 +335,7 @@ impl HubDevice {
             }
         }
 
-        Err(USBError::Other(anyhow!("Hub get descriptor failed")))
+        Err(USBError::from("Hub get descriptor failed"))
     }
 
     // ========== 端口状态获取方法 ==========
@@ -280,7 +347,7 @@ impl HubDevice {
         &mut self,
         port_index: u8,
     ) -> Result<(PortStatus, PortStatusChange), USBError> {
-        let mut buffer = [0u8; 4]; // wPortStatus (2字节) + wPortChange (2字节)
+        let mut buffer = vec![0u8; 4]; // wPortStatus (2字节) + wPortChange (2字节)
 
         self.data
             .dev
@@ -505,6 +572,107 @@ impl HubDevice {
 
         warn!("Port {} reset timeout", port_index);
         Err(USBError::Timeout)
+    }
+
+    /// 处理端口连接事件（参考 xHCI Root Hub 状态机）
+    ///
+    /// 三阶段验证流程：
+    /// 1. 防抖动检测 - 确保连接稳定
+    /// 2. 端口复位 - 复位设备到默认状态
+    /// 3. 等待启用 - 等待端口启用并验证速度
+    async fn handle_port_connection(
+        &mut self,
+        port_index: u8,
+        initial_status: &PortStatus,
+    ) -> Result<DeviceAddressInfo, USBError> {
+        info!(
+            "Handling connection on port {}, speed: {:?}",
+            port_index, initial_status.speed
+        );
+
+        // 阶段 1: 防抖动检测（确保连接稳定）
+        let stable_status = self.debounce_port(port_index, true).await?;
+        if !stable_status.connected {
+            return Err(USBError::from("Connection unstable"));
+        }
+
+        // 阶段 2: 端口复位
+        self.reset_port(port_index, &stable_status).await?;
+
+        // 阶段 3: 等待端口启用（最多等待 500ms）
+        let enabled_status = self.wait_for_port_enabled(port_index).await?;
+
+        // 阶段 4: 验证并生成 DeviceAddressInfo
+        let port_speed = self.decode_port_speed(&enabled_status);
+
+        info!(
+            "Port {} device ready: speed={:?}, enabled={}",
+            port_index, port_speed, enabled_status.enabled
+        );
+
+        // 生成 DeviceAddressInfo
+        let mut route_string = self.data.route_prefix;
+        route_string.push_hub(port_index);
+
+        Ok(DeviceAddressInfo {
+            route_string,
+            root_port_id: self.root_port_id(),
+            port_speed,
+        })
+    }
+
+    /// 等待端口启用（参照 xHCI Root Hub 的 handle_reseted）
+    async fn wait_for_port_enabled(&mut self, port_index: u8) -> Result<PortStatus, USBError> {
+        const MAX_WAIT_MS: u64 = 500;
+        const CHECK_INTERVAL_MS: u64 = 10;
+        let max_attempts = MAX_WAIT_MS / CHECK_INTERVAL_MS;
+
+        for attempt in 0..max_attempts {
+            let (status, _change) = self.get_port_status(port_index).await?;
+
+            if status.enabled && status.connected {
+                info!("Port {} enabled after {} checks", port_index, attempt + 1);
+                return Ok(status);
+            }
+
+            if !status.connected {
+                return Err(USBError::from("Device disconnected during enable wait"));
+            }
+
+            crate::osal::kernel::delay(Duration::from_millis(CHECK_INTERVAL_MS));
+        }
+
+        warn!("Port {} enable timeout after {}ms", port_index, MAX_WAIT_MS);
+        Err(USBError::Timeout)
+    }
+
+    /// 解码端口速度（参照 USB 2.0 规范）
+    fn decode_port_speed(&self, status: &PortStatus) -> u8 {
+        // USB 2.0 定义：
+        // - Low Speed: 0
+        // - Full Speed: 1
+        // - High Speed: 2
+        // USB 3.0+ 扩展：
+        // - SuperSpeed: 4
+        // - SuperSpeedPlus: 5
+        match status.speed {
+            DeviceSpeed::Low => 0,
+            DeviceSpeed::Full => 1,
+            DeviceSpeed::High => 2,
+            DeviceSpeed::SuperSpeed => 4,
+            DeviceSpeed::SuperSpeedPlus => 5,
+            DeviceSpeed::Wireless => 3,
+        }
+    }
+
+    /// 获取 Hub 的 route_string 前缀
+    pub fn route_string(&self) -> crate::hub::RouteString {
+        self.data.route_prefix
+    }
+
+    /// 获取 Hub 的 root_port_id
+    pub fn root_port_id(&self) -> u8 {
+        self.data.root_port_id
     }
 }
 

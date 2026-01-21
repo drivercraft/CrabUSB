@@ -122,6 +122,10 @@ impl HubOp for XhciRootHub {
 
         Ok(())
     }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 /// Hub 状态
