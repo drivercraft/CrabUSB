@@ -73,13 +73,13 @@ impl BackendOp for Libusb {
         async { Ok(()) }.boxed()
     }
 
-    fn probe_devices<'a>(
+    fn device_list<'a>(
         &'a mut self,
     ) -> futures::future::BoxFuture<
         'a,
         Result<Vec<Box<dyn super::ty::DeviceInfoOp>>, usb_if::host::USBError>,
     > {
-        async move { self.device_list().await }.boxed()
+        self.device_list().boxed()
     }
 
     fn open_device<'a>(
