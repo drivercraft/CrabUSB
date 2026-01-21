@@ -43,7 +43,7 @@ impl Core {
 
         for id in hub_ids {
             let addr_infos = self.hub_changed_ports(id).await?;
-
+            let parent_hub_id = self.hubs.get(id).unwrap().backend.slot_id();
             for addr_info in addr_infos {
                 let route_string = if let Some(route) = &self.hubs.get(id).unwrap().route_string {
                     let mut rs = *route;
@@ -73,8 +73,13 @@ impl Core {
                     info!("Device({port_path}) is a hub, creating HubDevice instance");
                     let device_inner: Device = device.into();
 
-                    let hub_device =
-                        HubDevice::new(device_inner, hub_settings, addr_info.root_port_id).await?;
+                    let hub_device = HubDevice::new(
+                        device_inner,
+                        hub_settings,
+                        addr_info.root_port_id,
+                        parent_hub_id,
+                    )
+                    .await?;
                     let mut hub = Hub::new(Box::new(hub_device), Some(route_string));
                     hub.parent = Some(id);
                     hub.backend.init().await?;

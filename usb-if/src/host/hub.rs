@@ -69,6 +69,28 @@ impl HubDescriptor {
     pub fn hub_characteristics(&self) -> u16 {
         u16::from_le(self.wHubCharacteristics)
     }
+
+    /// 从字节数组创建 HubDescriptor 引用
+    ///
+    /// 如果数据长度不足或描述符类型不匹配，返回 None
+    pub fn from_bytes(data: &[u8]) -> Option<&Self> {
+        if data.is_empty() {
+            return None;
+        }
+
+        let length = data[0] as usize;
+        if data.len() < length {
+            return None;
+        }
+
+        // 检查描述符类型（0x29 = Hub 描述符）
+        if data.len() < 2 || data[1] != 0x29 {
+            return None;
+        }
+
+        // SAFETY: 已检查数据长度和类型，指针有效且对齐
+        Some(unsafe { &*(data.as_ptr() as *const HubDescriptor) })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -339,15 +361,15 @@ mod tests {
 
         let desc = HubDescriptor::from_bytes(&data).expect("Failed to parse");
 
-        assert_eq!(desc.num_ports, 4);
-        assert_eq!(desc.power_good_time, 50);
-        assert_eq!(desc.hub_current, 100);
+        assert_eq!(desc.bNbrPorts, 4);
+        assert_eq!(desc.bPwrOn2PwrGood, 50);
+        assert_eq!(desc.bHubContrCurrent, 100);
 
-        // 验证特性解析
-        assert!(matches!(
-            desc.characteristics.power_switching,
-            PowerSwitchingMode::Individual
-        ));
+        // 验证特性解析（wHubCharacteristics = 0x0012）
+        // Bits 1:0 = 10b -> Individual power switching
+        // Bit 2 = 0 -> Not a compound device
+        // Bit 3 = 1 -> Individual over-current protection
+        assert_eq!(desc.hub_characteristics(), 0x0012);
     }
 
     #[test]

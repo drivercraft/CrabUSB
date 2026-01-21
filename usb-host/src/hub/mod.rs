@@ -3,7 +3,7 @@ pub mod device;
 use core::fmt::Debug;
 
 use alloc::boxed::Box;
-use alloc::string::{ToString, String};
+use alloc::string::{String, ToString};
 // 重新导出常用类型
 pub use device::HubDevice;
 use id_arena::Id;

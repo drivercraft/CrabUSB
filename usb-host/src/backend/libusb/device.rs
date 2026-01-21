@@ -302,7 +302,12 @@ impl DeviceOp for Device {
         &mut self,
         _params: crate::backend::ty::HubParams,
     ) -> futures::future::BoxFuture<'_, std::result::Result<(), USBError>> {
-        unimplemented!("libusb does not need to update hub parameters")
+        // libusb 运行在用户空间，由内核 USB 驱动处理 Hub 参数
+        async fn update_hub_inner() -> std::result::Result<(), USBError> {
+            debug!("libusb backend: Hub parameters managed by kernel");
+            Ok(())
+        }
+        update_hub_inner().boxed()
     }
 }
 

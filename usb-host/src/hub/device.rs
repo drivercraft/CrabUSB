@@ -55,6 +55,8 @@ struct Inner {
 
     pub descriptor: HubDescriptor,
 
+    pub parent_hub_slot_id: u8,
+
     /// Root Hub 端口 ID（如果这是外部 Hub）
     pub root_port_id: u8,
 }
@@ -66,6 +68,10 @@ pub struct HubSettings {
 }
 
 impl HubOp for HubDevice {
+    fn slot_id(&self) -> u8 {
+        self.data.dev.slot_id()
+    }
+
     fn init(&mut self) -> BoxFuture<'_, Result<(), USBError>> {
         self.configure().boxed()
     }
@@ -121,6 +127,7 @@ impl HubDevice {
         dev: Device,
         settings: HubSettings,
         root_port_id: u8,
+        parent_hub_slot_id: u8,
     ) -> Result<Self, USBError> {
         Ok(Self {
             settings,
@@ -130,7 +137,7 @@ impl HubDevice {
                 ports: vec![],
                 dev,
                 descriptor: unsafe { core::mem::zeroed() },
-
+                parent_hub_slot_id,
                 root_port_id,
             }),
         })
@@ -223,6 +230,45 @@ impl HubDevice {
         }
         self.data.num_ports = self.hub_descriptor().bNbrPorts;
 
+        // 解析 Hub 特性和配置参数（参考 U-Boot usb_hub_configure）
+        let characteristics = self.data.descriptor.hub_characteristics();
+
+        // 解析 TT 思考时间（Bits[6:5]，参考 USB 2.0 规范）
+        let ttt_bits = (characteristics >> 5) & 0x03;
+        let tt_think_time_ns = match ttt_bits {
+            0 => 0,       // No TT
+            1 => 666,     // 8 FS bit times
+            2 => 666 * 2, // 16 FS bit times
+            3 => 666 * 3, // 24 FS bit times
+            _ => unreachable!(),
+        };
+
+        // 判断 Multi-TT（参考 U-Boot）
+        // protocol = 0: Full Speed Hub (no TT)
+        // protocol = 1: High Speed Single TT
+        // protocol = 2: High Speed Multi TT
+        // protocol = 3: SuperSpeed Hub (no TT)
+        let device_protocol = self.data.dev.descriptor().protocol;
+        let multi_tt = device_protocol == 2;
+
+        debug!(
+            "Hub parameters: ports={}, protocol={}, multi_tt={}, tt_think_time={}ns",
+            self.data.num_ports, device_protocol, multi_tt, tt_think_time_ns
+        );
+
+        // 构造 HubParams
+        let params = crate::backend::ty::HubParams {
+            num_ports: self.data.num_ports,
+            multi_tt,
+            tt_think_time_ns: tt_think_time_ns as u16,
+            parent_hub_slot_id: self.data.parent_hub_slot_id, // TODO: 从 RouteString 提取
+            root_hub_port_number: self.data.root_port_id,
+            port_speed: device_protocol,
+        };
+
+        // 更新 xHCI Slot Context（如果后端支持）
+        self.data.dev.update_hub(params).await?;
+
         // 第三阶段：初始化端口状态（参考 Linux hub_activate）
         // 初始化所有端口为 Disconnected 状态
         self.data.ports = (1..=self.data.num_ports).map(Port::new).collect();
@@ -242,10 +288,6 @@ impl HubDevice {
         // 标记 Hub 为运行状态
         self.data.state = HubState::Running;
         debug!("Hub initialized with {} ports", self.data.num_ports);
-        Ok(())
-    }
-
-    async fn config(&mut self) -> Result<(), USBError> {
         Ok(())
     }
 

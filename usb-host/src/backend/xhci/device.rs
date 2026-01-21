@@ -5,7 +5,7 @@ use alloc::{sync::Arc, vec::Vec};
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
-use usb_if::descriptor::{Class, DeviceDescriptorBase};
+use usb_if::descriptor::DeviceDescriptorBase;
 use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,
@@ -16,6 +16,7 @@ use usb_if::{
 use xhci::ring::trb::command;
 
 use crate::backend::DeviceAddressInfo;
+use crate::backend::ty::HubParams;
 use crate::backend::xhci::cmd::CommandRing;
 use crate::{
     Xhci,
@@ -478,6 +479,57 @@ impl Device {
             }
         }
     }
+
+    async fn update_hub_inner(&mut self, params: HubParams) -> Result<()> {
+        debug!(
+            "Updating hub context for slot {}: ports={}, multi_tt={}, tt_time={}ns",
+            self.id.as_u8(),
+            params.num_ports,
+            params.multi_tt,
+            params.tt_think_time_ns
+        );
+
+        // 2. 设置 Input Control Context
+        self.ctx.with_input(|input| {
+            let slot_ctx = input.device_mut().slot_mut();
+
+            // 设置 Hub 标志
+            slot_ctx.set_hub();
+
+            // 设置 Multi-TT 标志
+            if params.multi_tt {
+                slot_ctx.set_multi_tt();
+            } else {
+                slot_ctx.clear_multi_tt();
+            }
+
+            // 设置端口数量
+            slot_ctx.set_number_of_ports(params.num_ports);
+
+            // 设置 TT 思考时间（参考 U-Boot xhci_update_hub_device）
+            // xHCI spec: TT_THINK_TIME (Bits[2:0])
+            // 0 = 8 FS bit times, 1 = 16 FS bit times, 2 = 24 FS bit times, 3 = 32 FS bit times
+            // 只对 High Speed Hub (speed=2) 设置 TT 思考时间
+            if params.port_speed == 2 && params.tt_think_time_ns > 0 {
+                let think_time = ((params.tt_think_time_ns / 666) - 1) as u8;
+                slot_ctx.set_tt_think_time(think_time);
+                debug!(
+                    "Set TT think time: {} (raw={})",
+                    think_time, params.tt_think_time_ns
+                );
+            } else {
+                slot_ctx.set_tt_think_time(0);
+            }
+
+            // 设置父 Hub Slot ID
+            slot_ctx.set_parent_hub_slot_id(params.parent_hub_slot_id);
+
+            // Root Hub Port Number 已在 address 阶段设置，这里不需要更新
+        });
+
+        self.evaluate().await?;
+        Ok(())
+    }
 }
 
 impl DeviceOp for Device {
@@ -519,7 +571,7 @@ impl DeviceOp for Device {
         ep.ok_or(USBError::NotFound)
     }
 
-    fn update_hub(&mut self, params: crate::backend::ty::HubParams) -> BoxFuture<'_, Result<()>> {
-        todo!()
+    fn update_hub(&mut self, params: HubParams) -> BoxFuture<'_, Result<()>> {
+        self.update_hub_inner(params).boxed()
     }
 }

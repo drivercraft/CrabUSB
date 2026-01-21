@@ -115,6 +115,10 @@ impl HubOp for XhciRootHub {
         }
         .boxed()
     }
+
+    fn slot_id(&self) -> u8 {
+        0
+    }
 }
 
 impl XhciRootHub {
