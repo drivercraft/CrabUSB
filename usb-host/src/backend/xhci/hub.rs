@@ -5,24 +5,15 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::{
     cell::UnsafeCell,
-    hint::spin_loop,
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use futures::{FutureExt, future::LocalBoxFuture};
-use futures::{future::BoxFuture, task::AtomicWaker};
-use usb_if::host::{USBError, hub::PortStatusChange};
+use futures::{FutureExt, future::BoxFuture, task::AtomicWaker};
+use usb_if::host::USBError;
 
 use crate::{
-    backend::{
-        ty::HubOp,
-        xhci::{
-            port,
-            reg::{XhciRegisters, XhciRegistersShared},
-        },
-    },
+    backend::{ty::HubOp, xhci::reg::XhciRegisters},
     hub::{DeviceAddressInfo, RouteString},
-    osal::SpinWhile,
 };
 
 pub struct PortChangeWaker {
@@ -224,6 +215,7 @@ impl XhciRootHub {
             out.push(DeviceAddressInfo {
                 route_string: RouteString::follow_root(),
                 root_port_id: id,
+                port_id: id,
                 port_speed: speed,
             });
         }

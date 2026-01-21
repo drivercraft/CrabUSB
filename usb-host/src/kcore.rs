@@ -72,7 +72,7 @@ impl Core {
                     )
                     .await?;
                     hub_device.init().await?;
-                    let mut hub = Hub::new(Box::new(hub_device));
+                    let mut hub = Hub::new(Box::new(hub_device), Some(route_prefix));
                     hub.setup(id);
                     let hub_id = self.hubs.alloc(hub);
                     is_have_new_hub = true;
@@ -139,7 +139,7 @@ impl BackendOp for Core {
     fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), usb_if::host::Error>> {
         async {
             self.backend.init().await?;
-            let mut root_hub = Hub::new(self.backend.root_hub());
+            let mut root_hub = Hub::new(self.backend.root_hub(), None);
             root_hub.backend.reset()?;
 
             let id = self.hubs.alloc(root_hub);

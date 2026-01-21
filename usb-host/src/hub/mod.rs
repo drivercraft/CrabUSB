@@ -11,6 +11,7 @@ use id_arena::Id;
 pub struct DeviceAddressInfo {
     pub route_string: RouteString,
     pub root_port_id: u8,
+    pub port_id: u8,
     pub port_speed: u8,
 }
 
@@ -69,6 +70,8 @@ impl Debug for RouteString {
 
 pub struct Hub {
     pub parent: Option<Id<Hub>>,
+    /// Roothub 为 `None`
+    pub route_string: Option<RouteString>,
     pub backend: Box<dyn crate::backend::ty::HubOp>,
 }
 impl Hub {
@@ -76,8 +79,12 @@ impl Hub {
         self.parent = Some(parent);
     }
 
-    pub fn new(backend: Box<dyn crate::backend::ty::HubOp>) -> Self {
+    pub fn new(
+        backend: Box<dyn crate::backend::ty::HubOp>,
+        route_string: Option<RouteString>,
+    ) -> Self {
         Self {
+            route_string,
             backend,
             parent: None,
         }

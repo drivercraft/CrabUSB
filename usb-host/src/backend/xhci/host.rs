@@ -48,8 +48,6 @@ pub struct Xhci {
     event_handler: Option<EventHandler>,
     event_ring_info: EventRingInfo,
     scratchpad_buf_arr: Option<ScratchpadBufferArray>,
-    port_status: Vec<ProtStaus>,
-    // inited_devices: BTreeMap<SlotId, Device>,
     pub(crate) transfer_result_handler: TransferResultHandler,
     root_hub: Option<XhciRootHub>,
 }
@@ -121,8 +119,6 @@ impl Xhci {
             root_hub: Some(root_hub),
             event_ring_info,
             scratchpad_buf_arr: None,
-            port_status: vec![],
-            // inited_devices: BTreeMap::new(),
         })
     }
 
@@ -472,53 +468,6 @@ impl Xhci {
             .write_volatile_at(0, doorbell::Register::default());
     }
 
-    // async fn reset_ports(&mut self) {
-    //     let mut regs = self.reg.write();
-    //     let port_len = regs.port_register_set.len();
-    //     debug!("Resetting {} ports", port_len);
-    //     // Enable port power for all ports
-    //     for i in 0..port_len {
-    //         let portsc = regs.port_register_set.read_volatile_at(i).portsc;
-    //         if !portsc.port_power() {
-    //             regs.port_register_set.update_volatile_at(i, |port| {
-    //                 port.portsc.set_port_power();
-    //             });
-    //         }
-    //     }
-
-    //     for i in 0..port_len {
-    //         self.port_status.push(ProtStaus::Uninit);
-    //         regs.port_register_set.update_volatile_at(i, |port| {
-    //             port.portsc.set_0_port_enabled_disabled();
-    //             port.portsc.set_port_reset();
-    //         });
-    //     }
-
-    //     debug!("Waiting for reset ...");
-
-    //     for i in 0..port_len {
-    //         // 等待复位完成
-    //         SpinWhile::new(|| {
-    //             let port_reg = regs.port_register_set.read_volatile_at(i);
-    //             port_reg.portsc.port_reset()
-    //         })
-    //         .await;
-    //     }
-
-    //     info!("All ports reset completed");
-    // }
-
-    fn need_init_port_idxs(&self) -> impl Iterator<Item = usize> {
-        (0..self.reg.read().port_register_set.len()).filter(move |&i| {
-            let portsc = self.reg.read().port_register_set.read_volatile_at(i).portsc;
-            info!("Port {i} status: {portsc:#x?}");
-
-            portsc.port_enabled_disabled()
-                && portsc.current_connect_status()
-                && self.port_status[i] == ProtStaus::Uninit
-        })
-    }
-
     pub(crate) fn cmd_request(
         &mut self,
         trb: command::Allowed,
@@ -673,10 +622,4 @@ impl EventHandlerOp for EventHandler {
 
         res
     }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ProtStaus {
-    Uninit,
-    Inited,
 }

@@ -610,13 +610,16 @@ impl HubDevice {
             port_index, port_speed, enabled_status.enabled
         );
 
+        let port_id = port_index;
+
         // 生成 DeviceAddressInfo
         let mut route_string = self.data.route_prefix;
-        route_string.push_hub(port_index);
+        route_string.push_hub(port_id);
 
         Ok(DeviceAddressInfo {
             route_string,
             root_port_id: self.root_port_id(),
+            port_id,
             port_speed,
         })
     }

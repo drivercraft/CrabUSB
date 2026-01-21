@@ -39,7 +39,6 @@ use crate::{
 
 pub struct Device {
     id: SlotId,
-    // port_id: PortId,
     ctx: ContextData,
     desc: DeviceDescriptor,
     ctrl_ep: Option<EndpointControl>,
@@ -71,7 +70,6 @@ impl Device {
 
         Ok(Self {
             id: slot_id,
-
             ctx,
             bell,
             ctrl_ep: None,
@@ -86,24 +84,12 @@ impl Device {
         })
     }
 
-    pub fn slot_id(&self) -> SlotId {
-        self.id
-    }
-
     fn new_ep(&mut self, dci: Dci) -> Result<Endpoint> {
         let ep = Endpoint::new(dci, self.dma_mask, self.bell.clone())?;
         self.transfer_result_handler
             .register_queue(self.id.as_u8(), dci.as_u8(), ep.ring());
 
         Ok(ep)
-    }
-
-    pub fn descriptor(&self) -> &DeviceDescriptor {
-        &self.desc
-    }
-
-    pub fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
-        &self.config_desc
     }
 
     pub(crate) async fn init(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
@@ -148,8 +134,7 @@ impl Device {
         }
 
         let dci = Dci::CTRL;
-        self.ctx.update_input(|input| {
-            input.control_mut().set_add_context_flag(1);
+        self.ctx.with_input(|input| {
             if is_hub {
                 input.device_mut().slot_mut().set_hub();
             } else {
@@ -179,7 +164,6 @@ impl Device {
         let port_speed = info.port_speed;
         let max_packet_size = parse_default_max_packet_size_from_port_speed(port_speed);
         let route_string = info.route_string.raw();
-        // let route_string = append_port_to_route_string(0, 0);
 
         let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
         // ctrl dci
