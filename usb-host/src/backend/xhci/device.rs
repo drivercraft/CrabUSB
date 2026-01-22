@@ -520,24 +520,34 @@ impl Device {
 
     async fn update_hub_inner(&mut self, params: HubParams) -> Result<()> {
         debug!(
-            "Updating hub context for slot {}: ports={}, multi_tt={}, tt_time={}ns",
+            "Updating hub context for slot {}: ports={}, multi_tt={}, tt_time={}ns, speed={:?}",
             self.id.as_u8(),
             params.num_ports,
             params.multi_tt,
-            params.tt_think_time_ns
+            params.tt_think_time_ns,
+            params.port_speed
         );
 
-        // 2. 设置 Input Control Context
+        // 1. 设置 Input Control Context（参考 U-Boot xhci_update_hub_device）
+        self.ctx.with_input(|input| {
+            let control_ctx = input.control_mut();
+            // 只更新 Slot Context (flag 0)
+            control_ctx.set_add_context_flag(0);
+        });
+
+        // 2. 设置 Slot Context Hub 参数
         self.ctx.with_input(|input| {
             let slot_ctx = input.device_mut().slot_mut();
 
             // 设置 Hub 标志
             slot_ctx.set_hub();
 
-            // 设置 Multi-TT 标志
+            // 设置 Multi-TT 标志（参考 U-Boot）
+            // 如果 hub->tt.multi 为真，设置 MTT
+            // 对于 Full Speed Hub，必须清除 MTT（xHCI 规范 6.2.2）
             if params.multi_tt {
                 slot_ctx.set_multi_tt();
-            } else {
+            } else if matches!(params.port_speed, DeviceSpeed::Full) {
                 slot_ctx.clear_multi_tt();
             }
 
@@ -545,24 +555,26 @@ impl Device {
             slot_ctx.set_number_of_ports(params.num_ports);
 
             // 设置 TT 思考时间（参考 U-Boot xhci_update_hub_device）
-            // xHCI spec: TT_THINK_TIME (Bits[2:0])
+            // xHCI spec: TT_THINK_TIME (Bits[16:17] of DWORD 2)
             // 0 = 8 FS bit times, 1 = 16 FS bit times, 2 = 24 FS bit times, 3 = 32 FS bit times
             // 只对 High Speed Hub 设置 TT 思考时间
-            if matches!(params.port_speed, DeviceSpeed::High) && params.tt_think_time_ns > 0 {
-                let think_time = ((params.tt_think_time_ns / 666) - 1) as u8;
+            if matches!(params.port_speed, DeviceSpeed::High) {
+                // params.tt_think_time_ns 已经是转换后的值 (0, 666, 1333, 1999)
+                // 需要转换为 xHCI 寄存器值
+                let think_time = if params.tt_think_time_ns > 0 {
+                    ((params.tt_think_time_ns / 666) - 1) as u8
+                } else {
+                    0
+                };
                 slot_ctx.set_tt_think_time(think_time);
                 debug!(
-                    "Set TT think time: {} (raw={})",
+                    "Set TT think time: {} (tt_think_time_ns={}ns)",
                     think_time, params.tt_think_time_ns
                 );
-            } else {
-                slot_ctx.set_tt_think_time(0);
             }
 
             // 设置父 Hub Slot ID
             slot_ctx.set_parent_hub_slot_id(params.parent_hub_slot_id);
-
-            // Root Hub Port Number 已在 address 阶段设置，这里不需要更新
         });
 
         self.evaluate().await?;

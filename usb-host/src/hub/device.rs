@@ -679,9 +679,10 @@ impl HubDevice {
             None
         };
 
-        // 从 Hub 描述符获取 Multi-TT 信息
-        // 根据 USB 规范，wHubCharacteristics 的 bit 2 表示是否为 Multi-TT
-        let parent_hub_multi_tt = (self.data.descriptor.hub_characteristics() & 0x0004) != 0;
+        // 从 Device Protocol 获取 Multi-TT 信息（参考 U-Boot）
+        // Device Protocol：0=FS Hub (no TT), 1=HS Single-TT, 2=HS Multi-TT, 3=SS Hub
+        let device_protocol = self.data.dev.descriptor().protocol;
+        let parent_hub_multi_tt = device_protocol == 2;
 
         Ok(PortChangeInfo {
             root_port_id: self.root_port_id(),
