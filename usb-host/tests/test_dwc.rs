@@ -30,7 +30,6 @@ use log::info;
 use log::*;
 use rockchip_pm::RockchipPM;
 use rockchip_soc::{Cru, CruOp, GpioDirection, PinConfig, PinCtrl, PinCtrlOp, SocType};
-use spin::Mutex;
 use usb_if::descriptor::ConfigurationDescriptor;
 
 #[bare_test::tests]
@@ -515,7 +514,6 @@ mod tests {
                         },
                         rst_list: &rst_list,
                         cru: CruOpImpl,
-                        dma_mask: u32::MAX as usize,
                         params,
                     })
                     .unwrap(),

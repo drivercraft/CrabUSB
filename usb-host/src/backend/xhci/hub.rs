@@ -194,7 +194,6 @@ impl XhciRootHub {
                 port_speed: speed,
                 // Root Hub 不需要 TT
                 tt_port_on_hub: None,
-                parent_hub_multi_tt: false,
             });
         }
 

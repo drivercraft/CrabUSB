@@ -271,7 +271,7 @@ mod tests {
                     println!("irq: {irq:?}");
 
                     return Some(XhciInfo {
-                        usb: USBHost::new_xhci(addr, u32::MAX as usize).unwrap(),
+                        usb: USBHost::new_xhci(addr).unwrap(),
                         irq,
                     });
                 }
@@ -318,7 +318,7 @@ mod tests {
                 let irq = node.irq_info();
 
                 return XhciInfo {
-                    usb: USBHost::new_xhci(addr, u32::MAX as usize).unwrap(),
+                    usb: USBHost::new_xhci(addr).unwrap(),
                     irq,
                 };
             }

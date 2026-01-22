@@ -83,8 +83,27 @@ impl CoreOp for Xhci {
 }
 
 impl Xhci {
-    pub fn new(mmio: Mmio, dma_mask: usize) -> Result<Self> {
+    pub fn new(mmio: Mmio) -> Result<Self> {
         let reg = XhciRegisters::new(mmio);
+
+        // 检查 xHCI 控制器的寻址能力（HCCPARAMS1 寄存器）
+        let hccparams1 = reg.capability.hccparams1.read_volatile();
+        let ac64 = hccparams1.addressing_capability(); // Bit[0]: 64-bit Addressing Capability
+
+        info!(
+            "xHCI: Addressing Capability (AC64) = {} ({}-bit addressing)",
+            ac64,
+            if ac64 { "64" } else { "32" }
+        );
+
+        // 根据 AC64 位调整 DMA mask
+        let dma_mask = if ac64 {
+            u64::MAX as usize
+        } else {
+            // 控制器只支持 32 位地址，强制限制在 32 位
+            u32::MAX as usize
+        };
+
         let reg_shared = Arc::new(RwLock::new(reg.clone()));
 
         let cmd = CommandRing::new(

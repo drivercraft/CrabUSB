@@ -16,11 +16,7 @@ use usb_if::{
     transfer::{Recipient, Request, RequestType},
 };
 
-use crate::{
-    Device,
-    backend::{DeviceId, ty::HubOp},
-    hub::PortChangeInfo,
-};
+use crate::{Device, backend::ty::HubOp, hub::PortChangeInfo};
 
 // Hub 枚举常量 (参照 Linux 内核)
 
@@ -204,6 +200,11 @@ impl HubDevice {
     pub async fn configure(&mut self) -> Result<(), USBError> {
         // 第二阶段：获取 Hub 描述符（带重试）
         debug!("Configuring hub device...");
+        trace!(
+            "settings: config_value={}, interface_number={}, alt_setting={}",
+            self.settings.config_value, self.settings.interface_number, self.settings.alt_setting
+        );
+
         let descriptor = self.get_hub_descriptor().await?;
 
         self.data.descriptor = descriptor;
@@ -679,17 +680,11 @@ impl HubDevice {
             None
         };
 
-        // 从 Device Protocol 获取 Multi-TT 信息（参考 U-Boot）
-        // Device Protocol：0=FS Hub (no TT), 1=HS Single-TT, 2=HS Multi-TT, 3=SS Hub
-        let device_protocol = self.data.dev.descriptor().protocol;
-        let parent_hub_multi_tt = device_protocol == 2;
-
         Ok(PortChangeInfo {
             root_port_id: self.root_port_id(),
             port_id,
             port_speed,
             tt_port_on_hub,
-            parent_hub_multi_tt,
         })
     }
 
@@ -745,9 +740,6 @@ pub struct Port {
     /// 端口状态机
     pub state: PortState,
 
-    /// 连接的设备
-    pub connected_device: Option<DeviceId>,
-
     /// 是否需要 Transaction Translator
     pub tt_required: bool,
 }
@@ -776,7 +768,6 @@ impl Port {
                 },
             },
             state: PortState::Uninit,
-            connected_device: None,
             tt_required: false,
         }
     }

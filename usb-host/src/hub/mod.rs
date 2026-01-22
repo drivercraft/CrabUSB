@@ -16,8 +16,6 @@ pub struct PortChangeInfo {
     pub port_speed: DeviceSpeed,
     /// 设备在 Hub 上的端口号（如果需要 Transaction Translator）
     pub tt_port_on_hub: Option<u8>,
-    /// Parent Hub 是否支持 Multi-TT
-    pub parent_hub_multi_tt: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -65,11 +63,6 @@ impl RouteString {
             parts.push(port.to_string());
         }
         parts.join(".")
-    }
-
-    /// Return the deepest (last non-zero) port id in the route string.
-    pub fn last_port(&self) -> Option<u8> {
-        self.route_port_ids().last()
     }
 }
 
