@@ -55,13 +55,18 @@ impl Core {
 
                 let port_path = route_string.to_port_path_string(addr_info.root_port_id);
 
-                info!("Found device at port={port_path}");
+                info!(
+                    "Found device at port={port_path}, speed={:?}",
+                    addr_info.port_speed
+                );
 
                 let info = DeviceAddressInfo {
                     root_port_id: addr_info.root_port_id,
                     route_string,
                     port_speed: addr_info.port_speed,
                     parent_hub_slot_id: parent_hub_id,
+                    tt_port_on_hub: addr_info.tt_port_on_hub,
+                    parent_hub_multi_tt: addr_info.parent_hub_multi_tt,
                 };
 
                 let device = self.backend.new_addressed_device(info).await?;

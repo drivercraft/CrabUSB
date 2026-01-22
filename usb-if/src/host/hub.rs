@@ -262,6 +262,79 @@ impl From<u8> for DeviceSpeed {
     }
 }
 
+impl DeviceSpeed {
+    /// 从 USB 2.0 Hub wPortStatus 解析速度
+    ///
+    /// 根据 USB 2.0 规范（第 11.24.2.7 节）：
+    /// - Bit 9 (0x0200): Low Speed
+    /// - Bit 10 (0x0400): High Speed
+    /// - Bit 11 (0x0800): SuperSpeed (USB 3.0)
+    /// - 默认: Full Speed
+    pub fn from_usb2_hub_status(raw: u16) -> Self {
+        if (raw & 0x0200) != 0 {
+            DeviceSpeed::Low
+        } else if (raw & 0x0400) != 0 {
+            DeviceSpeed::High
+        } else if (raw & 0x0800) != 0 {
+            DeviceSpeed::SuperSpeed
+        } else {
+            DeviceSpeed::Full
+        }
+    }
+
+    /// 从 xHCI PORTSC PortSpeed 字段解析速度
+    ///
+    /// 根据 xHCI 规范（第 4.19.2 节）：
+    /// - 0 = Full Speed
+    /// - 1 = Low Speed
+    /// - 2 = High Speed
+    /// - 3 = Reserved
+    /// - 4 = SuperSpeed
+    /// - 5 = SuperSpeedPlus
+    pub fn from_xhci_portsc(speed_value: u8) -> Self {
+        match speed_value {
+            0 => DeviceSpeed::Full,
+            1 => DeviceSpeed::Low,
+            2 => DeviceSpeed::High,
+            4 => DeviceSpeed::SuperSpeed,
+            5 => DeviceSpeed::SuperSpeedPlus,
+            _ => DeviceSpeed::Full, // Reserved/Unknown
+        }
+    }
+
+    /// 转换为 xHCI Slot Context 速度值
+    ///
+    /// 根据 xHCI 规范（第 6.2.2 节）Slot Context Speed 字段：
+    /// - 1 = Full Speed
+    /// - 2 = Low Speed
+    /// - 3 = High Speed
+    /// - 4 = Super Speed
+    pub fn to_xhci_slot_value(&self) -> u8 {
+        match self {
+            DeviceSpeed::Low => 2,
+            DeviceSpeed::Full => 1,
+            DeviceSpeed::High => 3,
+            DeviceSpeed::SuperSpeed => 4,
+            DeviceSpeed::SuperSpeedPlus => 5,
+            DeviceSpeed::Wireless => 3,
+        }
+    }
+
+    /// 判断是否需要 Transaction Translator
+    ///
+    /// 根据 xHCI 规范：
+    /// - LS/FS 设备连接在 HS Hub 上需要 TT
+    pub fn requires_tt(&self, hub_speed: Self) -> bool {
+        // 设备是 LS 或 FS，且 Hub 是 HS
+        matches!(self, Self::Low | Self::Full) && matches!(hub_speed, Self::High)
+    }
+
+    /// 判断设备是否为 Low Speed 或 Full Speed
+    pub fn is_low_or_full_speed(&self) -> bool {
+        matches!(self, Self::Low | Self::Full)
+    }
+}
+
 // ============================================================================
 // 辅助函数
 // ============================================================================

@@ -10,7 +10,7 @@ use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,
     },
-    host::{ControlSetup, USBError},
+    host::{ControlSetup, USBError, hub::DeviceSpeed},
     transfer::{Recipient, RequestType},
 };
 use xhci::ring::trb::command;
@@ -164,22 +164,28 @@ impl Device {
     }
 
     async fn address(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
-        let port_speed = info.port_speed;
-        let max_packet_size = parse_default_max_packet_size_from_port_speed(port_speed);
+        // 直接使用 DeviceSpeed 枚举计算默认 max packet size
+        let max_packet_size = parse_default_max_packet_size_from_port_speed(info.port_speed);
         let route_string = info.route_string.raw();
 
         let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
         // ctrl dci
         let dci = 1;
         debug!(
-            r#"Address device {:?} 
+            r#"Address device {:?}
     root port: {}
-    route string: {route_string}
+    route string: {:#x}
     parent_hub_slot_id: {}
-    ctrl ring: {ctrl_ring_addr:x?}
-    port speed: {port_speed}
-    max packet size: {max_packet_size}"#,
-            self.id, info.root_port_id, info.parent_hub_slot_id
+    ctrl ring: {:x?}
+    port speed: {:?}
+    max packet size: {}"#,
+            self.id,
+            info.root_port_id,
+            route_string,
+            info.parent_hub_slot_id,
+            ctrl_ring_addr,
+            info.port_speed,
+            max_packet_size
         );
 
         // 1. Allocate an Input Context data structure (6.2.5) and initialize all fields to
@@ -204,15 +210,25 @@ impl Device {
             let slot_context = input.device_mut().slot_mut();
             slot_context.clear_multi_tt();
             slot_context.clear_hub();
-            slot_context.set_route_string(route_string); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
+            slot_context.set_route_string(route_string);
             slot_context.set_context_entries(1);
             slot_context.set_max_exit_latency(0);
             slot_context.set_root_hub_port_number(info.root_port_id);
             slot_context.set_number_of_ports(0);
             slot_context.set_parent_hub_slot_id(info.parent_hub_slot_id);
+
+            // ✅ 新增：设置 TT_PORT（Transaction Translator Port Number）
+            // xHCI 规范：当 LS/FS 设备（port_speed=1/2）连接在 HS Hub 时必须设置
+            // xHCI crate 中这个字段命名为 parent_port_number
+            if let Some(tt_port) = info.tt_port_on_hub {
+                slot_context.set_parent_port_number(tt_port);
+                debug!("Setting TT_PORT: {} for LS/FS device", tt_port);
+            }
+
             slot_context.set_tt_think_time(0);
             slot_context.set_interrupter_target(0);
-            slot_context.set_speed(port_speed);
+            // 转换为 xHCI Slot Context 速度值
+            slot_context.set_speed(info.port_speed.to_xhci_slot_value());
 
             // Initialize the Input default control Endpoint 0 Context (6.2.3).
             let endpoint_0 = input.device_mut().endpoint_mut(dci);
@@ -241,6 +257,8 @@ impl Device {
             endpoint_0.set_mult(0);
             // • Error Count (CErr) = 3.
             endpoint_0.set_error_count(3);
+            // • Average TRB Length = 8 (xHCI spec 6.2.3).
+            endpoint_0.set_average_trb_length(8);
         });
 
         mb();
@@ -529,8 +547,8 @@ impl Device {
             // 设置 TT 思考时间（参考 U-Boot xhci_update_hub_device）
             // xHCI spec: TT_THINK_TIME (Bits[2:0])
             // 0 = 8 FS bit times, 1 = 16 FS bit times, 2 = 24 FS bit times, 3 = 32 FS bit times
-            // 只对 High Speed Hub (speed=2) 设置 TT 思考时间
-            if params.port_speed == 2 && params.tt_think_time_ns > 0 {
+            // 只对 High Speed Hub 设置 TT 思考时间
+            if matches!(params.port_speed, DeviceSpeed::High) && params.tt_think_time_ns > 0 {
                 let think_time = ((params.tt_think_time_ns / 666) - 1) as u8;
                 slot_ctx.set_tt_think_time(think_time);
                 debug!(

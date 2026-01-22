@@ -3,6 +3,7 @@ use core::fmt::Debug;
 
 use futures::future::BoxFuture;
 use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
+use usb_if::host::hub::DeviceSpeed;
 
 use crate::{backend::ty::ep::EndpointControl, err::USBError};
 
@@ -79,6 +80,6 @@ pub struct HubParams {
     /// Root Hub 端口号
     pub root_hub_port_number: u8,
 
-    /// 设备速度（0=Low, 1=Full, 2=High, 4=SuperSpeed）
-    pub port_speed: u8,
+    /// 设备速度
+    pub port_speed: DeviceSpeed,
 }

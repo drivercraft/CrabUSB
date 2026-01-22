@@ -255,6 +255,16 @@ impl HubDevice {
             if status.over_current() { "" } else { "no " }
         );
 
+        // 将 Hub 协议值转换为 DeviceSpeed
+        // protocol = 0: Full Speed Hub
+        // protocol = 1/2: High Speed Hub
+        // protocol = 3: SuperSpeed Hub
+        let hub_speed = match device_protocol {
+            1 | 2 => DeviceSpeed::High,
+            3 => DeviceSpeed::SuperSpeed,
+            _ => DeviceSpeed::Full,
+        };
+
         // 构造 HubParams
         let params = crate::backend::ty::HubParams {
             num_ports: self.data.num_ports,
@@ -262,7 +272,7 @@ impl HubDevice {
             tt_think_time_ns: tt_think_time_ns as u16,
             parent_hub_slot_id: self.data.parent_hub_slot_id, // TODO: 从 RouteString 提取
             root_hub_port_number: self.data.root_port_id,
-            port_speed: device_protocol,
+            port_speed: hub_speed,
         };
 
         // 更新 xHCI Slot Context（如果后端支持）
@@ -428,15 +438,7 @@ impl HubDevice {
             powered: (raw & 0x0100) != 0,
             low_speed: (raw & 0x0200) != 0,
             high_speed: (raw & 0x0400) != 0,
-            speed: if (raw & 0x0200) != 0 {
-                DeviceSpeed::Low
-            } else if (raw & 0x0400) != 0 {
-                DeviceSpeed::High
-            } else if (raw & 0x0800) != 0 {
-                DeviceSpeed::SuperSpeed
-            } else {
-                DeviceSpeed::Full
-            },
+            speed: DeviceSpeed::from_usb2_hub_status(raw),
             change: PortStatusChange {
                 connection_changed: false,
                 enabled_changed: false,
@@ -581,12 +583,11 @@ impl HubDevice {
     /// # 参数
     /// - `port_index`: 端口号（1-based）
     /// - `status`: 当前端口状态
-    async fn reset_port(&mut self, port_index: u8, status: &PortStatus) -> Result<(), USBError> {
-        info!("Resetting port {}", port_index);
+    async fn reset_port(&mut self, port_id: u8, status: &PortStatus) -> Result<(), USBError> {
+        info!("Resetting port {}", port_id);
 
         // 发送复位请求
-        self.set_port_feature(port_index, PortFeature::Reset)
-            .await?;
+        self.set_port_feature(port_id, PortFeature::Reset).await?;
 
         // 确定复位时间（低速设备需要长复位）
         let reset_time = if status.low_speed {
@@ -600,20 +601,20 @@ impl HubDevice {
 
         // 等待复位完成标志（最多等待 100ms）
         for _retry in 0..10 {
-            let (_status, change) = self.get_port_status(port_index).await?;
+            let (_status, change) = self.get_port_status(port_id).await?;
 
             if change.reset_complete {
                 // 清除复位完成标志
-                self.clear_port_feature(port_index, PortFeature::CReset)
+                self.clear_port_feature(port_id, PortFeature::CReset)
                     .await?;
-                info!("Port {} reset complete", port_index);
+                info!("Port {} reset complete", port_id);
                 return Ok(());
             }
 
             crate::osal::kernel::delay(Duration::from_millis(10));
         }
 
-        warn!("Port {} reset timeout", port_index);
+        warn!("Port {} reset timeout", port_id);
         Err(USBError::Timeout)
     }
 
@@ -625,55 +626,83 @@ impl HubDevice {
     /// 3. 等待启用 - 等待端口启用并验证速度
     async fn handle_port_connection(
         &mut self,
-        port_index: u8,
+        port_id: u8,
         initial_status: &PortStatus,
     ) -> Result<PortChangeInfo, USBError> {
         info!(
             "Handling connection on port {}, speed: {:?}",
-            port_index, initial_status.speed
+            port_id, initial_status.speed
         );
 
         // 阶段 1: 防抖动检测（确保连接稳定）
-        let stable_status = self.debounce_port(port_index, true).await?;
+        let stable_status = self.debounce_port(port_id, true).await?;
         if !stable_status.connected {
             return Err(USBError::from("Connection unstable"));
         }
 
         // 阶段 2: 端口复位
-        self.reset_port(port_index, &stable_status).await?;
+        self.reset_port(port_id, &stable_status).await?;
 
         // 阶段 3: 等待端口启用（最多等待 500ms）
-        let enabled_status = self.wait_for_port_enabled(port_index).await?;
+        let enabled_status = self.wait_for_port_enabled(port_id).await?;
 
         // 阶段 4: 验证并生成 DeviceAddressInfo
-        let port_speed = self.decode_port_speed(&enabled_status);
+        let port_speed = enabled_status.speed;
 
         info!(
             "Port {} device ready: speed={:?}, enabled={}",
-            port_index, port_speed, enabled_status.enabled
+            port_id, port_speed, enabled_status.enabled
         );
 
-        let port_id = port_index;
+        // ✅ 修复：更新 tt_required 字段
+        // 根据 xHCI 规范，LS/FS 设备连接在 HS Hub 时需要 TT
+        let hub_speed = match self.data.dev.descriptor().protocol {
+            // Hub 协议值：0=FS Hub, 1/2=HS Hub, 3=SS Hub
+            1 | 2 => DeviceSpeed::High,   // HS Hub
+            3 => DeviceSpeed::SuperSpeed, // SS Hub
+            _ => DeviceSpeed::Full,       // FS Hub
+        };
+
+        let port = &mut self.data.ports[port_id as usize - 1];
+
+        // TT 需求判断：使用 DeviceSpeed::requires_tt 方法
+        port.tt_required = port_speed.requires_tt(hub_speed);
+
+        debug!(
+            "TT required: port_speed={:?}, hub_speed={:?}, tt_required={}",
+            port_speed, hub_speed, port.tt_required
+        );
+
+        let tt_port_on_hub = if port.tt_required {
+            Some(port_id)
+        } else {
+            None
+        };
+
+        // 从 Hub 描述符获取 Multi-TT 信息
+        // 根据 USB 规范，wHubCharacteristics 的 bit 2 表示是否为 Multi-TT
+        let parent_hub_multi_tt = (self.data.descriptor.hub_characteristics() & 0x0004) != 0;
 
         Ok(PortChangeInfo {
-            // route_string,
             root_port_id: self.root_port_id(),
             port_id,
             port_speed,
+            tt_port_on_hub,
+            parent_hub_multi_tt,
         })
     }
 
     /// 等待端口启用（参照 xHCI Root Hub 的 handle_reseted）
-    async fn wait_for_port_enabled(&mut self, port_index: u8) -> Result<PortStatus, USBError> {
+    async fn wait_for_port_enabled(&mut self, port_id: u8) -> Result<PortStatus, USBError> {
         const MAX_WAIT_MS: u64 = 500;
         const CHECK_INTERVAL_MS: u64 = 10;
         let max_attempts = MAX_WAIT_MS / CHECK_INTERVAL_MS;
 
         for attempt in 0..max_attempts {
-            let (status, _change) = self.get_port_status(port_index).await?;
+            let (status, _change) = self.get_port_status(port_id).await?;
 
             if status.enabled && status.connected {
-                info!("Port {} enabled after {} checks", port_index, attempt + 1);
+                info!("Port {} enabled after {} checks", port_id, attempt + 1);
                 return Ok(status);
             }
 
@@ -684,27 +713,8 @@ impl HubDevice {
             crate::osal::kernel::delay(Duration::from_millis(CHECK_INTERVAL_MS));
         }
 
-        warn!("Port {} enable timeout after {}ms", port_index, MAX_WAIT_MS);
+        warn!("Port {} enable timeout after {}ms", port_id, MAX_WAIT_MS);
         Err(USBError::Timeout)
-    }
-
-    /// 解码端口速度（参照 USB 2.0 规范）
-    fn decode_port_speed(&self, status: &PortStatus) -> u8 {
-        // USB 2.0 定义：
-        // - Low Speed: 0
-        // - Full Speed: 1
-        // - High Speed: 2
-        // USB 3.0+ 扩展：
-        // - SuperSpeed: 4
-        // - SuperSpeedPlus: 5
-        match status.speed {
-            DeviceSpeed::Low => 0,
-            DeviceSpeed::Full => 1,
-            DeviceSpeed::High => 2,
-            DeviceSpeed::SuperSpeed => 4,
-            DeviceSpeed::SuperSpeedPlus => 5,
-            DeviceSpeed::Wireless => 3,
-        }
     }
 
     /// 获取 Hub 的 root_port_id

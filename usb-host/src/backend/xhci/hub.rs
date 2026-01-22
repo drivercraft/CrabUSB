@@ -9,7 +9,7 @@ use core::{
 };
 
 use futures::{FutureExt, future::BoxFuture, task::AtomicWaker};
-use usb_if::host::USBError;
+use usb_if::host::{USBError, hub::DeviceSpeed};
 
 use crate::{
     backend::{ty::HubOp, xhci::reg::XhciRegisters},
@@ -181,7 +181,8 @@ impl XhciRootHub {
             {
                 continue;
             }
-            let speed = port_reg.portsc.port_speed();
+            let speed_raw = port_reg.portsc.port_speed();
+            let speed = DeviceSpeed::from_xhci_portsc(speed_raw);
             debug!("Port {} device connected at speed {:?}", id, speed);
             debug!("Port {} : \r\n {:?}", id, port_reg.portsc);
             self.ports_mut()[i].state = PortState::Probed;
@@ -191,6 +192,9 @@ impl XhciRootHub {
                 root_port_id: id,
                 port_id: id,
                 port_speed: speed,
+                // Root Hub 不需要 TT
+                tt_port_on_hub: None,
+                parent_hub_multi_tt: false,
             });
         }
 
