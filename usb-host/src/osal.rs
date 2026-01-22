@@ -1,14 +1,20 @@
 use core::time::Duration;
 
-use trait_ffi::def_extern_trait;
+pub use dma_api::{Direction, DmaAddr, DmaError, DmaHandle, MapHandle, Osal};
 
-#[def_extern_trait]
-pub trait Kernel {
-    fn page_size() -> usize;
-    fn delay(duration: Duration);
+// use trait_ffi::def_extern_trait;
+
+// #[def_extern_trait]
+// pub trait Kernel {
+//     fn page_size() -> usize;
+//     fn delay(duration: Duration);
+// }
+
+pub trait KernelOp: Osal {
+    fn delay(&self, duration: Duration);
 }
 
-pub struct SpinWhile<F>
+pub(crate) struct SpinWhile<F>
 where
     F: Fn() -> bool,
 {

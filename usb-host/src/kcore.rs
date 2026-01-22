@@ -69,6 +69,7 @@ impl Core {
                 };
 
                 let device = self.backend.new_addressed_device(info).await?;
+                let kernel = self.backend.kernel();
 
                 let device_id = device.id();
 
@@ -83,6 +84,7 @@ impl Core {
                         hub_settings,
                         addr_info.root_port_id,
                         parent_hub_id,
+                        kernel,
                     )
                     .await?;
                     let mut hub = Hub::new(Box::new(hub_device), Some(route_string));

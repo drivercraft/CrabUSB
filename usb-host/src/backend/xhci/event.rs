@@ -1,4 +1,4 @@
-use dma_api::DVec;
+use dma_api::{DArray, DeviceDma};
 use mbarrier::mb;
 use xhci::ring::trb::event::Allowed;
 
@@ -14,21 +14,25 @@ pub struct EventRingSte {
 
 pub struct EventRing {
     ring: Ring,
-    pub ste: DVec<EventRingSte>,
+    pub ste: DArray<EventRingSte>,
 }
 
 unsafe impl Send for EventRing {}
 unsafe impl Sync for EventRing {}
 
 impl EventRing {
-    pub fn new(dma_mask: usize) -> Result<Self> {
-        let ring = Ring::new(true, dma_api::Direction::Bidirectional, dma_mask)?;
+    pub fn new(dma: &DeviceDma) -> Result<Self> {
+        let ring = Ring::new(true, dma_api::Direction::Bidirectional, dma)?;
 
-        let mut ste = DVec::zeros(dma_mask as _, 1, 64, dma_api::Direction::Bidirectional)
+        // let mut ste = DVec::zeros(dma_mask as _, 1, 64, dma_api::Direction::Bidirectional)
+        //     .map_err(|_| USBError::NoMemory)?;
+
+        let mut ste = dma
+            .new_array(1, 64, dma_api::Direction::Bidirectional)
             .map_err(|_| USBError::NoMemory)?;
 
         let ste0 = EventRingSte {
-            addr: ring.trbs.bus_addr(),
+            addr: ring.trbs.dma_addr(),
             size: ring.len() as _,
             _reserved: [0; 6],
         };
@@ -56,7 +60,7 @@ impl EventRing {
         self.ring.current_trb_addr().raw() & 0xFFFF_FFFF_FFFF_FFF0
     }
     pub fn erstba(&self) -> u64 {
-        self.ste.bus_addr()
+        self.ste.dma_addr()
     }
 
     pub fn len(&self) -> usize {

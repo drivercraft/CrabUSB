@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
 
+use dma_api::DeviceDma;
 use mbarrier::wmb;
 use spin::{Mutex, RwLock};
 use usb_if::err::TransferError;
@@ -20,10 +21,10 @@ pub struct CommandRing(Arc<Mutex<Inner>>);
 impl CommandRing {
     pub fn new(
         direction: dma_api::Direction,
-        dma_mask: usize,
+        dma: &DeviceDma,
         reg: Arc<RwLock<XhciRegisters>>,
     ) -> crate::err::Result<Self> {
-        let ring = SendRing::new(direction, dma_mask)?;
+        let ring = SendRing::new(direction, dma)?;
         let inner = Inner { ring, reg };
         Ok(Self(Arc::new(Mutex::new(inner))))
     }

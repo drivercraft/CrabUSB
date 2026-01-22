@@ -1,11 +1,10 @@
-use dma_api::DVec;
 pub use dma_api::Direction;
+use dma_api::{DArray, DeviceDma};
 use xhci::ring::trb::{Link, command, transfer};
 
 use crate::{
     BusAddr,
     err::*,
-    osal::kernel::page_size,
     queue::{Finished, TWaiter},
 };
 
@@ -38,7 +37,7 @@ impl From<transfer::Allowed> for TrbData {
 
 pub struct Ring {
     link: bool,
-    pub trbs: DVec<TrbData>,
+    pub trbs: DArray<TrbData>,
     pub i: usize,
     pub cycle: bool,
 }
@@ -51,9 +50,10 @@ impl Ring {
         len: usize,
         link: bool,
         direction: Direction,
-        dma_mask: usize,
+        dma: &DeviceDma,
     ) -> core::result::Result<Self, HostError> {
-        let trbs = DVec::zeros(dma_mask as _, len, page_size(), direction)?;
+        // let trbs = DArray::zeros(dma_mask as _, len, page_size(), direction)?;
+        let trbs = dma.new_array(len, dma.page_size(), direction)?;
 
         Ok(Self {
             link,
@@ -63,9 +63,9 @@ impl Ring {
         })
     }
 
-    pub fn new(link: bool, direction: Direction, dma_mask: usize) -> Result<Self> {
-        let len = page_size() / TRB_SIZE;
-        Ok(Self::new_with_len(len, link, direction, dma_mask)?)
+    pub fn new(link: bool, direction: Direction, dma: &DeviceDma) -> Result<Self> {
+        let len = dma.page_size() / TRB_SIZE;
+        Ok(Self::new_with_len(len, link, direction, dma)?)
     }
 
     pub fn len(&self) -> usize {
@@ -73,11 +73,11 @@ impl Ring {
     }
 
     fn get_trb(&self) -> Option<TrbData> {
-        self.trbs.get(self.i)
+        self.trbs.read(self.i)
     }
 
     pub fn bus_addr(&self) -> BusAddr {
-        self.trbs.bus_addr().into()
+        self.trbs.dma_addr().into()
     }
 
     pub fn enque_command(&mut self, mut trb: command::Allowed) -> BusAddr {
@@ -172,8 +172,8 @@ pub struct SendRing<R> {
 }
 
 impl<R> SendRing<R> {
-    pub fn new(direction: Direction, dma_mask: usize) -> Result<Self> {
-        let ring = Ring::new(true, direction, dma_mask)?;
+    pub fn new(direction: Direction, dma: &DeviceDma) -> Result<Self> {
+        let ring = Ring::new(true, direction, dma)?;
         let finished = Finished::new(ring.trb_bus_addr_list());
         Ok(Self { ring, finished })
     }

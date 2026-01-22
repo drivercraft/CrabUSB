@@ -3,6 +3,10 @@
 #![feature(used_with_arg)]
 #![allow(dead_code)]
 
+use core::alloc::Layout;
+
+use bare_test::mem::alloc_with_mask;
+
 extern crate alloc;
 
 #[bare_test::tests]
@@ -23,7 +27,7 @@ mod tests {
         sync::atomic::{AtomicBool, Ordering},
         time::Duration,
     };
-    use crab_usb::{impl_trait, *};
+    use crab_usb::*;
 
     use log::info;
     use log::*;
@@ -149,18 +153,18 @@ mod tests {
         });
     }
 
-    struct KernelImpl;
-    impl_trait! {
-           impl Kernel for KernelImpl {
-               fn page_size() -> usize {
-                   page_size()
-               }
-    fn delay(duration: Duration){
-                   spin_delay(duration);
-    }
+    // struct KernelImpl;
+    // impl_trait! {
+    //        impl Kernel for KernelImpl {
+    //            fn page_size() -> usize {
+    //                page_size()
+    //            }
+    // fn delay(duration: Duration){
+    //                spin_delay(duration);
+    // }
 
-           }
-       }
+    //        }
+    //    }
 
     struct XhciInfo {
         usb: USBHost,
@@ -271,7 +275,7 @@ mod tests {
                     println!("irq: {irq:?}");
 
                     return Some(XhciInfo {
-                        usb: USBHost::new_xhci(addr).unwrap(),
+                        usb: USBHost::new_xhci(addr, &KernelImpl).unwrap(),
                         irq,
                     });
                 }
@@ -318,7 +322,7 @@ mod tests {
                 let irq = node.irq_info();
 
                 return XhciInfo {
-                    usb: USBHost::new_xhci(addr).unwrap(),
+                    usb: USBHost::new_xhci(addr, &KernelImpl).unwrap(),
                     irq,
                 };
             }
@@ -361,5 +365,74 @@ impl Align for usize {
         } else {
             *self + align - *self % align
         }
+    }
+}
+
+struct KernelImpl;
+
+impl crab_usb::Osal for KernelImpl {
+    fn page_size() -> usize {
+        page_size()
+    }
+
+    unsafe fn map_single(
+        &self,
+        dma_mask: u64,
+        addr: core::ptr::NonNull<u8>,
+        size: usize,
+        direction: crab_usb::Direction,
+    ) -> Result<crab_usb::MapHandle, crab_usb::DmaError> {
+        let mut phys = PhysAddr::from(VirtAddr::from(addr)).raw() as u64;
+        if phys + size as u64 > dma_mask {
+            let ptr =
+                unsafe { alloc_with_mask(Layout::from_size_align(size, 64).unwrap(), dma_mask) };
+            if ptr.is_null() {
+                return Err(crab_usb::DmaError::NoMemory);
+            }
+            phys = PhysAddr::from(VirtAddr::from(NonNull::new(ptr).unwrap())).raw() as u64;
+        }
+        Ok(crab_usb::MapHandle {
+            dma_addr: crab_usb::DmaAddr(phys),
+            virt_addr: addr,
+            size,
+        })
+    }
+
+    unsafe fn unmap_single(&self, handle: dma_api::MapHandle) {
+        let vaddr = handle.virt_addr;
+        let paddr = PhysAddr::from(VirtAddr::from(vaddr));
+        let phys = paddr.raw() as u64;
+        if phys + handle.size as u64 > handle.dma_addr.0 {
+            unsafe {
+                alloc::alloc::dealloc(vaddr.as_ptr(), handle.layout());
+            }
+        }
+    }
+
+    unsafe fn alloc_coherent(
+        &self,
+        dma_mask: u64,
+        layout: core::alloc::Layout,
+    ) -> Option<crab_usb::DmaHandle> {
+        let ptr = unsafe { alloc_with_mask(layout, dma_mask) };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(crab_usb::DmaHandle {
+                virt_addr: NonNull::new(ptr).unwrap(),
+                dma_addr: PhysAddr::from(VirtAddr::from(NonNull::new(ptr).unwrap())).raw() as _,
+                layout,
+            })
+        }
+    }
+
+    unsafe fn dealloc_coherent(&self, _dma_mask: u64, handle: dma_api::DmaHandle) {
+        unsafe { unsafe { alloc::alloc::dealloc(handle.virt_addr.as_ptr(), handle.layout) } }
+    }
+}
+
+impl crab_usb::KernelOp for KernelImpl {
+    fn delay(duration: Duration) {
+        spin_delay(duration);
     }
 }

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use crate::backend::{CoreOp, ty::*};
 use crate::err::Result;
-use crate::kcore::*;
+use crate::{KernelOp, kcore::*};
 use crate::{Mmio, backend::BackendOp};
 
 pub use super::backend::{
@@ -22,8 +22,8 @@ pub struct USBHost {
 }
 
 impl USBHost {
-    pub fn new_xhci(mmio: Mmio) -> Result<USBHost> {
-        Ok(USBHost::new(Xhci::new(mmio)?))
+    pub fn new_xhci(mmio: Mmio, kernel: &'static dyn KernelOp) -> Result<USBHost> {
+        Ok(USBHost::new(Xhci::new(mmio, kernel)?))
     }
 
     pub fn new_dwc(params: DwcNewParams<'_, impl CruOp>) -> Result<USBHost> {

@@ -31,7 +31,7 @@ pub use usb_if::{DeviceSpeed, DrMode};
 
 #[macro_use]
 mod osal;
-pub use osal::Kernel;
+pub use osal::*;
 pub use trait_ffi::impl_extern_trait;
 
 define_int_type!(BusAddr, u64);

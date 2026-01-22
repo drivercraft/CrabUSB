@@ -25,7 +25,7 @@ impl EndpointControl {
         param: usb_if::host::ControlSetup,
         buff: &mut [u8],
     ) -> Result<usize, TransferError> {
-        let transfer = Transfer::new_in(TransferKind::Control(param), Pin::new(buff));
+        let transfer = Transfer::new_in(self.raw.dma(), TransferKind::Control(param), Pin::new(buff));
         let t = self.raw.submit_and_wait(transfer).await?;
         let n = t.transfer_len;
         Ok(n)
@@ -36,7 +36,7 @@ impl EndpointControl {
         param: usb_if::host::ControlSetup,
         buff: &[u8],
     ) -> Result<usize, TransferError> {
-        let transfer = Transfer::new_out(TransferKind::Control(param), Pin::new(buff));
+        let transfer = Transfer::new_out(self.raw.dma(), TransferKind::Control(param), Pin::new(buff));
         let t = self.raw.submit_and_wait(transfer).await?;
         let n = t.transfer_len;
         Ok(n)

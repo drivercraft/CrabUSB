@@ -1,5 +1,6 @@
 use alloc::{collections::BTreeMap, sync::Arc};
 
+use dma_api::DeviceDma;
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
@@ -33,22 +34,22 @@ pub struct Endpoint {
     pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
     transfers: BTreeMap<TransferId, Transfer>,
-    dma_mask: usize,
+    dma: DeviceDma,
 }
 
 unsafe impl Send for Endpoint {}
 unsafe impl Sync for Endpoint {}
 
 impl Endpoint {
-    pub fn new(dci: Dci, dma_mask: usize, bell: Arc<Mutex<SlotBell>>) -> crate::err::Result<Self> {
-        let ring = SendRing::new(dma_api::Direction::Bidirectional, dma_mask)?;
+    pub fn new(dci: Dci, dma: &DeviceDma, bell: Arc<Mutex<SlotBell>>) -> crate::err::Result<Self> {
+        let ring = SendRing::new(dma_api::Direction::Bidirectional, dma)?;
 
         Ok(Self {
             dci,
             ring,
             bell,
             transfers: BTreeMap::new(),
-            dma_mask,
+            dma: dma.clone(),
         })
     }
 
@@ -86,11 +87,12 @@ impl Endpoint {
         if matches!(t.direction, Direction::In) {
             // 对于 IN 端点，实际传输长度 = 请求长度 - 剩余长度
             t.transfer_len = t
-                .buffer_len
+                .buffer_len()
                 .saturating_sub(c.trb_transfer_length() as usize);
 
             if t.transfer_len > 0 {
-                t.dma_slice().prepare_read_all();
+                // t.dma_slice().prepare_read_all();
+                t.mapping.prepare_read_all();
             }
         } else {
             // 对于 OUT 端点，trb_transfer_length 就是实际传输长度
@@ -183,20 +185,22 @@ impl EndpointOp for Endpoint {
         transfer: crate::backend::ty::transfer::Transfer,
     ) -> Result<crate::backend::ty::ep::TransferHandle<'_>, TransferError> {
         let mut data_bus_addr = 0;
-        if transfer.buffer_len > 0 {
-            let data_slice = transfer.dma_slice();
+        if transfer.buffer_len() > 0 {
+            // let data_slice = transfer.dma_slice();
             if matches!(transfer.direction, Direction::Out) {
-                data_slice.confirm_write_all();
+                // data_slice.confirm_write_all();
+                transfer.mapping.confirm_write_all();
             }
-            data_bus_addr = data_slice.bus_addr();
+            // data_bus_addr = data_slice.bus_addr();
+            data_bus_addr = transfer.mapping.handle.dma_addr;
 
             // 检查缓冲区起始地址是否在 dma_mask 范围内
             assert!(
-                data_bus_addr <= self.dma_mask as u64,
+                data_bus_addr <= self.dma.dma_mask(),
                 "DMA address 0x{:x} exceeds controller DMA mask 0x{:x} ({}-bit addressing)",
                 data_bus_addr,
-                self.dma_mask,
-                if self.dma_mask == u32::MAX as usize {
+                self.dma.dma_mask(),
+                if self.dma.dma_mask() == u32::MAX as u64 {
                     32
                 } else {
                     64
@@ -204,15 +208,15 @@ impl EndpointOp for Endpoint {
             );
 
             // 检查缓冲区结束地址是否在 dma_mask 范围内
-            let buffer_end = data_bus_addr + transfer.buffer_len as u64;
+            let buffer_end = data_bus_addr + transfer.buffer_len() as u64;
             assert!(
-                buffer_end <= self.dma_mask as u64,
+                buffer_end <= self.dma.dma_mask(),
                 "DMA buffer end 0x{:x} (start: 0x{:x}, len: {} bytes) exceeds controller DMA mask 0x{:x} ({}-bit addressing)",
                 buffer_end,
                 data_bus_addr,
-                transfer.buffer_len,
-                self.dma_mask,
-                if self.dma_mask == u32::MAX as usize {
+                transfer.buffer_len(),
+                self.dma.dma_mask(),
+                if self.dma.dma_mask() == u32::MAX as u64 {
                     32
                 } else {
                     64
@@ -220,7 +224,7 @@ impl EndpointOp for Endpoint {
             );
         }
 
-        let data_len = transfer.buffer_len;
+        let data_len = transfer.buffer_len();
         let dir = transfer.direction;
 
         let mut handle = TransferId(BusAddr(0));
@@ -244,7 +248,7 @@ impl EndpointOp for Endpoint {
 
                 let mut data = None;
 
-                if transfer.buffer_len > 0 {
+                if transfer.buffer_len() > 0 {
                     setup
                         .set_transfer_type(dir.to_xhci_transfer_type())
                         .set_length(data_len as _);
@@ -260,7 +264,7 @@ impl EndpointOp for Endpoint {
                 let mut status = transfer::StatusStage::default();
                 status.set_interrupt_on_completion();
 
-                if matches!(transfer.direction, Direction::In) && transfer.buffer_len > 0 {
+                if matches!(transfer.direction, Direction::In) && transfer.buffer_len() > 0 {
                     status.clear_direction();
                 } else {
                     status.set_direction();
@@ -306,6 +310,10 @@ impl EndpointOp for Endpoint {
 
     fn register_cx(&self, id: u64, cx: &mut core::task::Context<'_>) {
         self.ring.register_cx(BusAddr(id), cx);
+    }
+
+    fn dma(&self) -> &DeviceDma {
+        &self.dma
     }
 }
 

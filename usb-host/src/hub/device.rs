@@ -16,7 +16,7 @@ use usb_if::{
     transfer::{Recipient, Request, RequestType},
 };
 
-use crate::{Device, backend::ty::HubOp, hub::PortChangeInfo};
+use crate::{Device, KernelOp, backend::ty::HubOp, hub::PortChangeInfo};
 
 // Hub 枚举常量 (参照 Linux 内核)
 
@@ -35,6 +35,7 @@ const HUB_DEBOUNCE_STABLE: u64 = 100;
 pub struct HubDevice {
     settings: HubSettings,
     data: Box<Inner>,
+    kernel: &'static dyn KernelOp,
 }
 
 struct Inner {
@@ -124,6 +125,7 @@ impl HubDevice {
         settings: HubSettings,
         root_port_id: u8,
         parent_hub_slot_id: u8,
+        kernel: &'static dyn KernelOp,
     ) -> Result<Self, USBError> {
         Ok(Self {
             settings,
@@ -136,6 +138,7 @@ impl HubDevice {
                 parent_hub_slot_id,
                 root_port_id,
             }),
+            kernel,
         })
     }
 
@@ -359,7 +362,7 @@ impl HubDevice {
             debug!("Powered on port {}", port_id);
         }
 
-        crate::osal::kernel::delay(Duration::from_millis(100));
+        self.kernel.delay(Duration::from_millis(100));
         Ok(())
     }
 
@@ -537,7 +540,8 @@ impl HubDevice {
 
         for attempt in 0..max_attempts {
             // 等待检查间隔（25ms）
-            crate::osal::kernel::delay(core::time::Duration::from_millis(HUB_DEBOUNCE_STEP));
+            self.kernel
+                .delay(core::time::Duration::from_millis(HUB_DEBOUNCE_STEP));
 
             // 获取当前状态
             let (status, _change) = self.get_port_status(port_index).await?;
@@ -598,7 +602,7 @@ impl HubDevice {
         };
 
         // 等待复位完成
-        crate::osal::kernel::delay(reset_time);
+        self.kernel.delay(reset_time);
 
         // 等待复位完成标志（最多等待 100ms）
         for _retry in 0..10 {
@@ -612,7 +616,7 @@ impl HubDevice {
                 return Ok(());
             }
 
-            crate::osal::kernel::delay(Duration::from_millis(10));
+            self.kernel.delay(Duration::from_millis(10));
         }
 
         warn!("Port {} reset timeout", port_id);
@@ -706,7 +710,7 @@ impl HubDevice {
                 return Err(USBError::from("Device disconnected during enable wait"));
             }
 
-            crate::osal::kernel::delay(Duration::from_millis(CHECK_INTERVAL_MS));
+            self.kernel.delay(Duration::from_millis(CHECK_INTERVAL_MS));
         }
 
         warn!("Port {} enable timeout after {}ms", port_id, MAX_WAIT_MS);

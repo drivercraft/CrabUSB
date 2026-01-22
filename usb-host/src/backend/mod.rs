@@ -62,6 +62,8 @@ pub(crate) trait CoreOp: Send + 'static {
     ) -> BoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
 
     fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
+
+    fn kernel(&self) -> &'static dyn crate::osal::KernelOp;
 }
 
 pub struct DeviceAddressInfo {
