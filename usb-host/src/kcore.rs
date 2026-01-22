@@ -66,7 +66,6 @@ impl Core {
                     port_speed: addr_info.port_speed,
                     parent_hub_slot_id: parent_hub_id,
                     tt_port_on_hub: addr_info.tt_port_on_hub,
-                    parent_hub_multi_tt: addr_info.parent_hub_multi_tt,
                 };
 
                 let device = self.backend.new_addressed_device(info).await?;

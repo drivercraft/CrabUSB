@@ -71,6 +71,4 @@ pub struct DeviceAddressInfo {
     pub port_speed: DeviceSpeed,
     /// TT 信息：设备在 Hub 上的端口号（LS/FS 设备需要）
     pub tt_port_on_hub: Option<u8>,
-    /// TT 信息：Parent Hub 是否支持 Multi-TT
-    pub parent_hub_multi_tt: bool,
 }
