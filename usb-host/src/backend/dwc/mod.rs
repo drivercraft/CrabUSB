@@ -19,13 +19,10 @@ use crate::backend::dwc::reg::GEVNTSIZ;
 use crate::backend::{CoreOp, DeviceAddressInfo};
 use crate::{
     Mmio, Xhci,
-    backend::{
-        BackendOp,
-        dwc::{
-            event::EventBuffer,
-            reg::{GCTL, GHWPARAMS0, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1},
-            udphy::Udphy,
-        },
+    backend::dwc::{
+        event::EventBuffer,
+        reg::{GCTL, GHWPARAMS0, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1},
+        udphy::Udphy,
     },
     err::{Result, USBError},
     osal::kernel::page_size,
@@ -73,7 +70,6 @@ pub struct DwcNewParams<'a, C: CruOp> {
     pub usb2_phy_param: Usb2PhyParam<'a>,
     pub cru: C,
     pub rst_list: &'a [(&'a str, u64)],
-    pub dma_mask: usize,
     pub params: DwcParams,
 }
 
@@ -142,7 +138,7 @@ impl Dwc {
         let phy = Udphy::new(params.phy, cru.clone(), params.phy_param);
         let usb2_phy = Usb2Phy::new(cru.clone(), params.usb2_phy_param);
 
-        let xhci = Xhci::new(params.ctrl, params.dma_mask)?;
+        let xhci = Xhci::new(params.ctrl)?;
 
         let dwc_regs = unsafe { Dwc3Regs::new(mmio_base) };
 
@@ -254,7 +250,28 @@ impl Dwc {
         debug!("DWC3: Max speed {:?}", self.max_speed);
 
         self.dwc_regs.device_soft_reset().await;
+
+        // PHY 软复位（包含 PHY 复位和核心复位）
+        info!("DWC3: Starting core soft reset (includes PHY soft reset)");
         self.dwc_regs.core_soft_reset().await;
+
+        // **关键调试：检查 PHY 软复位后的寄存器状态**
+        use crate::backend::dwc::reg::GUSB2PHYCFG;
+        let gusb3_val = self.dwc_regs.globals().gusb3pipectl0.extract();
+        let gusb2_val = self.dwc_regs.globals().gusb2phycfg0.extract();
+        info!(
+            "DWC3: After core_soft_reset - GUSB3PIPECTL={:#010x}, GUSB2PHYCFG={:#010x}",
+            gusb3_val.get(),
+            gusb2_val.get()
+        );
+
+        // **关键修复：在初始化开始时清除 suspendusb20 位（RK3588 TRM 要求）**
+        // TRM 明确说明：如果此位为 1，应用程序必须在 power-on reset 后清除此位
+        info!("DWC3: Clearing suspendusb20 bit (TRM requirement)");
+        self.dwc_regs
+            .globals()
+            .gusb2phycfg0
+            .modify(GUSB2PHYCFG::SUSPHY::Disable);
         if self.revistion >= DWC3_REVISION_250A {
             debug!("DWC3: Revision 250A or later detected");
 
@@ -374,6 +391,13 @@ impl Dwc {
         };
 
         // === USB3 PHY 配置 ===
+        // **关键：读取当前寄存器值（保留硬件状态）**
+        let gusb3_init = self.dwc_regs.globals().gusb3pipectl0.extract();
+        info!(
+            "DWC3: Initial GUSB3PIPECTL = {:#010x} before config",
+            gusb3_init.get()
+        );
+
         let mut gusb3 = self.dwc_regs.globals().gusb3pipectl0.extract();
 
         /*
@@ -436,6 +460,13 @@ impl Dwc {
         crate::osal::kernel::delay(core::time::Duration::from_millis(100));
 
         // === USB2 PHY 配置 ===
+        // **关键：读取当前寄存器值（保留硬件状态）**
+        let gusb2_init = self.dwc_regs.globals().gusb2phycfg0.extract();
+        info!(
+            "DWC3: Initial GUSB2PHYCFG = {:#010x} before config",
+            gusb2_init.get()
+        );
+
         let mut gusb2 = self.dwc_regs.globals().gusb2phycfg0.extract();
 
         /*

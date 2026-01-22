@@ -22,8 +22,8 @@ pub struct USBHost {
 }
 
 impl USBHost {
-    pub fn new_xhci(mmio: Mmio, dma_mask: usize) -> Result<USBHost> {
-        Ok(USBHost::new(Xhci::new(mmio, dma_mask)?))
+    pub fn new_xhci(mmio: Mmio) -> Result<USBHost> {
+        Ok(USBHost::new(Xhci::new(mmio)?))
     }
 
     pub fn new_dwc(params: DwcNewParams<'_, impl CruOp>) -> Result<USBHost> {
