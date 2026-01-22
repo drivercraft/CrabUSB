@@ -66,6 +66,11 @@ impl RouteString {
         }
         parts.join(".")
     }
+
+    /// Return the deepest (last non-zero) port id in the route string.
+    pub fn last_port(&self) -> Option<u8> {
+        self.route_port_ids().last()
+    }
 }
 
 impl Debug for RouteString {

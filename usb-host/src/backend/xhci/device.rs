@@ -94,6 +94,9 @@ impl Device {
     }
 
     pub(crate) async fn init(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
+        // Keep the raw PORTSC.PortSpeed encoding for interval calculations
+        self.port_speed = info.port_speed.to_xhci_portsc_value();
+
         let ep = self.new_ep(Dci::CTRL)?;
         self.ctrl_ep = Some(EndpointControl::new(ep));
         self.address(host, info).await?;
@@ -166,28 +169,19 @@ impl Device {
     async fn address(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
         // 直接使用 DeviceSpeed 枚举计算默认 max packet size
         let max_packet_size = parse_default_max_packet_size_from_port_speed(info.port_speed);
-        let route_string = info.route_string.raw();
+        // Route String is only valid for USB3.x devices; USB2.x devices must use 0.
+        let route_string = if matches!(
+            info.port_speed,
+            DeviceSpeed::SuperSpeed | DeviceSpeed::SuperSpeedPlus
+        ) {
+            info.route_string.raw()
+        } else {
+            0
+        };
 
         let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
         // ctrl dci
-        let dci = 1;
-        debug!(
-            r#"Address device {:?}
-    root port: {}
-    route string: {:#x}
-    parent_hub_slot_id: {}
-    ctrl ring: {:x?}
-    port speed: {:?}
-    max packet size: {}"#,
-            self.id,
-            info.root_port_id,
-            route_string,
-            info.parent_hub_slot_id,
-            ctrl_ring_addr,
-            info.port_speed,
-            max_packet_size
-        );
-
+        let dci = Dci::CTRL;
         // 1. Allocate an Input Context data structure (6.2.5) and initialize all fields to
         // ‘0’.
         self.ctx.with_empty_input(|input| {
@@ -215,14 +209,16 @@ impl Device {
             slot_context.set_max_exit_latency(0);
             slot_context.set_root_hub_port_number(info.root_port_id);
             slot_context.set_number_of_ports(0);
-            slot_context.set_parent_hub_slot_id(info.parent_hub_slot_id);
+            slot_context.set_parent_hub_slot_id(0);
 
-            // ✅ 新增：设置 TT_PORT（Transaction Translator Port Number）
-            // xHCI 规范：当 LS/FS 设备（port_speed=1/2）连接在 HS Hub 时必须设置
-            // xHCI crate 中这个字段命名为 parent_port_number
+            // TT info is only valid for LS/FS devices behind a HS hub.
             if let Some(tt_port) = info.tt_port_on_hub {
+                slot_context.set_parent_hub_slot_id(info.parent_hub_slot_id);
                 slot_context.set_parent_port_number(tt_port);
-                debug!("Setting TT_PORT: {} for LS/FS device", tt_port);
+                debug!(
+                    "Setting parent_port_number (TT): {}, parent_hub_slot_id: {}",
+                    tt_port, info.parent_hub_slot_id
+                );
             }
 
             slot_context.set_tt_think_time(0);
@@ -231,7 +227,7 @@ impl Device {
             slot_context.set_speed(info.port_speed.to_xhci_slot_value());
 
             // Initialize the Input default control Endpoint 0 Context (6.2.3).
-            let endpoint_0 = input.device_mut().endpoint_mut(dci);
+            let endpoint_0 = input.device_mut().endpoint_mut(dci.as_usize());
             // • EP Type = Control.
             endpoint_0.set_endpoint_type(xhci::context::EndpointType::Control);
             // • Max Packet Size = The default maximum packet size for the Default Control Endpoint,
@@ -260,6 +256,21 @@ impl Device {
             // • Average TRB Length = 8 (xHCI spec 6.2.3).
             endpoint_0.set_average_trb_length(8);
         });
+
+        debug!(
+            r#"Address device {:?}
+    root port: {}
+    route string: {:#x}
+    ctrl ring: {:x?}
+    port speed: {:?}
+    max packet size: {}"#,
+            self.id,
+            info.root_port_id,
+            route_string,
+            ctrl_ring_addr,
+            info.port_speed,
+            max_packet_size
+        );
 
         mb();
 
@@ -453,7 +464,7 @@ impl Device {
         match transfer_type {
             EndpointType::Isochronous => {
                 match self.port_speed {
-                    2..=5 => {
+                    3..=5 => {
                         // HighSpeed, SuperSpeed, SuperSpeedPlus ISO 端点
                         // Interval = max(1, min(16, bInterval))
                         let interval = binterval.clamp(1, 16);
@@ -483,7 +494,7 @@ impl Device {
             }
             EndpointType::Interrupt => {
                 match self.port_speed {
-                    2..=5 => {
+                    3..=5 => {
                         // HighSpeed, SuperSpeed, SuperSpeedPlus 中断端点
                         // Interval = max(1, min(16, bInterval))
                         let interval = binterval.clamp(1, 16);
@@ -572,9 +583,6 @@ impl Device {
                     think_time, params.tt_think_time_ns
                 );
             }
-
-            // 设置父 Hub Slot ID
-            slot_ctx.set_parent_hub_slot_id(params.parent_hub_slot_id);
         });
 
         self.evaluate().await?;

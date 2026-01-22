@@ -285,17 +285,16 @@ impl DeviceSpeed {
     /// 从 xHCI PORTSC PortSpeed 字段解析速度
     ///
     /// 根据 xHCI 规范（第 4.19.2 节）：
-    /// - 0 = Full Speed
-    /// - 1 = Low Speed
-    /// - 2 = High Speed
-    /// - 3 = Reserved
+    /// - 1 = Full Speed
+    /// - 2 = Low Speed
+    /// - 3 = High Speed
     /// - 4 = SuperSpeed
     /// - 5 = SuperSpeedPlus
     pub fn from_xhci_portsc(speed_value: u8) -> Self {
         match speed_value {
-            0 => DeviceSpeed::Full,
-            1 => DeviceSpeed::Low,
-            2 => DeviceSpeed::High,
+            1 => DeviceSpeed::Full,
+            2 => DeviceSpeed::Low,
+            3 => DeviceSpeed::High,
             4 => DeviceSpeed::SuperSpeed,
             5 => DeviceSpeed::SuperSpeedPlus,
             _ => DeviceSpeed::Full, // Reserved/Unknown
@@ -313,6 +312,20 @@ impl DeviceSpeed {
         match self {
             DeviceSpeed::Low => 2,
             DeviceSpeed::Full => 1,
+            DeviceSpeed::High => 3,
+            DeviceSpeed::SuperSpeed => 4,
+            DeviceSpeed::SuperSpeedPlus => 5,
+            DeviceSpeed::Wireless => 3,
+        }
+    }
+
+    /// Convert to the raw PORTSC.PortSpeed encoding used by xHCI registers.
+    ///
+    /// Values follow xHCI 4.19.2: 1=FS, 2=LS, 3=HS, 4=SS, 5=SS+.
+    pub fn to_xhci_portsc_value(&self) -> u8 {
+        match self {
+            DeviceSpeed::Full => 1,
+            DeviceSpeed::Low => 2,
             DeviceSpeed::High => 3,
             DeviceSpeed::SuperSpeed => 4,
             DeviceSpeed::SuperSpeedPlus => 5,
