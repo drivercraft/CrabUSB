@@ -33,6 +33,7 @@ pub struct Endpoint {
     pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
     transfers: BTreeMap<TransferId, Transfer>,
+    dma_mask: usize,
 }
 
 unsafe impl Send for Endpoint {}
@@ -47,6 +48,7 @@ impl Endpoint {
             ring,
             bell,
             transfers: BTreeMap::new(),
+            dma_mask,
         })
     }
 
@@ -187,6 +189,35 @@ impl EndpointOp for Endpoint {
                 data_slice.confirm_write_all();
             }
             data_bus_addr = data_slice.bus_addr();
+
+            // 检查缓冲区起始地址是否在 dma_mask 范围内
+            assert!(
+                data_bus_addr <= self.dma_mask as u64,
+                "DMA address 0x{:x} exceeds controller DMA mask 0x{:x} ({}-bit addressing)",
+                data_bus_addr,
+                self.dma_mask,
+                if self.dma_mask == u32::MAX as usize {
+                    32
+                } else {
+                    64
+                }
+            );
+
+            // 检查缓冲区结束地址是否在 dma_mask 范围内
+            let buffer_end = data_bus_addr + transfer.buffer_len as u64;
+            assert!(
+                buffer_end <= self.dma_mask as u64,
+                "DMA buffer end 0x{:x} (start: 0x{:x}, len: {} bytes) exceeds controller DMA mask 0x{:x} ({}-bit addressing)",
+                buffer_end,
+                data_bus_addr,
+                transfer.buffer_len,
+                self.dma_mask,
+                if self.dma_mask == u32::MAX as usize {
+                    32
+                } else {
+                    64
+                }
+            );
         }
 
         let data_len = transfer.buffer_len;
