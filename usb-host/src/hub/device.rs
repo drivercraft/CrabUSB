@@ -155,7 +155,7 @@ impl HubDevice {
             debug!("Port {} status: {:?}", port_id, status);
 
             if change.connection_changed {
-                info!("Port {} enabled changed: {}", port_id, status.enabled);
+                info!("Port {} connection changed: {}", port_id, status.connected);
                 // 清除连接变化标志
                 self.clear_port_feature(port_id, PortFeature::CConnection)
                     .await?;
