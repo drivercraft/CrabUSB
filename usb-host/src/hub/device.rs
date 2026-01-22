@@ -317,7 +317,7 @@ impl HubDevice {
 
         self.read_hub_descriptor_raw(&mut full_buff).await?;
 
-        let desc = unsafe { *(full_buff.as_ptr() as *const HubDescriptor) };
+        let desc = unsafe { (full_buff.as_ptr() as *const HubDescriptor).read_unaligned() };
         Ok(desc)
     }
 
