@@ -3,15 +3,21 @@ pub mod device;
 use core::fmt::Debug;
 
 use alloc::boxed::Box;
+use alloc::string::{String, ToString};
+use usb_if::host::hub::DeviceSpeed;
 // 重新导出常用类型
-pub use device::HubDevice;
+pub use device::{HubDevice, PortState};
 use id_arena::Id;
 
 #[derive(Debug, Clone)]
 pub struct PortChangeInfo {
     pub root_port_id: u8,
     pub port_id: u8,
-    pub port_speed: u8,
+    pub port_speed: DeviceSpeed,
+    /// 设备在 Hub 上的端口号（如果需要 Transaction Translator）
+    pub tt_port_on_hub: Option<u8>,
+    /// Parent Hub 是否支持 Multi-TT
+    pub parent_hub_multi_tt: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -52,6 +58,19 @@ impl RouteString {
             if port == 0 { None } else { Some(port) }
         })
     }
+
+    pub fn to_port_path_string(self, root_hub_port: u8) -> String {
+        let mut parts = vec![root_hub_port.to_string()];
+        for port in self.route_port_ids() {
+            parts.push(port.to_string());
+        }
+        parts.join(".")
+    }
+
+    /// Return the deepest (last non-zero) port id in the route string.
+    pub fn last_port(&self) -> Option<u8> {
+        self.route_port_ids().last()
+    }
 }
 
 impl Debug for RouteString {
@@ -74,10 +93,6 @@ pub struct Hub {
     pub backend: Box<dyn crate::backend::ty::HubOp>,
 }
 impl Hub {
-    pub fn setup(&mut self, parent: Id<Hub>) {
-        self.parent = Some(parent);
-    }
-
     pub fn new(
         backend: Box<dyn crate::backend::ty::HubOp>,
         route_string: Option<RouteString>,

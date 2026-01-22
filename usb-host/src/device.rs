@@ -124,6 +124,10 @@ impl Device {
         self.descriptor().vendor_id
     }
 
+    pub fn slot_id(&self) -> u8 {
+        self.inner.id() as _
+    }
+
     pub async fn claim_interface(&mut self, interface: u8, alternate: u8) -> Result<(), USBError> {
         trace!("Claiming interface {interface}, alternate {alternate}");
         self.inner.claim_interface(interface, alternate).await?;
@@ -188,6 +192,13 @@ impl Device {
         buff: &[u8],
     ) -> Result<usize, TransferError> {
         self.ep_ctrl().control_out(param, buff).await
+    }
+
+    pub async fn update_hub(
+        &mut self,
+        params: crate::backend::ty::HubParams,
+    ) -> Result<(), USBError> {
+        self.inner.update_hub(params).await
     }
 
     pub async fn current_configuration_descriptor(

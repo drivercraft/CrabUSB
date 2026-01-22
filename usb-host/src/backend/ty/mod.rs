@@ -3,6 +3,7 @@ use core::fmt::Debug;
 
 use futures::future::BoxFuture;
 use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
+use usb_if::host::hub::DeviceSpeed;
 
 use crate::{backend::ty::ep::EndpointControl, err::USBError};
 
@@ -56,5 +57,29 @@ pub(crate) trait DeviceOp: Send + Any + 'static {
         desc: &usb_if::descriptor::EndpointDescriptor,
     ) -> Result<ep::EndpointBase, USBError>;
 
+    fn update_hub(&mut self, params: HubParams) -> BoxFuture<'_, Result<(), USBError>>;
+
     // async fn new_endpoint(&mut self, dci: Dci) -> Result<Self::Ep, USBError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct HubParams {
+    /// Hub 端口数量
+    pub num_ports: u8,
+
+    /// 是否为 Multi-TT Hub
+    pub multi_tt: bool,
+
+    /// TT 思考时间（单位：纳秒）
+    /// 8 FS bit times = 666ns
+    pub tt_think_time_ns: u16,
+
+    /// 父 Hub Slot ID（0 表示 Root Hub）
+    pub parent_hub_slot_id: u8,
+
+    /// Root Hub 端口号
+    pub root_hub_port_number: u8,
+
+    /// 设备速度
+    pub port_speed: DeviceSpeed,
 }

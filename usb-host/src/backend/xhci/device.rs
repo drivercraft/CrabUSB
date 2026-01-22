@@ -5,17 +5,18 @@ use alloc::{sync::Arc, vec::Vec};
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
-use usb_if::descriptor::{Class, DeviceDescriptorBase};
+use usb_if::descriptor::DeviceDescriptorBase;
 use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,
     },
-    host::{ControlSetup, USBError},
+    host::{ControlSetup, USBError, hub::DeviceSpeed},
     transfer::{Recipient, RequestType},
 };
 use xhci::ring::trb::command;
 
 use crate::backend::DeviceAddressInfo;
+use crate::backend::ty::HubParams;
 use crate::backend::xhci::cmd::CommandRing;
 use crate::{
     Xhci,
@@ -93,59 +94,45 @@ impl Device {
     }
 
     pub(crate) async fn init(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
+        // Keep the raw PORTSC.PortSpeed encoding for interval calculations
+        self.port_speed = info.port_speed.to_xhci_portsc_value();
+
         let ep = self.new_ep(Dci::CTRL)?;
         self.ctrl_ep = Some(EndpointControl::new(ep));
         self.address(host, info).await?;
         // self.dump_device_out();
         let base = self.get_device_descriptor_base().await?;
-
-        // let max_packet_size = self.control_max_packet_size().await?;
-        // trace!("Max packet size: {max_packet_size}");
         debug!("Device Descriptor Base: {:#x?}", base);
 
-        self.evaluate_context(base).await?;
-        self.get_configuration().await?;
+        self.setup_max_packet(base).await?;
+
+        // 读取当前配置（应该返回 0，表示未配置）
+        let current_config = self.get_configuration().await?;
+        debug!("Current configuration value: {}", current_config);
+
         self.read_descriptor().await?;
 
+        // 读取所有配置描述符
         for i in 0..self.desc.num_configurations {
             let config_desc = self.ep_ctrl().get_configuration_descriptor(i).await?;
             self.config_desc.push(config_desc);
         }
 
+        // 设置配置为第一个配置（大多数设备只有一个配置）
+        // 参考 USB 2.0 规范第 9.1.1 节和 u-boot 的 usb_set_configure_device
+        if !self.config_desc.is_empty() {
+            let config_value = self.config_desc[0].configuration_value;
+            debug!("Setting device configuration to {}", config_value);
+            self.set_configuration(config_value).await?;
+        }
+
+        debug!("device descriptor ok");
         Ok(())
     }
 
-    async fn evaluate_context(&mut self, desc: DeviceDescriptorBase) -> Result {
-        // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
-        // 对于控制端点，这是直接的字节数值，不需要解码
-        let packet_size = if desc.max_packet_size_0 == 0 {
-            8u8
-        } else {
-            desc.max_packet_size_0
-        } as u16;
-
-        let is_hub;
-
-        if let Class::Hub(speed) = desc.class() {
-            is_hub = true;
-            info!("Device is a hub with speed: {:?}", speed);
-        } else {
-            is_hub = false;
-        }
-
-        let dci = Dci::CTRL;
-        self.ctx.with_input(|input| {
-            if is_hub {
-                input.device_mut().slot_mut().set_hub();
-            } else {
-                input.device_mut().slot_mut().clear_hub();
-            }
-            let endpoint = input.device_mut().endpoint_mut(dci.as_usize());
-            endpoint.set_max_packet_size(packet_size);
-        });
-
+    async fn evaluate(&mut self) -> Result {
+        self.ctx.input_clean_change();
         mb();
-
         debug!("Evaluating context for slot {}", self.id.as_u8());
         let _result = self
             .cmd
@@ -155,23 +142,46 @@ impl Device {
                     .set_input_context_pointer(self.ctx.input_bus_addr()),
             ))
             .await?;
+        debug!("Evaluate context ok");
+        Ok(())
+    }
+
+    async fn setup_max_packet(&mut self, desc: DeviceDescriptorBase) -> Result {
+        // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
+        // 对于控制端点，这是直接的字节数值，不需要解码
+        let packet_size = if desc.max_packet_size_0 == 0 {
+            8u8
+        } else {
+            desc.max_packet_size_0
+        } as u16;
+
+        let dci = Dci::CTRL;
+        self.ctx.with_input(|input| {
+            let endpoint = input.device_mut().endpoint_mut(dci.as_usize());
+            endpoint.set_max_packet_size(packet_size);
+        });
+
+        self.evaluate().await?;
 
         Ok(())
     }
 
     async fn address(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
-        trace!("Addressing device with ID: {}", self.id.as_u8());
-        let port_speed = info.port_speed;
-        let max_packet_size = parse_default_max_packet_size_from_port_speed(port_speed);
-        let route_string = info.route_string.raw();
+        // 直接使用 DeviceSpeed 枚举计算默认 max packet size
+        let max_packet_size = parse_default_max_packet_size_from_port_speed(info.port_speed);
+        // Route String is only valid for USB3.x devices; USB2.x devices must use 0.
+        let route_string = if matches!(
+            info.port_speed,
+            DeviceSpeed::SuperSpeed | DeviceSpeed::SuperSpeedPlus
+        ) {
+            info.route_string.raw()
+        } else {
+            0
+        };
 
         let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
         // ctrl dci
-        let dci = 1;
-        trace!(
-            "ctrl ring: {ctrl_ring_addr:x?}, port speed: {port_speed}, max packet size: {max_packet_size}, route string: {route_string}"
-        );
-
+        let dci = Dci::CTRL;
         // 1. Allocate an Input Context data structure (6.2.5) and initialize all fields to
         // ‘0’.
         self.ctx.with_empty_input(|input| {
@@ -194,18 +204,30 @@ impl Device {
             let slot_context = input.device_mut().slot_mut();
             slot_context.clear_multi_tt();
             slot_context.clear_hub();
-            slot_context.set_route_string(route_string); // for now, not support more hub ,so hardcode as 0.//TODO: generate route string
+            slot_context.set_route_string(route_string);
             slot_context.set_context_entries(1);
             slot_context.set_max_exit_latency(0);
             slot_context.set_root_hub_port_number(info.root_port_id);
             slot_context.set_number_of_ports(0);
             slot_context.set_parent_hub_slot_id(0);
+
+            // TT info is only valid for LS/FS devices behind a HS hub.
+            if let Some(tt_port) = info.tt_port_on_hub {
+                slot_context.set_parent_hub_slot_id(info.parent_hub_slot_id);
+                slot_context.set_parent_port_number(tt_port);
+                debug!(
+                    "Setting parent_port_number (TT): {}, parent_hub_slot_id: {}",
+                    tt_port, info.parent_hub_slot_id
+                );
+            }
+
             slot_context.set_tt_think_time(0);
             slot_context.set_interrupter_target(0);
-            slot_context.set_speed(port_speed);
+            // 转换为 xHCI Slot Context 速度值
+            slot_context.set_speed(info.port_speed.to_xhci_slot_value());
 
             // Initialize the Input default control Endpoint 0 Context (6.2.3).
-            let endpoint_0 = input.device_mut().endpoint_mut(dci);
+            let endpoint_0 = input.device_mut().endpoint_mut(dci.as_usize());
             // • EP Type = Control.
             endpoint_0.set_endpoint_type(xhci::context::EndpointType::Control);
             // • Max Packet Size = The default maximum packet size for the Default Control Endpoint,
@@ -231,7 +253,24 @@ impl Device {
             endpoint_0.set_mult(0);
             // • Error Count (CErr) = 3.
             endpoint_0.set_error_count(3);
+            // • Average TRB Length = 8 (xHCI spec 6.2.3).
+            endpoint_0.set_average_trb_length(8);
         });
+
+        debug!(
+            r#"Address device {:?}
+    root port: {}
+    route string: {:#x}
+    ctrl ring: {:x?}
+    port speed: {:?}
+    max packet size: {}"#,
+            self.id,
+            info.root_port_id,
+            route_string,
+            ctrl_ring_addr,
+            info.port_speed,
+            max_packet_size
+        );
 
         mb();
 
@@ -284,7 +323,7 @@ impl Device {
             let c = input.control_mut();
             c.set_configuration_value(configuration_value);
         });
-
+        self.evaluate().await?;
         debug!("Device configuration set to {configuration_value}");
         Ok(())
     }
@@ -315,7 +354,7 @@ impl Device {
 
     async fn setup_all_endpoints(&mut self, interface: u8, alternate: u8) -> Result {
         let mut max_dci = 1;
-        self.ctx.input_perper_modify();
+        self.ctx.input_clean_change();
         self.eps.clear();
 
         for desc in self
@@ -425,7 +464,7 @@ impl Device {
         match transfer_type {
             EndpointType::Isochronous => {
                 match self.port_speed {
-                    2..=5 => {
+                    3..=5 => {
                         // HighSpeed, SuperSpeed, SuperSpeedPlus ISO 端点
                         // Interval = max(1, min(16, bInterval))
                         let interval = binterval.clamp(1, 16);
@@ -455,7 +494,7 @@ impl Device {
             }
             EndpointType::Interrupt => {
                 match self.port_speed {
-                    2..=5 => {
+                    3..=5 => {
                         // HighSpeed, SuperSpeed, SuperSpeedPlus 中断端点
                         // Interval = max(1, min(16, bInterval))
                         let interval = binterval.clamp(1, 16);
@@ -488,6 +527,66 @@ impl Device {
                 default
             }
         }
+    }
+
+    async fn update_hub_inner(&mut self, params: HubParams) -> Result<()> {
+        debug!(
+            "Updating hub context for slot {}: ports={}, multi_tt={}, tt_time={}ns, speed={:?}",
+            self.id.as_u8(),
+            params.num_ports,
+            params.multi_tt,
+            params.tt_think_time_ns,
+            params.port_speed
+        );
+
+        // 1. 设置 Input Control Context（参考 U-Boot xhci_update_hub_device）
+        self.ctx.with_input(|input| {
+            let control_ctx = input.control_mut();
+            // 只更新 Slot Context (flag 0)
+            control_ctx.set_add_context_flag(0);
+        });
+
+        // 2. 设置 Slot Context Hub 参数
+        self.ctx.with_input(|input| {
+            let slot_ctx = input.device_mut().slot_mut();
+
+            // 设置 Hub 标志
+            slot_ctx.set_hub();
+
+            // 设置 Multi-TT 标志（参考 U-Boot）
+            // 如果 hub->tt.multi 为真，设置 MTT
+            // 对于 Full Speed Hub，必须清除 MTT（xHCI 规范 6.2.2）
+            if params.multi_tt {
+                slot_ctx.set_multi_tt();
+            } else if matches!(params.port_speed, DeviceSpeed::Full) {
+                slot_ctx.clear_multi_tt();
+            }
+
+            // 设置端口数量
+            slot_ctx.set_number_of_ports(params.num_ports);
+
+            // 设置 TT 思考时间（参考 U-Boot xhci_update_hub_device）
+            // xHCI spec: TT_THINK_TIME (Bits[16:17] of DWORD 2)
+            // 0 = 8 FS bit times, 1 = 16 FS bit times, 2 = 24 FS bit times, 3 = 32 FS bit times
+            // 只对 High Speed Hub 设置 TT 思考时间
+            if matches!(params.port_speed, DeviceSpeed::High) {
+                // params.tt_think_time_ns 已经是转换后的值 (0, 666, 1333, 1999)
+                // 需要转换为 xHCI 寄存器值
+                let think_time = if params.tt_think_time_ns > 0 {
+                    ((params.tt_think_time_ns / 666) - 1) as u8
+                } else {
+                    0
+                };
+                slot_ctx.set_tt_think_time(think_time);
+                debug!(
+                    "Set TT think time: {} (tt_think_time_ns={}ns)",
+                    think_time, params.tt_think_time_ns
+                );
+            }
+        });
+
+        self.evaluate().await?;
+        Ok(())
     }
 }
 
@@ -528,5 +627,9 @@ impl DeviceOp for Device {
     ) -> Result<EndpointBase> {
         let ep = self.eps.remove(&desc.dci().into());
         ep.ok_or(USBError::NotFound)
+    }
+
+    fn update_hub(&mut self, params: HubParams) -> BoxFuture<'_, Result<()>> {
+        self.update_hub_inner(params).boxed()
     }
 }

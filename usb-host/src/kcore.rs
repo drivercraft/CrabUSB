@@ -43,13 +43,8 @@ impl Core {
 
         for id in hub_ids {
             let addr_infos = self.hub_changed_ports(id).await?;
-
+            let parent_hub_id = self.hubs.get(id).unwrap().backend.slot_id();
             for addr_info in addr_infos {
-                debug!(
-                    "Found device at hub {:?}, port {}",
-                    id, addr_info.root_port_id
-                );
-
                 let route_string = if let Some(route) = &self.hubs.get(id).unwrap().route_string {
                     let mut rs = *route;
                     rs.push_hub(addr_info.port_id);
@@ -58,10 +53,20 @@ impl Core {
                     RouteString::follow_root()
                 };
 
+                let port_path = route_string.to_port_path_string(addr_info.root_port_id);
+
+                info!(
+                    "Found device at port={port_path}, speed={:?}",
+                    addr_info.port_speed
+                );
+
                 let info = DeviceAddressInfo {
                     root_port_id: addr_info.root_port_id,
                     route_string,
                     port_speed: addr_info.port_speed,
+                    parent_hub_slot_id: parent_hub_id,
+                    tt_port_on_hub: addr_info.tt_port_on_hub,
+                    parent_hub_multi_tt: addr_info.parent_hub_multi_tt,
                 };
 
                 let device = self.backend.new_addressed_device(info).await?;
@@ -71,15 +76,20 @@ impl Core {
                 if let Some(hub_settings) =
                     HubDevice::is_hub(device.descriptor(), device.configuration_descriptors())
                 {
-                    info!("Found hub device at hub {:?}", id);
-
+                    info!("Device({port_path}) is a hub, creating HubDevice instance");
                     let device_inner: Device = device.into();
 
-                    let mut hub_device =
-                        HubDevice::new(device_inner, hub_settings, addr_info.root_port_id).await?;
-                    hub_device.init().await?;
+                    let hub_device = HubDevice::new(
+                        device_inner,
+                        hub_settings,
+                        addr_info.root_port_id,
+                        parent_hub_id,
+                    )
+                    .await?;
                     let mut hub = Hub::new(Box::new(hub_device), Some(route_string));
-                    hub.setup(id);
+                    hub.parent = Some(id);
+                    hub.backend.init().await?;
+
                     let hub_id = self.hubs.alloc(hub);
                     is_have_new_hub = true;
 
@@ -128,7 +138,7 @@ impl BackendOp for Core {
         async {
             self.backend.init().await?;
             let mut root_hub = Hub::new(self.backend.root_hub(), None);
-            root_hub.backend.init()?;
+            root_hub.backend.init().await?;
 
             let id = self.hubs.alloc(root_hub);
             self.root_hub = Some(id);

@@ -9,11 +9,11 @@ use core::{
 };
 
 use futures::{FutureExt, future::BoxFuture, task::AtomicWaker};
-use usb_if::host::USBError;
+use usb_if::host::{USBError, hub::DeviceSpeed};
 
 use crate::{
     backend::{ty::HubOp, xhci::reg::XhciRegisters},
-    hub::PortChangeInfo,
+    hub::{PortChangeInfo, PortState},
 };
 
 pub struct PortChangeWaker {
@@ -47,14 +47,6 @@ impl PortChangeWaker {
         ports[idx].changed.store(true, Ordering::Release);
         ports[idx].change_waker.wake();
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum PortState {
-    #[default]
-    Uninit,
-    Reseted,
-    Probed,
 }
 
 pub struct Port {
@@ -91,26 +83,33 @@ impl HubOp for XhciRootHub {
         self._changed_ports().boxed()
     }
 
-    fn init(&mut self) -> Result<(), USBError> {
-        debug!("Resetting all ports of xHCI Root Hub");
+    fn init(&mut self) -> BoxFuture<'_, Result<(), USBError>> {
+        async {
+            debug!("Resetting all ports of xHCI Root Hub");
 
-        for idx in 0..self.reg.port_register_set.len() {
-            self.reg.port_register_set.update_volatile_at(idx, |reg| {
-                if !reg.portsc.port_power() {
-                    trace!("Powering on port {}", idx + 1);
-                    reg.portsc.set_port_power();
-                }
-            });
+            for idx in 0..self.reg.port_register_set.len() {
+                self.reg.port_register_set.update_volatile_at(idx, |reg| {
+                    if !reg.portsc.port_power() {
+                        trace!("Powering on port {}", idx + 1);
+                        reg.portsc.set_port_power();
+                    }
+                });
+            }
+
+            for idx in 0..self.reg.port_register_set.len() {
+                self.reg.port_register_set.update_volatile_at(idx, |reg| {
+                    reg.portsc.set_0_port_enabled_disabled();
+                    reg.portsc.set_port_reset();
+                });
+            }
+
+            Ok(())
         }
+        .boxed()
+    }
 
-        for idx in 0..self.reg.port_register_set.len() {
-            self.reg.port_register_set.update_volatile_at(idx, |reg| {
-                reg.portsc.set_0_port_enabled_disabled();
-                reg.portsc.set_port_reset();
-            });
-        }
-
-        Ok(())
+    fn slot_id(&self) -> u8 {
+        0
     }
 }
 
@@ -182,7 +181,8 @@ impl XhciRootHub {
             {
                 continue;
             }
-            let speed = port_reg.portsc.port_speed();
+            let speed_raw = port_reg.portsc.port_speed();
+            let speed = DeviceSpeed::from_xhci_portsc(speed_raw);
             debug!("Port {} device connected at speed {:?}", id, speed);
             debug!("Port {} : \r\n {:?}", id, port_reg.portsc);
             self.ports_mut()[i].state = PortState::Probed;
@@ -192,6 +192,9 @@ impl XhciRootHub {
                 root_port_id: id,
                 port_id: id,
                 port_speed: speed,
+                // Root Hub 不需要 TT
+                tt_port_on_hub: None,
+                parent_hub_multi_tt: false,
             });
         }
 

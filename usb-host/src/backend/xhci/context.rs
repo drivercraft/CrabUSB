@@ -92,7 +92,7 @@ impl ContextData {
         }
     }
 
-    pub fn input_perper_modify(&mut self) {
+    pub fn input_clean_change(&mut self) {
         self.with_input(|input| {
             let control_context = input.control_mut();
             for i in 0..32 {
@@ -103,11 +103,6 @@ impl ContextData {
             }
             control_context.set_add_context_flag(0);
         });
-    }
-
-    pub fn update_input(&mut self, f: impl FnOnce(&mut dyn InputHandler)) {
-        self.input_perper_modify();
-        self.with_input(f);
     }
 }
 

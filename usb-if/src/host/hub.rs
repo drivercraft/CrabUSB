@@ -49,8 +49,8 @@ pub enum PortFeature {
     CReset = 20,       // 清除复位完成
 }
 
-const USB_MAXCHILDREN: usize = 31;
-const DEVICE_BITMAP_BYTES: usize = (USB_MAXCHILDREN + 1).div_ceil(8);
+const USB_MAXCHILDREN: usize = 8;
+const DEVICE_BITMAP_BYTES: usize = (USB_MAXCHILDREN + 1 + 7).div_ceil(8);
 
 #[derive(Clone, Copy)]
 #[allow(non_snake_case)]
@@ -68,6 +68,28 @@ pub struct HubDescriptor {
 impl HubDescriptor {
     pub fn hub_characteristics(&self) -> u16 {
         u16::from_le(self.wHubCharacteristics)
+    }
+
+    /// 从字节数组创建 HubDescriptor 引用
+    ///
+    /// 如果数据长度不足或描述符类型不匹配，返回 None
+    pub fn from_bytes(data: &[u8]) -> Option<&Self> {
+        if data.is_empty() {
+            return None;
+        }
+
+        let length = data[0] as usize;
+        if data.len() < length {
+            return None;
+        }
+
+        // 检查描述符类型（0x29 = Hub 描述符）
+        if data.len() < 2 || data[1] != 0x29 {
+            return None;
+        }
+
+        // SAFETY: 已检查数据长度和类型，指针有效且对齐
+        Some(unsafe { &*(data.as_ptr() as *const HubDescriptor) })
     }
 }
 
@@ -240,6 +262,92 @@ impl From<u8> for DeviceSpeed {
     }
 }
 
+impl DeviceSpeed {
+    /// 从 USB 2.0 Hub wPortStatus 解析速度
+    ///
+    /// 根据 USB 2.0 规范（第 11.24.2.7 节）：
+    /// - Bit 9 (0x0200): Low Speed
+    /// - Bit 10 (0x0400): High Speed
+    /// - Bit 11 (0x0800): SuperSpeed (USB 3.0)
+    /// - 默认: Full Speed
+    pub fn from_usb2_hub_status(raw: u16) -> Self {
+        if (raw & 0x0200) != 0 {
+            DeviceSpeed::Low
+        } else if (raw & 0x0400) != 0 {
+            DeviceSpeed::High
+        } else if (raw & 0x0800) != 0 {
+            DeviceSpeed::SuperSpeed
+        } else {
+            DeviceSpeed::Full
+        }
+    }
+
+    /// 从 xHCI PORTSC PortSpeed 字段解析速度
+    ///
+    /// 根据 xHCI 规范（第 4.19.2 节）：
+    /// - 1 = Full Speed
+    /// - 2 = Low Speed
+    /// - 3 = High Speed
+    /// - 4 = SuperSpeed
+    /// - 5 = SuperSpeedPlus
+    pub fn from_xhci_portsc(speed_value: u8) -> Self {
+        match speed_value {
+            1 => DeviceSpeed::Full,
+            2 => DeviceSpeed::Low,
+            3 => DeviceSpeed::High,
+            4 => DeviceSpeed::SuperSpeed,
+            5 => DeviceSpeed::SuperSpeedPlus,
+            _ => DeviceSpeed::Full, // Reserved/Unknown
+        }
+    }
+
+    /// 转换为 xHCI Slot Context 速度值
+    ///
+    /// 根据 xHCI 规范（第 6.2.2 节）Slot Context Speed 字段：
+    /// - 1 = Full Speed
+    /// - 2 = Low Speed
+    /// - 3 = High Speed
+    /// - 4 = Super Speed
+    pub fn to_xhci_slot_value(&self) -> u8 {
+        match self {
+            DeviceSpeed::Low => 2,
+            DeviceSpeed::Full => 1,
+            DeviceSpeed::High => 3,
+            DeviceSpeed::SuperSpeed => 4,
+            DeviceSpeed::SuperSpeedPlus => 5,
+            DeviceSpeed::Wireless => 3,
+        }
+    }
+
+    /// Convert to the raw PORTSC.PortSpeed encoding used by xHCI registers.
+    ///
+    /// Values follow xHCI 4.19.2: 1=FS, 2=LS, 3=HS, 4=SS, 5=SS+.
+    pub fn to_xhci_portsc_value(&self) -> u8 {
+        match self {
+            DeviceSpeed::Full => 1,
+            DeviceSpeed::Low => 2,
+            DeviceSpeed::High => 3,
+            DeviceSpeed::SuperSpeed => 4,
+            DeviceSpeed::SuperSpeedPlus => 5,
+            DeviceSpeed::Wireless => 3,
+        }
+    }
+
+    /// 判断是否需要 Transaction Translator
+    ///
+    /// 根据 xHCI 规范：
+    /// - LS/FS 设备连接在 HS Hub 上需要 TT
+    pub fn requires_tt(&self, hub_speed: Self) -> bool {
+        // 设备是 LS 或 FS，且 Hub 是 HS
+        matches!(self, Self::Low | Self::Full) && matches!(hub_speed, Self::High)
+    }
+
+    /// 判断设备是否为 Low Speed 或 Full Speed
+    pub fn is_low_or_full_speed(&self) -> bool {
+        matches!(self, Self::Low | Self::Full)
+    }
+}
+
 // ============================================================================
 // 辅助函数
 // ============================================================================
@@ -339,15 +447,15 @@ mod tests {
 
         let desc = HubDescriptor::from_bytes(&data).expect("Failed to parse");
 
-        assert_eq!(desc.num_ports, 4);
-        assert_eq!(desc.power_good_time, 50);
-        assert_eq!(desc.hub_current, 100);
+        assert_eq!(desc.bNbrPorts, 4);
+        assert_eq!(desc.bPwrOn2PwrGood, 50);
+        assert_eq!(desc.bHubContrCurrent, 100);
 
-        // 验证特性解析
-        assert!(matches!(
-            desc.characteristics.power_switching,
-            PowerSwitchingMode::Individual
-        ));
+        // 验证特性解析（wHubCharacteristics = 0x0012）
+        // Bits 1:0 = 10b -> Individual power switching
+        // Bit 2 = 0 -> Not a compound device
+        // Bit 3 = 1 -> Individual over-current protection
+        assert_eq!(desc.hub_characteristics(), 0x0012);
     }
 
     #[test]

@@ -55,6 +55,8 @@ struct Inner {
 
     pub descriptor: HubDescriptor,
 
+    pub parent_hub_slot_id: u8,
+
     /// Root Hub 端口 ID（如果这是外部 Hub）
     pub root_port_id: u8,
 }
@@ -66,8 +68,12 @@ pub struct HubSettings {
 }
 
 impl HubOp for HubDevice {
-    fn init(&mut self) -> Result<(), USBError> {
-        Ok(())
+    fn slot_id(&self) -> u8 {
+        self.data.dev.slot_id()
+    }
+
+    fn init(&mut self) -> BoxFuture<'_, Result<(), USBError>> {
+        self.configure().boxed()
     }
 
     fn changed_ports<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<PortChangeInfo>, USBError>> {
@@ -121,6 +127,7 @@ impl HubDevice {
         dev: Device,
         settings: HubSettings,
         root_port_id: u8,
+        parent_hub_slot_id: u8,
     ) -> Result<Self, USBError> {
         Ok(Self {
             settings,
@@ -130,7 +137,7 @@ impl HubDevice {
                 ports: vec![],
                 dev,
                 descriptor: unsafe { core::mem::zeroed() },
-
+                parent_hub_slot_id,
                 root_port_id,
             }),
         })
@@ -140,65 +147,48 @@ impl HubDevice {
         let mut changed_ports = vec![];
 
         // 收集所有端口号，避免借用冲突
-        let port_indices: Vec<u8> = self.data.ports.iter().map(|p| p.index).collect();
 
-        for port_index in port_indices {
-            let (status, change) = self.get_port_status(port_index).await?;
+        for port_idx in 0..self.data.num_ports {
+            let port_id = port_idx + 1;
+            let (status, change) = self.get_port_status(port_id).await?;
+
+            debug!("Port {} status: {:?}", port_id, status);
 
             if change.connection_changed {
+                info!("Port {} connection changed: {}", port_id, status.connected);
+                // 清除连接变化标志
+                self.clear_port_feature(port_id, PortFeature::CConnection)
+                    .await?;
+            }
+
+            if status.connected && self.data.ports[port_idx as usize].state == PortState::Uninit {
                 info!(
                     "Port {} connection changed: connected={}, enabled={}",
-                    port_index, status.connected, status.enabled
+                    port_id, status.connected, status.enabled
                 );
 
-                // 清除连接变化标志
-                self.clear_port_feature(port_index, PortFeature::CConnection)
-                    .await?;
+                // 执行端口验证流程（参考 xHCI Root Hub）
+                let validation_result = self.handle_port_connection(port_id, &status).await?;
 
-                // 如果设备已连接，进行完整验证流程
-                if status.connected {
-                    // 执行端口验证流程（参考 xHCI Root Hub）
-                    let validation_result = self.handle_port_connection(port_index, &status).await;
+                self.data.ports[port_idx as usize].state = PortState::Probed;
 
-                    // 更新端口状态
-                    if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
-                        port.status = status;
-
-                        match validation_result {
-                            Ok(addr_info) => {
-                                changed_ports.push(addr_info);
-                            }
-                            Err(e) => {
-                                warn!("Port {} connection validation failed: {:?}", port_index, e);
-                                // 更新端口状态为 Disconnected
-                                port.state = PortState::Disconnected;
-                            }
-                        }
-                    }
-                } else {
-                    // 设备断开，更新端口状态
-                    if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
-                        port.status = status;
-                        port.state = PortState::Disconnected;
-                        port.connected_device = None;
-                    }
-                }
+                changed_ports.push(validation_result);
             }
 
             if change.enabled_changed {
-                info!("Port {} enabled changed: {}", port_index, status.enabled);
-                self.clear_port_feature(port_index, PortFeature::CEnable)
+                info!("Port {} enabled changed: {}", port_id, status.enabled);
+                self.clear_port_feature(port_id, PortFeature::CEnable)
                     .await?;
-                if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
+                if let Some(port) = self.data.ports.iter_mut().find(|p| p.id == port_id) {
                     port.status = status;
                 }
             }
 
             if change.reset_complete {
-                debug!("Port {} reset complete", port_index);
-                self.clear_port_feature(port_index, PortFeature::CReset)
+                debug!("Port {} reset complete", port_id);
+                self.clear_port_feature(port_id, PortFeature::CReset)
                     .await?;
-                if let Some(port) = self.data.ports.iter_mut().find(|p| p.index == port_index) {
+                if let Some(port) = self.data.ports.iter_mut().find(|p| p.id == port_id) {
                     port.status = status;
                 }
             }
@@ -211,30 +201,100 @@ impl HubDevice {
         self.data.dev.descriptor().protocol == 3
     }
 
-    pub async fn init(&mut self) -> Result<(), USBError> {
+    pub async fn configure(&mut self) -> Result<(), USBError> {
         // 第二阶段：获取 Hub 描述符（带重试）
+        debug!("Configuring hub device...");
         let descriptor = self.get_hub_descriptor().await?;
+
         self.data.descriptor = descriptor;
+
         if self.hub_descriptor().bNbrPorts == 0 {
             return Err(USBError::from("Hub has zero ports"));
         }
         self.data.num_ports = self.hub_descriptor().bNbrPorts;
 
+        // 解析 Hub 特性和配置参数（参考 U-Boot usb_hub_configure）
+        let characteristics = self.data.descriptor.hub_characteristics();
+
+        // 解析 TT 思考时间（Bits[6:5]，参考 USB 2.0 规范）
+        let ttt_bits = (characteristics >> 5) & 0x03;
+        let tt_think_time_ns = match ttt_bits {
+            0 => 0,       // No TT
+            1 => 666,     // 8 FS bit times
+            2 => 666 * 2, // 16 FS bit times
+            3 => 666 * 3, // 24 FS bit times
+            _ => unreachable!(),
+        };
+
+        // 判断 Multi-TT（参考 U-Boot）
+        // protocol = 0: Full Speed Hub (no TT)
+        // protocol = 1: High Speed Single TT
+        // protocol = 2: High Speed Multi TT
+        // protocol = 3: SuperSpeed Hub (no TT)
+        let device_protocol = self.data.dev.descriptor().protocol;
+        let multi_tt = device_protocol == 2;
+
+        debug!(
+            "Hub parameters: ports={}, protocol={}, multi_tt={}, tt_think_time={}ns",
+            self.data.num_ports, device_protocol, multi_tt, tt_think_time_ns
+        );
+
+        let status = self.get_hub_status().await?;
+
+        debug!(
+            "local power source: {}",
+            if status.local_power_source() {
+                "lost (inactive)"
+            } else {
+                "good"
+            }
+        );
+
+        debug!(
+            "over current condition exists: {}",
+            if status.over_current() { "" } else { "no " }
+        );
+
+        // 将 Hub 协议值转换为 DeviceSpeed
+        // protocol = 0: Full Speed Hub
+        // protocol = 1/2: High Speed Hub
+        // protocol = 3: SuperSpeed Hub
+        let hub_speed = match device_protocol {
+            1 | 2 => DeviceSpeed::High,
+            3 => DeviceSpeed::SuperSpeed,
+            _ => DeviceSpeed::Full,
+        };
+
+        // 构造 HubParams
+        let params = crate::backend::ty::HubParams {
+            num_ports: self.data.num_ports,
+            multi_tt,
+            tt_think_time_ns: tt_think_time_ns as u16,
+            parent_hub_slot_id: self.data.parent_hub_slot_id, // TODO: 从 RouteString 提取
+            root_hub_port_number: self.data.root_port_id,
+            port_speed: hub_speed,
+        };
+
+        // 更新 xHCI Slot Context（如果后端支持）
+        self.data.dev.update_hub(params).await?;
+
         // 第三阶段：初始化端口状态（参考 Linux hub_activate）
         // 初始化所有端口为 Disconnected 状态
         self.data.ports = (1..=self.data.num_ports).map(Port::new).collect();
 
-        self.data
-            .dev
-            .set_configuration(self.settings.config_value)
-            .await?;
+        self.hub_power_on().await?;
 
-        debug!("Set configuration to {}", self.settings.config_value);
+        // self.data
+        //     .dev
+        //     .set_configuration(self.settings.config_value)
+        //     .await?;
 
-        self.data
-            .dev
-            .claim_interface(self.settings.interface_number, self.settings.alt_setting)
-            .await?;
+        // debug!("Set configuration to {}", self.settings.config_value);
+
+        // self.data
+        //     .dev
+        //     .claim_interface(self.settings.interface_number, self.settings.alt_setting)
+        //     .await?;
 
         // 标记 Hub 为运行状态
         self.data.state = HubState::Running;
@@ -247,76 +307,83 @@ impl HubDevice {
     }
 
     /// 获取 Hub 描述符（参考 Linux 内核实现）
-    ///
-    /// Linux 内核位置: drivers/usb/core/hub.c:get_hub_descriptor()
-    ///
-    /// 重试策略:
-    /// - 最多重试 3 次
-    /// - 使用小缓冲区（USB 2.0 Hub 描述符可变长）
-    /// - QEMU 等模拟环境可能不支持，使用默认值
     async fn get_hub_descriptor(&mut self) -> Result<HubDescriptor, USBError> {
+        let mut buff = vec![0u8; 4]; // Hub 描述符最小长度
+        self.read_hub_descriptor_raw(&mut buff).await?;
+        let desc_len = buff[0] as usize;
+        trace!("Hub descriptor length from initial read: {}", desc_len);
+
+        let mut full_buff = vec![0u8; desc_len];
+
+        self.read_hub_descriptor_raw(&mut full_buff).await?;
+
+        let desc = unsafe { (full_buff.as_ptr() as *const HubDescriptor).read_unaligned() };
+        Ok(desc)
+    }
+
+    async fn read_hub_descriptor_raw(&mut self, buff: &mut [u8]) -> Result<(), USBError> {
         const DT_SS_HUB: u16 = 0x0a;
         const DT_HUB: u16 = 0x9;
+        const TYPE_CLASS: u16 = 1 << 5;
 
-        let dtype;
-        let size;
-
-        if self.is_superspeed() {
-            dtype = DT_SS_HUB;
-            size = 12;
+        let dtype = if self.is_superspeed() {
+            DT_SS_HUB
         } else {
-            dtype = DT_HUB;
-            size = size_of::<HubDescriptor>();
+            DT_HUB
+        } | TYPE_CLASS;
+
+        let n = self
+            .data
+            .dev
+            .ep_ctrl()
+            .control_in(
+                ControlSetup {
+                    request_type: RequestType::Class,
+                    recipient: Recipient::Device,
+                    request: Request::GetDescriptor,
+                    value: dtype << 8,
+                    index: 0,
+                },
+                buff,
+            )
+            .await?;
+        trace!("Hub raw descriptor read {n} bytes");
+
+        Ok(())
+    }
+
+    async fn hub_power_on(&mut self) -> Result<(), USBError> {
+        for port_id in 1..=self.data.num_ports {
+            self.set_port_feature(port_id, PortFeature::Power).await?;
+            debug!("Powered on port {}", port_id);
         }
 
-        let mut buff = vec![0u8; size];
+        crate::osal::kernel::delay(Duration::from_millis(100));
+        Ok(())
+    }
 
-        const MAX_RETRIES: u8 = 3;
+    async fn get_hub_status(&mut self) -> Result<HubStatus, USBError> {
+        let mut buffer = vec![0u8; size_of::<HubStatus>()];
 
-        // 参考 Linux 的重试机制
-        for attempt in 1..=MAX_RETRIES {
-            let result = self
-                .data
-                .dev
-                .ep_ctrl()
-                .control_in(
-                    ControlSetup {
-                        request_type: RequestType::Class,
-                        recipient: Recipient::Device,
-                        request: Request::GetDescriptor,
-                        value: dtype << 8,
-                        index: 0,
-                    },
-                    &mut buff,
-                )
-                .await;
+        self.data
+            .dev
+            .ep_ctrl()
+            .control_in(
+                ControlSetup {
+                    request_type: RequestType::Class,
+                    recipient: Recipient::Device,
+                    request: Request::GetStatus,
+                    value: 0,
+                    index: 0,
+                },
+                &mut buffer,
+            )
+            .await?;
 
-            let desc = unsafe { *(buff.as_ptr() as *const HubDescriptor) };
-
-            match result {
-                Ok(act_size) => {
-                    if self.is_superspeed() {
-                        if act_size == 12 {
-                            return Ok(desc);
-                        }
-                    } else if act_size >= 9 {
-                        let size = 7 + desc.bNbrPorts / 8 + 1;
-                        if (act_size as u8) < size {
-                            return Err(USBError::from("Hub descriptor size error"));
-                        }
-                        return Ok(desc);
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to get hub descriptor on attempt {}: {:?}",
-                        attempt, e
-                    );
-                }
-            }
-        }
-
-        Err(USBError::from("Hub get descriptor failed"))
+        let status = u16::from_le_bytes([buffer[0], buffer[1]]);
+        let change = u16::from_le_bytes([buffer[2], buffer[3]]);
+        trace!("Hub raw status: 0x{:04x}, change: 0x{:04x}", status, change);
+        Ok(HubStatus { status, change })
     }
 
     // ========== 端口状态获取方法 ==========
@@ -326,7 +393,7 @@ impl HubDevice {
     /// 返回: (端口状态, 状态变化标志)
     async fn get_port_status(
         &mut self,
-        port_index: u8,
+        port_id: u8,
     ) -> Result<(PortStatus, PortStatusChange), USBError> {
         let mut buffer = vec![0u8; 4]; // wPortStatus (2字节) + wPortChange (2字节)
 
@@ -339,7 +406,7 @@ impl HubDevice {
                     recipient: Recipient::Other, // Port
                     request: Request::GetStatus,
                     value: 0,
-                    index: port_index as u16,
+                    index: port_id as u16,
                 },
                 &mut buffer,
             )
@@ -348,6 +415,11 @@ impl HubDevice {
         // 解析端口状态和变化
         let status_raw = u16::from_le_bytes([buffer[0], buffer[1]]);
         let change_raw = u16::from_le_bytes([buffer[2], buffer[3]]);
+
+        trace!(
+            "Port {} raw status: 0x{:04x}, change: 0x{:04x}",
+            port_id, status_raw, change_raw
+        );
 
         Ok((
             self.parse_port_status(status_raw),
@@ -366,15 +438,7 @@ impl HubDevice {
             powered: (raw & 0x0100) != 0,
             low_speed: (raw & 0x0200) != 0,
             high_speed: (raw & 0x0400) != 0,
-            speed: if (raw & 0x0200) != 0 {
-                DeviceSpeed::Low
-            } else if (raw & 0x0400) != 0 {
-                DeviceSpeed::High
-            } else if (raw & 0x0800) != 0 {
-                DeviceSpeed::SuperSpeed
-            } else {
-                DeviceSpeed::Full
-            },
+            speed: DeviceSpeed::from_usb2_hub_status(raw),
             change: PortStatusChange {
                 connection_changed: false,
                 enabled_changed: false,
@@ -423,7 +487,7 @@ impl HubDevice {
     /// 清除端口特性
     async fn clear_port_feature(
         &mut self,
-        port_index: u8,
+        port_id: u8,
         feature: PortFeature,
     ) -> Result<(), USBError> {
         self.data
@@ -435,7 +499,7 @@ impl HubDevice {
                     recipient: Recipient::Other,
                     request: Request::ClearFeature,
                     value: feature as u16,
-                    index: port_index as u16,
+                    index: port_id as u16,
                 },
                 &[],
             )
@@ -519,12 +583,11 @@ impl HubDevice {
     /// # 参数
     /// - `port_index`: 端口号（1-based）
     /// - `status`: 当前端口状态
-    async fn reset_port(&mut self, port_index: u8, status: &PortStatus) -> Result<(), USBError> {
-        info!("Resetting port {}", port_index);
+    async fn reset_port(&mut self, port_id: u8, status: &PortStatus) -> Result<(), USBError> {
+        info!("Resetting port {}", port_id);
 
         // 发送复位请求
-        self.set_port_feature(port_index, PortFeature::Reset)
-            .await?;
+        self.set_port_feature(port_id, PortFeature::Reset).await?;
 
         // 确定复位时间（低速设备需要长复位）
         let reset_time = if status.low_speed {
@@ -538,20 +601,20 @@ impl HubDevice {
 
         // 等待复位完成标志（最多等待 100ms）
         for _retry in 0..10 {
-            let (_status, change) = self.get_port_status(port_index).await?;
+            let (_status, change) = self.get_port_status(port_id).await?;
 
             if change.reset_complete {
                 // 清除复位完成标志
-                self.clear_port_feature(port_index, PortFeature::CReset)
+                self.clear_port_feature(port_id, PortFeature::CReset)
                     .await?;
-                info!("Port {} reset complete", port_index);
+                info!("Port {} reset complete", port_id);
                 return Ok(());
             }
 
             crate::osal::kernel::delay(Duration::from_millis(10));
         }
 
-        warn!("Port {} reset timeout", port_index);
+        warn!("Port {} reset timeout", port_id);
         Err(USBError::Timeout)
     }
 
@@ -563,55 +626,84 @@ impl HubDevice {
     /// 3. 等待启用 - 等待端口启用并验证速度
     async fn handle_port_connection(
         &mut self,
-        port_index: u8,
+        port_id: u8,
         initial_status: &PortStatus,
     ) -> Result<PortChangeInfo, USBError> {
         info!(
             "Handling connection on port {}, speed: {:?}",
-            port_index, initial_status.speed
+            port_id, initial_status.speed
         );
 
         // 阶段 1: 防抖动检测（确保连接稳定）
-        let stable_status = self.debounce_port(port_index, true).await?;
+        let stable_status = self.debounce_port(port_id, true).await?;
         if !stable_status.connected {
             return Err(USBError::from("Connection unstable"));
         }
 
         // 阶段 2: 端口复位
-        self.reset_port(port_index, &stable_status).await?;
+        self.reset_port(port_id, &stable_status).await?;
 
         // 阶段 3: 等待端口启用（最多等待 500ms）
-        let enabled_status = self.wait_for_port_enabled(port_index).await?;
+        let enabled_status = self.wait_for_port_enabled(port_id).await?;
 
         // 阶段 4: 验证并生成 DeviceAddressInfo
-        let port_speed = self.decode_port_speed(&enabled_status);
+        let port_speed = enabled_status.speed;
 
         info!(
             "Port {} device ready: speed={:?}, enabled={}",
-            port_index, port_speed, enabled_status.enabled
+            port_id, port_speed, enabled_status.enabled
         );
 
-        let port_id = port_index;
+        // ✅ 修复：更新 tt_required 字段
+        // 根据 xHCI 规范，LS/FS 设备连接在 HS Hub 时需要 TT
+        let hub_speed = match self.data.dev.descriptor().protocol {
+            // Hub 协议值：0=FS Hub, 1/2=HS Hub, 3=SS Hub
+            1 | 2 => DeviceSpeed::High,   // HS Hub
+            3 => DeviceSpeed::SuperSpeed, // SS Hub
+            _ => DeviceSpeed::Full,       // FS Hub
+        };
+
+        let port = &mut self.data.ports[port_id as usize - 1];
+
+        // TT 需求判断：使用 DeviceSpeed::requires_tt 方法
+        port.tt_required = port_speed.requires_tt(hub_speed);
+
+        debug!(
+            "TT required: port_speed={:?}, hub_speed={:?}, tt_required={}",
+            port_speed, hub_speed, port.tt_required
+        );
+
+        let tt_port_on_hub = if port.tt_required {
+            Some(port_id)
+        } else {
+            None
+        };
+
+        // 从 Device Protocol 获取 Multi-TT 信息（参考 U-Boot）
+        // Device Protocol：0=FS Hub (no TT), 1=HS Single-TT, 2=HS Multi-TT, 3=SS Hub
+        let device_protocol = self.data.dev.descriptor().protocol;
+        let parent_hub_multi_tt = device_protocol == 2;
 
         Ok(PortChangeInfo {
-            // route_string,
             root_port_id: self.root_port_id(),
             port_id,
             port_speed,
+            tt_port_on_hub,
+            parent_hub_multi_tt,
         })
     }
 
     /// 等待端口启用（参照 xHCI Root Hub 的 handle_reseted）
-    async fn wait_for_port_enabled(&mut self, port_index: u8) -> Result<PortStatus, USBError> {
+    async fn wait_for_port_enabled(&mut self, port_id: u8) -> Result<PortStatus, USBError> {
         const MAX_WAIT_MS: u64 = 500;
         const CHECK_INTERVAL_MS: u64 = 10;
         let max_attempts = MAX_WAIT_MS / CHECK_INTERVAL_MS;
 
         for attempt in 0..max_attempts {
-            let (status, _change) = self.get_port_status(port_index).await?;
+            let (status, _change) = self.get_port_status(port_id).await?;
 
             if status.enabled && status.connected {
-                info!("Port {} enabled after {} checks", port_index, attempt + 1);
+                info!("Port {} enabled after {} checks", port_id, attempt + 1);
                 return Ok(status);
             }
 
@@ -622,27 +714,8 @@ impl HubDevice {
             crate::osal::kernel::delay(Duration::from_millis(CHECK_INTERVAL_MS));
         }
 
-        warn!("Port {} enable timeout after {}ms", port_index, MAX_WAIT_MS);
+        warn!("Port {} enable timeout after {}ms", port_id, MAX_WAIT_MS);
         Err(USBError::Timeout)
-    }
-
-    /// 解码端口速度（参照 USB 2.0 规范）
-    fn decode_port_speed(&self, status: &PortStatus) -> u8 {
-        // USB 2.0 定义：
-        // - Low Speed: 0
-        // - Full Speed: 1
-        // - High Speed: 2
-        // USB 3.0+ 扩展：
-        // - SuperSpeed: 4
-        // - SuperSpeedPlus: 5
-        match status.speed {
-            DeviceSpeed::Low => 0,
-            DeviceSpeed::Full => 1,
-            DeviceSpeed::High => 2,
-            DeviceSpeed::SuperSpeed => 4,
-            DeviceSpeed::SuperSpeedPlus => 5,
-            DeviceSpeed::Wireless => 3,
-        }
     }
 
     /// 获取 Hub 的 root_port_id
@@ -664,7 +737,7 @@ pub enum HubState {
 /// 端口
 pub struct Port {
     /// 端口号（1-based）
-    pub index: u8,
+    pub id: u8,
 
     /// 端口状态
     pub status: PortStatus,
@@ -683,7 +756,7 @@ impl Port {
     /// 创建新端口
     pub fn new(index: u8) -> Self {
         Self {
-            index,
+            id: index,
             status: PortStatus {
                 connected: false,
                 enabled: false,
@@ -702,16 +775,36 @@ impl Port {
                     over_current_changed: false,
                 },
             },
-            state: PortState::Disconnected,
+            state: PortState::Uninit,
             connected_device: None,
             tt_required: false,
         }
     }
 }
 
-/// 端口状态机
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PortState {
-    /// 未连接
-    Disconnected,
+    #[default]
+    Uninit,
+    Reseted,
+    Probed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+struct HubStatus {
+    status: u16,
+    change: u16,
+}
+
+impl HubStatus {
+    #[allow(dead_code)]
+    fn local_power_source(&self) -> bool {
+        (self.status & 0x0001) != 0
+    }
+
+    #[allow(dead_code)]
+    fn over_current(&self) -> bool {
+        (self.status & 0x0002) != 0
+    }
 }

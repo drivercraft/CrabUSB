@@ -297,6 +297,18 @@ impl DeviceOp for Device {
         let ep = EndpointImpl::new(self.handle.clone(), desc.address);
         Ok(EndpointBase::new(ep))
     }
+
+    fn update_hub(
+        &mut self,
+        _params: crate::backend::ty::HubParams,
+    ) -> futures::future::BoxFuture<'_, std::result::Result<(), USBError>> {
+        // libusb 运行在用户空间，由内核 USB 驱动处理 Hub 参数
+        async fn update_hub_inner() -> std::result::Result<(), USBError> {
+            debug!("libusb backend: Hub parameters managed by kernel");
+            Ok(())
+        }
+        update_hub_inner().boxed()
+    }
 }
 
 fn libusb_device_desc_to_desc(
