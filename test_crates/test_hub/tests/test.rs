@@ -23,7 +23,7 @@ mod tests {
         sync::atomic::{AtomicBool, Ordering},
         time::Duration,
     };
-    use crab_usb::*;
+    use crab_usb::{usb_if::descriptor::ConfigurationDescriptor, *};
     use ktest_helper::*;
 
     use log::info;
