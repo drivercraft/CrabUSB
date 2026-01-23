@@ -46,7 +46,7 @@ impl Transfer {
                 NonNull::new(buffer_addr as *mut u8).unwrap(),
                 len,
                 ALIGN,
-                dma_api::Direction::Bidirectional,
+                dma_api::Direction::FromDevice,
             )
             .expect("DMA mapping failed")
         });

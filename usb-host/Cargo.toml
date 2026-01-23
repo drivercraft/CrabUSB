@@ -21,7 +21,8 @@ crossbeam-skiplist = {version = "0.1", features = [
   "alloc",
 ], default-features = false}
 # dma-api = {version = "0.5", features = ["alloc"]}
-dma-api = {version = "0.6", features = ["alloc"]}
+# dma-api = {version = "0.6", features = ["alloc"]}
+dma-api = { path = "/home/zhourui/sparreal/sparreal-dev/crates/dma-api", features = ["alloc"] }
 
 anyhow = {version = "1", default-features = false}
 enum_dispatch = "0.3"

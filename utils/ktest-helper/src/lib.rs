@@ -83,18 +83,16 @@ impl DmaOp for KernelImpl {
 
     unsafe fn alloc_coherent(&self, dma_mask: u64, layout: Layout) -> Option<DmaHandle> {
         let ptr = unsafe { alloc_with_mask(layout, dma_mask) };
-        if ptr.is_null() {
-            None
-        } else {
-            let virt = NonNull::new(ptr).unwrap();
+        let ptr = NonNull::new(ptr)?;
+        let virt = VirtAddr::from(ptr);
+        let phys = PhysAddr::from(virt).raw() as u64;
 
-            Some(crab_usb::DmaHandle {
-                origin_virt: virt,
-                dma_addr: PhysAddr::from(VirtAddr::from(NonNull::new(ptr).unwrap())).raw() as _,
-                layout,
-                alloc_virt: Some(virt),
-            })
-        }
+        Some(crab_usb::DmaHandle {
+            origin_virt: ptr,
+            dma_addr: phys,
+            layout,
+            alloc_virt: Some(ptr),
+        })
     }
 
     unsafe fn dealloc_coherent(&self, handle: DmaHandle) {
