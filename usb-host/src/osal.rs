@@ -2,7 +2,7 @@ use core::ops::Deref;
 use core::time::Duration;
 
 use dma_api::DeviceDma;
-pub use dma_api::{Direction, DmaAddr, DmaError, DmaHandle, DmaOp};
+pub use dma_api::{Direction as DmaDirection, DmaAddr, DmaError, DmaHandle, DmaOp};
 
 // use trait_ffi::def_extern_trait;
 

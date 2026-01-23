@@ -23,14 +23,15 @@ impl DmaOp for KernelImpl {
         dma_mask: u64,
         origin_virt: NonNull<u8>,
         size: NonZeroUsize,
-        _direction: crate::Direction,
+        align: usize,
+        _direction: crate::DmaDirection,
     ) -> Result<DmaHandle, DmaError> {
         let size = size.get();
         let orig_phys = PhysAddr::from(VirtAddr::from(origin_virt)).raw() as u64;
 
-        let layout = Layout::from_size_align(size, self.page_size()).unwrap();
+        let layout = Layout::from_size_align(size, align).unwrap();
 
-        if orig_phys + size as u64 > dma_mask {
+        if orig_phys + size as u64 > dma_mask || !orig_phys.is_multiple_of(align as u64) {
             // 需要重新分配内存
             let ptr = unsafe { alloc_with_mask(layout, dma_mask) };
             if ptr.is_null() {
@@ -49,14 +50,9 @@ impl DmaOp for KernelImpl {
                 size
             );
 
-            unsafe{
-                core::ptr::copy_nonoverlapping(
-                    origin_virt.as_ptr(),
-                    new_virt.as_ptr(),
-                    size,
-                );
+            unsafe {
+                core::ptr::copy_nonoverlapping(origin_virt.as_ptr(), new_virt.as_ptr(), size);
             }
-
 
             Ok(DmaHandle {
                 dma_addr: new_phys,
@@ -79,10 +75,7 @@ impl DmaOp for KernelImpl {
         if let Some(virt) = handle.alloc_virt {
             // 重新分配过，需要释放新分配的内存
             unsafe {
-                alloc::alloc::dealloc(
-                    virt.as_ptr(),
-                    Layout::from_size_align(handle.size(), self.page_size()).unwrap(),
-                );
+                alloc::alloc::dealloc(virt.as_ptr(), handle.layout);
             }
         }
         // 没有重新分配，原始 buffer 由调用者管理，不需要释放

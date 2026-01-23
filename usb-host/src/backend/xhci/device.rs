@@ -296,24 +296,17 @@ impl Device {
     }
 
     async fn get_device_descriptor_base(&mut self) -> Result<DeviceDescriptorBase> {
-        let mut data = alloc::vec![0u8; 8];
+        let data = self
+            .kernel
+            .new_array(8, 8, crate::DmaDirection::FromDevice)
+            .unwrap();
 
+        // DMA 传输
         self.ep_ctrl()
-            .get_descriptor(
-                DescriptorType::DEVICE,
-                0,
-                // LanguageId::default().into(),
-                0,
-                &mut data,
-            )
+            .get_descriptor(DescriptorType::DEVICE, 0, 0, unsafe {
+                core::slice::from_raw_parts_mut(data.as_ptr(), data.len())
+            })
             .await?;
-        // let mut data = self
-        //     .kernel
-        //     .new_array::<u8>(8, 1, dma_api::Direction::FromDevice)
-        //     .unwrap();
-        // self.ep_ctrl()
-        //     .get_descriptor(DescriptorType::DEVICE, 0, 0, unsafe { data.as_mut_slice() })
-        //     .await?;
 
         let desc = unsafe { *(data.as_ptr() as *const DeviceDescriptorBase) };
 

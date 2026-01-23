@@ -30,6 +30,8 @@ pub struct Transfer {
     pub transfer_len: usize,
 }
 
+const ALIGN: usize = 64;
+
 impl Transfer {
     pub(crate) fn new_in(dma: &Kernel, kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {
         let buffer_addr = buff.as_ptr() as usize;
@@ -43,6 +45,7 @@ impl Transfer {
             dma.map_single(
                 NonNull::new(buffer_addr as *mut u8).unwrap(),
                 len,
+                ALIGN,
                 dma_api::Direction::Bidirectional,
             )
             .expect("DMA mapping failed")
@@ -70,6 +73,7 @@ impl Transfer {
                     .map_single(
                         NonNull::new(buffer_addr as *mut u8).unwrap(),
                         len,
+                        ALIGN,
                         dma_api::Direction::ToDevice,
                     )
                     .expect("DMA mapping failed"),

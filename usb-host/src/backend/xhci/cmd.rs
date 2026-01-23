@@ -20,7 +20,7 @@ pub struct CommandRing(Arc<Mutex<Inner>>);
 
 impl CommandRing {
     pub fn new(
-        direction: crate::osal::Direction,
+        direction: crate::osal::DmaDirection,
         dma: &Kernel,
         reg: Arc<RwLock<XhciRegisters>>,
     ) -> crate::err::Result<Self> {
