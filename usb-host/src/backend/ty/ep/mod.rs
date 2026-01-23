@@ -7,7 +7,7 @@ use core::{
 };
 use dma_api::DeviceDma;
 
-use crate::KernelOp;
+use crate::{Kernel, KernelOp};
 
 use super::transfer::Transfer;
 use usb_if::err::TransferError;
@@ -84,8 +84,8 @@ impl EndpointBase {
         }
     }
 
-    pub fn dma(&self) -> &DeviceDma {
-        self.raw.dma()
+    pub fn kernel(&self) -> &Kernel {
+        self.raw.kernel()
     }
 
     pub fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle<'_>, TransferError> {
@@ -112,7 +112,7 @@ pub trait EndpointOp: Send + Any + 'static {
 
     fn register_cx(&self, id: u64, cx: &mut Context<'_>);
 
-    fn dma(&self) -> &DeviceDma;
+    fn kernel(&self) -> &Kernel;
 }
 
 pub struct TransferHandle<'a> {

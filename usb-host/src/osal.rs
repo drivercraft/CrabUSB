@@ -1,5 +1,7 @@
 use core::time::Duration;
+use core::ops::Deref;
 
+use dma_api::DeviceDma;
 pub use dma_api::{Direction, DmaAddr, DmaError, DmaHandle, MapHandle, Osal};
 
 // use trait_ffi::def_extern_trait;
@@ -9,6 +11,33 @@ pub use dma_api::{Direction, DmaAddr, DmaError, DmaHandle, MapHandle, Osal};
 //     fn page_size() -> usize;
 //     fn delay(duration: Duration);
 // }
+
+#[derive(Clone)]
+pub(crate) struct Kernel {
+    dma: DeviceDma,
+    osal: &'static dyn KernelOp,
+}
+
+impl Kernel {
+    pub fn new(dma_mask: u64, osal: &'static dyn KernelOp) -> Self {
+        Self {
+            dma: DeviceDma::new(dma_mask, osal),
+            osal,
+        }
+    }
+
+    pub fn delay(&self, duration: Duration) {
+        self.osal.delay(duration)
+    }
+}
+
+impl Deref for Kernel {
+    type Target = DeviceDma;
+
+    fn deref(&self) -> &Self::Target {
+        &self.dma
+    }
+}
 
 pub trait KernelOp: Osal {
     fn delay(&self, duration: Duration);

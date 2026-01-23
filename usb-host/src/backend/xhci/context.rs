@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use dma_api::{DArray, DBox, DeviceDma};
 use xhci::context::{Device32Byte, Device64Byte, Input32Byte, Input64Byte, InputHandler};
 
-use crate::{backend::xhci::SlotId, err::*};
+use crate::{Kernel, backend::xhci::SlotId, err::*};
 
 pub struct DeviceContextList {
     pub dcbaa: DArray<u64>,
@@ -28,7 +28,7 @@ pub(crate) enum ContextData {
 }
 
 impl ContextData {
-    pub fn new(is_64: bool, dma: &DeviceDma) -> core::result::Result<Self, HostError> {
+    pub fn new(is_64: bool, dma: &Kernel) -> core::result::Result<Self, HostError> {
         if is_64 {
             Ok(ContextData::Context64(Context64 {
                 // out: DBox::zero_with_align(dma_mask as _, dma_api::Direction::FromDevice, 64)?,
@@ -111,7 +111,7 @@ impl ContextData {
 }
 
 impl DeviceContextList {
-    pub fn new(max_slots: usize, dma: &DeviceDma) -> Result<Self> {
+    pub fn new(max_slots: usize, dma: &Kernel) -> Result<Self> {
         // let dcbaa = DVec::zeros(dma_mask as _, 256, 0x1000, dma_api::Direction::ToDevice)
         //     .map_err(|_| USBError::NoMemory)?;
         let dcbaa = dma
@@ -120,12 +120,7 @@ impl DeviceContextList {
         Ok(Self { dcbaa, max_slots })
     }
 
-    pub fn new_ctx(
-        &mut self,
-        slot_id: SlotId,
-        is_64: bool,
-        dma: &DeviceDma,
-    ) -> Result<ContextData> {
+    pub fn new_ctx(&mut self, slot_id: SlotId, is_64: bool, dma: &Kernel) -> Result<ContextData> {
         if slot_id.as_usize() > self.max_slots {
             Err(USBError::SlotLimitReached)?;
         }
@@ -141,7 +136,7 @@ pub struct ScratchpadBufferArray {
 }
 
 impl ScratchpadBufferArray {
-    pub fn new(entries: usize, dma: &DeviceDma) -> Result<Self> {
+    pub fn new(entries: usize, dma: &Kernel) -> Result<Self> {
         // let mut entries_vec = DVec::zeros(
         //     dma_mask as _,
         //     entries,

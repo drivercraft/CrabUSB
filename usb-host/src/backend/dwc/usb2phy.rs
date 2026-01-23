@@ -8,7 +8,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 
 use crate::{
-    Mmio,
+    Kernel, Mmio,
     backend::dwc::{
         CruOp,
         consts::genmask,
@@ -104,6 +104,7 @@ pub struct Usb2Phy {
     cru: Arc<dyn CruOp>,
     /// 复位信号映射表
     rsts: BTreeMap<String, u64>,
+    kernel: Kernel,
 }
 
 impl Usb2Phy {
@@ -114,7 +115,7 @@ impl Usb2Phy {
     /// * `base` - PHY 寄存器基址
     /// * `cru` - CRU 接口
     /// * `param` - 初始化参数
-    pub fn new(cru: Arc<dyn CruOp>, param: Usb2PhyParam<'_>) -> Self {
+    pub fn new(cru: Arc<dyn CruOp>, param: Usb2PhyParam<'_>, kernel: Kernel) -> Self {
         // 根据 ID 选择对应的配置
         let cfg = find_usb2phy_cfg(param.reg);
         // 构建复位映射表
@@ -129,6 +130,7 @@ impl Usb2Phy {
             cru,
             rsts,
             port_kind: param.port_kind,
+            kernel,
         }
     }
 
@@ -172,7 +174,7 @@ impl Usb2Phy {
 
         // Step 3: 等待 UTMI 时钟稳定（U-Boot 中等待 2ms）
         info!("USB2PHY: Waiting for UTMI clock to stabilize",);
-        crate::osal::kernel::delay(core::time::Duration::from_micros(2000));
+        self.kernel.delay(core::time::Duration::from_micros(2000));
     }
 
     fn property_enable(&self, reg: &Usb2PhyGrfReg, en: bool) {
@@ -189,11 +191,11 @@ impl Usb2Phy {
         // Assert reset
         if let Some(&rst_id) = self.rsts.get("phy") {
             self.cru.reset_assert(rst_id);
-            crate::osal::kernel::delay(core::time::Duration::from_micros(20));
+            self.kernel.delay(core::time::Duration::from_micros(20));
 
             // Deassert reset
             self.cru.reset_deassert(rst_id);
-            crate::osal::kernel::delay(core::time::Duration::from_micros(100));
+            self.kernel.delay(core::time::Duration::from_micros(100));
         }
     }
 

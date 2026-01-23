@@ -7,6 +7,7 @@ use futures::future::{BoxFuture, LocalBoxFuture};
 use usb_if::host::{USBError, hub::DeviceSpeed};
 
 use crate::{
+    Kernel,
     backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp, HubOp},
     hub::RouteString,
 };
@@ -63,7 +64,7 @@ pub(crate) trait CoreOp: Send + 'static {
 
     fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
 
-    fn kernel(&self) -> &'static dyn crate::osal::KernelOp;
+    fn kernel(&self) -> &Kernel;
 }
 
 pub struct DeviceAddressInfo {

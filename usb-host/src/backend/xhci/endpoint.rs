@@ -17,7 +17,7 @@ use xhci::{
 };
 
 use crate::{
-    BusAddr,
+    BusAddr, Kernel,
     backend::{
         Dci,
         ty::{
@@ -34,22 +34,22 @@ pub struct Endpoint {
     pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
     transfers: BTreeMap<TransferId, Transfer>,
-    dma: DeviceDma,
+    kernel: Kernel,
 }
 
 unsafe impl Send for Endpoint {}
 unsafe impl Sync for Endpoint {}
 
 impl Endpoint {
-    pub fn new(dci: Dci, dma: &DeviceDma, bell: Arc<Mutex<SlotBell>>) -> crate::err::Result<Self> {
-        let ring = SendRing::new(dma_api::Direction::Bidirectional, dma)?;
+    pub fn new(dci: Dci, kernel: &Kernel, bell: Arc<Mutex<SlotBell>>) -> crate::err::Result<Self> {
+        let ring = SendRing::new(dma_api::Direction::Bidirectional, kernel)?;
 
         Ok(Self {
             dci,
             ring,
             bell,
             transfers: BTreeMap::new(),
-            dma: dma.clone(),
+            kernel: kernel.clone(),
         })
     }
 
@@ -196,11 +196,11 @@ impl EndpointOp for Endpoint {
 
             // 检查缓冲区起始地址是否在 dma_mask 范围内
             assert!(
-                data_bus_addr <= self.dma.dma_mask(),
+                data_bus_addr <= self.kernel.dma_mask(),
                 "DMA address 0x{:x} exceeds controller DMA mask 0x{:x} ({}-bit addressing)",
                 data_bus_addr,
-                self.dma.dma_mask(),
-                if self.dma.dma_mask() == u32::MAX as u64 {
+                self.kernel.dma_mask(),
+                if self.kernel.dma_mask() == u32::MAX as u64 {
                     32
                 } else {
                     64
@@ -210,13 +210,13 @@ impl EndpointOp for Endpoint {
             // 检查缓冲区结束地址是否在 dma_mask 范围内
             let buffer_end = data_bus_addr + transfer.buffer_len() as u64;
             assert!(
-                buffer_end <= self.dma.dma_mask(),
+                buffer_end <= self.kernel.dma_mask(),
                 "DMA buffer end 0x{:x} (start: 0x{:x}, len: {} bytes) exceeds controller DMA mask 0x{:x} ({}-bit addressing)",
                 buffer_end,
                 data_bus_addr,
                 transfer.buffer_len(),
-                self.dma.dma_mask(),
-                if self.dma.dma_mask() == u32::MAX as u64 {
+                self.kernel.dma_mask(),
+                if self.kernel.dma_mask() == u32::MAX as u64 {
                     32
                 } else {
                     64
@@ -312,8 +312,8 @@ impl EndpointOp for Endpoint {
         self.ring.register_cx(BusAddr(id), cx);
     }
 
-    fn dma(&self) -> &DeviceDma {
-        &self.dma
+    fn kernel(&self) -> &Kernel {
+        &self.kernel
     }
 }
 

@@ -1,9 +1,9 @@
-use dma_api::{DArray, DeviceDma};
+use dma_api::DArray;
 use mbarrier::mb;
 use xhci::ring::trb::event::Allowed;
 
 use super::ring::Ring;
-use crate::err::*;
+use crate::{Kernel, err::*};
 
 #[repr(C)]
 pub struct EventRingSte {
@@ -21,7 +21,7 @@ unsafe impl Send for EventRing {}
 unsafe impl Sync for EventRing {}
 
 impl EventRing {
-    pub fn new(dma: &DeviceDma) -> Result<Self> {
+    pub fn new(dma: &Kernel) -> Result<Self> {
         let ring = Ring::new(true, dma_api::Direction::Bidirectional, dma)?;
 
         // let mut ste = DVec::zeros(dma_mask as _, 1, 64, dma_api::Direction::Bidirectional)

@@ -4,6 +4,7 @@
 use tock_registers::interfaces::*;
 use tock_registers::{register_bitfields, register_structs, registers::*};
 
+use crate::Kernel;
 use crate::osal::SpinWhile;
 
 /// DWC3 全局寄存器基址偏移 (相对于 xHCI 寄存器区域)
@@ -851,6 +852,7 @@ register_bitfields![u32,
 #[derive(Clone)]
 pub struct Dwc3Regs {
     base: usize,
+    kernel: Kernel,
 }
 
 impl Dwc3Regs {
@@ -859,8 +861,8 @@ impl Dwc3Regs {
     /// # Safety
     ///
     /// 调用者必须确保 `base` 地址有效且可以访问
-    pub unsafe fn new(base: usize) -> Self {
-        Self { base }
+    pub unsafe fn new(base: usize, kernel: Kernel) -> Self {
+        Self { base, kernel }
     }
 
     /// 获取全局寄存器
@@ -946,6 +948,7 @@ impl Dwc3Regs {
     }
 
     fn delay_ms(&self, ms: u32) {
-        crate::osal::kernel::delay(core::time::Duration::from_millis(ms as _));
+        self.kernel
+            .delay(core::time::Duration::from_millis(ms as _));
     }
 }

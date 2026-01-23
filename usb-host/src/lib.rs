@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(windows, unix)), no_std)]
+#![cfg_attr(target_os = "none", no_std)]
 #![feature(iterator_try_collect)]
 
 #[macro_use]
@@ -12,7 +12,6 @@ use core::ptr::NonNull;
 
 pub use usb_if::descriptor::*;
 pub use usb_if::err::*;
-pub use usb_if::transfer::*;
 
 #[macro_use]
 mod _macros;
@@ -32,7 +31,8 @@ pub use usb_if::{DeviceSpeed, DrMode};
 #[macro_use]
 mod osal;
 pub use osal::*;
-pub use trait_ffi::impl_extern_trait;
+
+// pub use trait_ffi::impl_extern_trait;
 
 define_int_type!(BusAddr, u64);
 

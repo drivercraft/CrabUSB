@@ -16,7 +16,7 @@ use usb_if::{
     transfer::{Recipient, Request, RequestType},
 };
 
-use crate::{Device, KernelOp, backend::ty::HubOp, hub::PortChangeInfo};
+use crate::{Device, Kernel, backend::ty::HubOp, hub::PortChangeInfo};
 
 // Hub 枚举常量 (参照 Linux 内核)
 
@@ -35,7 +35,7 @@ const HUB_DEBOUNCE_STABLE: u64 = 100;
 pub struct HubDevice {
     settings: HubSettings,
     data: Box<Inner>,
-    kernel: &'static dyn KernelOp,
+    kernel: Kernel,
 }
 
 struct Inner {
@@ -125,7 +125,7 @@ impl HubDevice {
         settings: HubSettings,
         root_port_id: u8,
         parent_hub_slot_id: u8,
-        kernel: &'static dyn KernelOp,
+        kernel: &Kernel,
     ) -> Result<Self, USBError> {
         Ok(Self {
             settings,
@@ -138,7 +138,7 @@ impl HubDevice {
                 parent_hub_slot_id,
                 root_port_id,
             }),
-            kernel,
+            kernel: kernel.clone(),
         })
     }
 

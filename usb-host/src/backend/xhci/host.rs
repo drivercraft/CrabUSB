@@ -1,7 +1,6 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cell::UnsafeCell;
 use core::time::Duration;
-use dma_api::DeviceDma;
 use futures::{FutureExt, future::BoxFuture};
 use spin::RwLock;
 
@@ -18,7 +17,7 @@ use super::Device;
 use super::hub::XhciRootHub;
 use super::reg::{MemMapper, XhciRegisters};
 use crate::{
-    KernelOp,
+    Kernel, KernelOp,
     backend::{
         CoreOp,
         ty::{Event, EventHandlerOp},
@@ -44,7 +43,7 @@ use crate::{backend::xhci::reg::SlotBell, queue::Finished};
 
 pub struct Xhci {
     pub(crate) reg: Arc<RwLock<XhciRegisters>>,
-    pub(crate) dma: DeviceDma,
+    pub(crate) kernel: Kernel,
     pub(crate) cmd: CommandRing,
     dev_ctx: Option<DeviceContextList>,
     event_handler: Option<EventHandler>,
@@ -52,7 +51,6 @@ pub struct Xhci {
     scratchpad_buf_arr: Option<ScratchpadBufferArray>,
     pub(crate) transfer_result_handler: TransferResultHandler,
     root_hub: Option<XhciRootHub>,
-    kernel: &'static dyn KernelOp,
 }
 
 unsafe impl Send for Xhci {}
@@ -86,8 +84,8 @@ impl CoreOp for Xhci {
         )
     }
 
-    fn kernel(&self) -> &'static dyn crate::osal::KernelOp {
-        self.kernel
+    fn kernel(&self) -> &Kernel {
+        &self.kernel
     }
 }
 
@@ -113,13 +111,17 @@ impl Xhci {
             u32::MAX as usize
         };
 
-        let dma = DeviceDma::new(dma_mask as _, kernel);
+        let kernel = Kernel::new(dma_mask as _, kernel);
 
         let reg_shared = Arc::new(RwLock::new(reg.clone()));
 
-        let cmd = CommandRing::new(dma_api::Direction::Bidirectional, &dma, reg_shared.clone())?;
+        let cmd = CommandRing::new(
+            dma_api::Direction::Bidirectional,
+            &kernel,
+            reg_shared.clone(),
+        )?;
         let cmd_finished = cmd.finished_handle();
-        let event_ring = EventRing::new(&dma)?;
+        let event_ring = EventRing::new(&kernel)?;
         let event_ring_info = event_ring.info();
 
         let root_hub = XhciRootHub::new(reg.clone())?;
@@ -129,7 +131,7 @@ impl Xhci {
 
         Ok(Xhci {
             reg: reg_shared,
-            dma,
+            kernel,
             cmd,
             dev_ctx: None,
             transfer_result_handler: transfer_result_handler.clone(),
@@ -143,7 +145,6 @@ impl Xhci {
             root_hub: Some(root_hub),
             event_ring_info,
             scratchpad_buf_arr: None,
-            kernel,
         })
     }
 
@@ -162,7 +163,7 @@ impl Xhci {
         // register (5.4.7) to enable the device slots that system software is going to
         // use.
         let max_slots = self.setup_max_device_slots();
-        self.dev_ctx = Some(DeviceContextList::new(max_slots as _, &self.dma)?);
+        self.dev_ctx = Some(DeviceContextList::new(max_slots as _, self.kernel())?);
 
         // Program the Device Context Base Address Array Pointer (DCBAAP)
         // register (5.4.6) with a 64-bit address pointing to where the Device
@@ -453,7 +454,7 @@ impl Xhci {
             if buf_count == 0 {
                 return Ok(());
             }
-            let scratchpad_buf_arr = ScratchpadBufferArray::new(buf_count as _, &self.dma)?;
+            let scratchpad_buf_arr = ScratchpadBufferArray::new(buf_count as _, &self.kernel)?;
 
             let bus_addr = scratchpad_buf_arr.bus_addr();
 

@@ -2,7 +2,6 @@ use alloc::collections::BTreeMap;
 
 use alloc::{sync::Arc, vec::Vec};
 
-use dma_api::DeviceDma;
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
@@ -16,6 +15,7 @@ use usb_if::{
 };
 use xhci::ring::trb::command;
 
+use crate::Kernel;
 use crate::backend::DeviceAddressInfo;
 use crate::backend::ty::HubParams;
 use crate::backend::xhci::cmd::CommandRing;
@@ -46,7 +46,7 @@ pub struct Device {
     ctrl_ep: Option<EndpointControl>,
     transfer_result_handler: TransferResultHandler,
     bell: Arc<Mutex<SlotBell>>,
-    dma: DeviceDma,
+    kernel: Kernel,
     current_config_value: Option<u8>,
     config_desc: Vec<ConfigurationDescriptor>,
     port_speed: u8,
@@ -63,7 +63,7 @@ impl Device {
             "Creating new context for slot {slot_id}, {}",
             if is_64 { "64-bit" } else { "32-bit" }
         );
-        let dma = host.dma.clone();
+        let dma = host.kernel.clone();
         let ctx = host.dev_mut()?.new_ctx(slot_id, is_64, &dma)?;
         let bell = host.new_slot_bell(slot_id);
         let bell = Arc::new(Mutex::new(bell));
@@ -76,7 +76,7 @@ impl Device {
             bell,
             ctrl_ep: None,
             desc,
-            dma,
+            kernel: dma,
             transfer_result_handler: host.transfer_result_handler.clone(),
             current_config_value: None,
             config_desc: vec![],
@@ -87,7 +87,7 @@ impl Device {
     }
 
     fn new_ep(&mut self, dci: Dci) -> Result<Endpoint> {
-        let ep = Endpoint::new(dci, &self.dma, self.bell.clone())?;
+        let ep = Endpoint::new(dci, &self.kernel, self.bell.clone())?;
         self.transfer_result_handler
             .register_queue(self.id.as_u8(), dci.as_u8(), ep.ring());
 

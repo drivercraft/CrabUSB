@@ -30,7 +30,7 @@ impl EndpointIsoIn {
         num_packets: usize,
     ) -> Result<TransferHandle<'_>, TransferError> {
         let transfer = Transfer::new_in(
-            self.raw.dma(),
+            self.raw.kernel(),
             TransferKind::Isochronous {
                 num_pkgs: num_packets,
             },
@@ -67,7 +67,7 @@ impl EndpointIsoOut {
         num_packets: usize,
     ) -> Result<TransferHandle<'_>, TransferError> {
         let transfer = Transfer::new_out(
-            self.raw.dma(),
+            self.raw.kernel(),
             TransferKind::Isochronous {
                 num_pkgs: num_packets,
             },

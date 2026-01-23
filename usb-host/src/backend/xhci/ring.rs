@@ -3,9 +3,7 @@ use dma_api::{DArray, DeviceDma};
 use xhci::ring::trb::{Link, command, transfer};
 
 use crate::{
-    BusAddr,
-    err::*,
-    queue::{Finished, TWaiter},
+    BusAddr, Kernel, err::*, queue::{Finished, TWaiter}
 };
 
 const TRB_LEN: usize = 4;
@@ -50,7 +48,7 @@ impl Ring {
         len: usize,
         link: bool,
         direction: Direction,
-        dma: &DeviceDma,
+        dma: &Kernel,
     ) -> core::result::Result<Self, HostError> {
         // let trbs = DArray::zeros(dma_mask as _, len, page_size(), direction)?;
         let trbs = dma.new_array(len, dma.page_size(), direction)?;
@@ -63,7 +61,7 @@ impl Ring {
         })
     }
 
-    pub fn new(link: bool, direction: Direction, dma: &DeviceDma) -> Result<Self> {
+    pub fn new(link: bool, direction: Direction, dma: &Kernel) -> Result<Self> {
         let len = dma.page_size() / TRB_SIZE;
         Ok(Self::new_with_len(len, link, direction, dma)?)
     }
@@ -172,7 +170,7 @@ pub struct SendRing<R> {
 }
 
 impl<R> SendRing<R> {
-    pub fn new(direction: Direction, dma: &DeviceDma) -> Result<Self> {
+    pub fn new(direction: Direction, dma: &Kernel) -> Result<Self> {
         let ring = Ring::new(true, direction, dma)?;
         let finished = Finished::new(ring.trb_bus_addr_list());
         Ok(Self { ring, finished })

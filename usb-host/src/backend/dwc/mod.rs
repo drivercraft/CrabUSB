@@ -4,17 +4,19 @@
 //! 本模块实现 Host 模式驱动，基于 xHCI 规范。
 
 use core::ops::{Deref, DerefMut};
+use core::time::Duration;
 
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use alloc::{boxed::Box, collections::BTreeMap};
-use dma_api::DVec;
+use dma_api::DArray;
 use futures::FutureExt;
 use tock_registers::interfaces::*;
 use usb_if::DeviceSpeed;
 pub use usb_if::DrMode;
 
+use crate::KernelOp;
 use crate::backend::dwc::reg::GEVNTSIZ;
 use crate::backend::{CoreOp, DeviceAddressInfo};
 use crate::{
@@ -25,7 +27,6 @@ use crate::{
         udphy::Udphy,
     },
     err::{Result, USBError},
-    osal::kernel::page_size,
 };
 
 use usb2phy::Usb2Phy;
@@ -66,6 +67,7 @@ pub trait CruOp: Sync + Send + 'static {
 pub struct DwcNewParams<'a, C: CruOp> {
     pub ctrl: Mmio,
     pub phy: Mmio,
+    pub kernel: &'static dyn KernelOp,
     pub phy_param: UdphyParam<'a>,
     pub usb2_phy_param: Usb2PhyParam<'a>,
     pub cru: C,
@@ -126,7 +128,7 @@ pub struct Dwc {
     revistion: u32,
     nr_scratch: u32,
     params: DwcParams,
-    scratchbuf: Option<DVec<u8>>,
+    scratchbuf: Option<DArray<u8>>,
 }
 
 impl Dwc {
@@ -135,12 +137,17 @@ impl Dwc {
         params.params.max_speed = DeviceSpeed::Super;
         let cru = Arc::new(params.cru);
 
-        let phy = Udphy::new(params.phy, cru.clone(), params.phy_param);
-        let usb2_phy = Usb2Phy::new(cru.clone(), params.usb2_phy_param);
+        let xhci = Xhci::new(params.ctrl, params.kernel)?;
 
-        let xhci = Xhci::new(params.ctrl)?;
+        let phy = Udphy::new(
+            params.phy,
+            cru.clone(),
+            params.phy_param,
+            xhci.kernel.clone(),
+        );
+        let usb2_phy = Usb2Phy::new(cru.clone(), params.usb2_phy_param, xhci.kernel.clone());
 
-        let dwc_regs = unsafe { Dwc3Regs::new(mmio_base) };
+        let dwc_regs = unsafe { Dwc3Regs::new(mmio_base, xhci.kernel.clone()) };
 
         let mut rsts = BTreeMap::new();
         for &(name, id) in params.rst_list.iter() {
@@ -178,7 +185,7 @@ impl Dwc {
             .read(GHWPARAMS1::NUM_EVENT_BUFFERS);
         debug!("Allocating {} event buffers", num_buffs);
         for _ in 0..num_buffs {
-            let ev_buff = EventBuffer::new(len, self.xhci.dma_mask)?;
+            let ev_buff = EventBuffer::new(len, self.kernel())?;
             self.ev_buffs.push(ev_buff);
         }
         Ok(())
@@ -457,7 +464,7 @@ impl Dwc {
         // 配置 USB2 High-Speed PHY 接口模式
         self.hsphy_mode_setup();
 
-        crate::osal::kernel::delay(core::time::Duration::from_millis(100));
+        self.xhci.kernel.delay(Duration::from_millis(100));
 
         // === USB2 PHY 配置 ===
         // **关键：读取当前寄存器值（保留硬件状态）**
@@ -502,7 +509,7 @@ impl Dwc {
 
         self.dwc_regs.globals().gusb2phycfg0.set(gusb2.get());
 
-        crate::osal::kernel::delay(core::time::Duration::from_millis(100));
+        self.kernel().delay(core::time::Duration::from_millis(100));
 
         debug!("DWC3: PHY configuration completed");
 
@@ -519,13 +526,24 @@ impl Dwc {
         }
 
         let scratch_size = (self.nr_scratch as usize) * DWC3_SCRATCHBUF_SIZE;
-        let scratchbuf = DVec::zeros(
-            self.xhci.dma_mask as _,
-            scratch_size,
-            page_size(),
-            dma_api::Direction::Bidirectional,
-        )
-        .map_err(|_| USBError::NoMemory)?;
+
+        let scratchbuf = self
+            .xhci
+            .kernel
+            .new_array(
+                scratch_size,
+                self.xhci.kernel.page_size(),
+                dma_api::Direction::Bidirectional,
+            )
+            .map_err(|_| USBError::NoMemory)?;
+
+        // let scratchbuf = DVec::zeros(
+        //     self.xhci.dma_mask as _,
+        //     scratch_size,
+        //     page_size(),
+        //     dma_api::Direction::Bidirectional,
+        // )
+        // .map_err(|_| USBError::NoMemory)?;
 
         self.scratchbuf = Some(scratchbuf);
         debug!(
@@ -649,7 +667,7 @@ impl Dwc {
             self.cru.reset_assert(id);
         }
 
-        crate::osal::kernel::delay(core::time::Duration::from_millis(1));
+        self.kernel().delay(core::time::Duration::from_millis(1));
         // 初始化 USB2 PHY（需要在 xHCI HCRST 之前）
         self.usb2_phy.setup().await?;
 
@@ -717,6 +735,10 @@ impl CoreOp for Dwc {
         addr: DeviceAddressInfo,
     ) -> futures::future::BoxFuture<'a, Result<Box<dyn super::ty::DeviceOp>>> {
         self.xhci.new_addressed_device(addr)
+    }
+
+    fn kernel(&self) -> &crate::Kernel {
+        self.xhci.kernel()
     }
 }
 

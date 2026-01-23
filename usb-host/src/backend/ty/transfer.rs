@@ -1,7 +1,9 @@
 use core::{pin::Pin, ptr::NonNull};
 
-use dma_api::{DSliceSingle, DeviceDma, SingleMapping};
+use dma_api::{DeviceDma, SingleMapping};
 use usb_if::host::ControlSetup;
+
+use crate::Kernel;
 
 #[derive(Clone)]
 pub enum TransferKind {
@@ -32,7 +34,7 @@ pub struct Transfer {
 }
 
 impl Transfer {
-    pub fn new_in(dma: &DeviceDma, kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {
+    pub fn new_in(dma: &Kernel, kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {
         let buffer_addr = buff.as_ptr() as usize;
         let buffer_len = buff.len();
         trace!(
@@ -58,7 +60,7 @@ impl Transfer {
         }
     }
 
-    pub fn new_out(dma: &DeviceDma, kind: TransferKind, buff: Pin<&[u8]>) -> Self {
+    pub fn new_out(kernel: &Kernel, kind: TransferKind, buff: Pin<&[u8]>) -> Self {
         let buffer_addr = buff.as_ptr() as usize;
         let buffer_len = buff.len();
         trace!(
@@ -66,7 +68,7 @@ impl Transfer {
             buffer_addr, buffer_len
         );
 
-        let mapping = dma
+        let mapping = kernel
             .map_single(
                 NonNull::new(buffer_addr as *mut u8).unwrap(),
                 buffer_len,
@@ -87,7 +89,6 @@ impl Transfer {
     pub fn buffer_len(&self) -> usize {
         self.mapping.len()
     }
-
 
     // pub(crate) fn dma_slice<'a>(&'a self) -> dma_api::DSlice<'a, u8> {
     //     dma_from_usize(self.buffer_addr, self.buffer_len)

@@ -21,7 +21,7 @@ impl EndpointBulkIn {
     }
 
     pub fn submit(&mut self, buff: &mut [u8]) -> Result<TransferHandle<'_>, TransferError> {
-        let transfer = Transfer::new_in(self.raw.dma(), TransferKind::Bulk, Pin::new(buff));
+        let transfer = Transfer::new_in(self.raw.kernel(), TransferKind::Bulk, Pin::new(buff));
         self.raw.submit(transfer)
     }
 }
@@ -44,7 +44,7 @@ impl EndpointBulkOut {
     }
 
     pub fn submit(&mut self, buff: &[u8]) -> Result<TransferHandle<'_>, TransferError> {
-        let transfer = Transfer::new_out(self.raw.dma(), TransferKind::Bulk, Pin::new(buff));
+        let transfer = Transfer::new_out(self.raw.kernel(), TransferKind::Bulk, Pin::new(buff));
         self.raw.submit(transfer)
     }
 }

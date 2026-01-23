@@ -7,7 +7,7 @@ use alloc::sync::Arc;
 
 use super::CruOp;
 use crate::{
-    Mmio,
+    Kernel, Mmio,
     backend::dwc::udphy::regmap::{
         RK3588_UDPHY_24M_REFCLK_CFG, RK3588_UDPHY_INIT_SEQUENCE, Regmap,
     },
@@ -82,10 +82,11 @@ pub struct Udphy {
     flip: bool,
     cru: Arc<dyn CruOp>,
     rsts: BTreeMap<String, u64>,
+    kernel: Kernel,
 }
 
 impl Udphy {
-    pub fn new(base: Mmio, cru: Arc<dyn CruOp>, param: UdphyParam<'_>) -> Self {
+    pub fn new(base: Mmio, cru: Arc<dyn CruOp>, param: UdphyParam<'_>, kernel: Kernel) -> Self {
         let cfg = Box::new(config::RK3588_UDPHY_CFGS.clone());
         let mut lane_mux_sel = [0u32; 4];
         let mut dp_lane_sel = [0u32; 4];
@@ -154,6 +155,7 @@ impl Udphy {
             cru,
             rsts,
             flip,
+            kernel,
         }
     }
 
@@ -205,7 +207,7 @@ impl Udphy {
             self.cmn_dp_rstn().modify(CMN_DP_RSTN::DP_INIT_RSTN::Enable);
         }
 
-        crate::osal::kernel::delay(Duration::from_micros(1));
+        self.kernel.delay(Duration::from_micros(1));
 
         if self.mode.contains(UdphyMode::USB) {
             // Step 5: deassert usb rstn
