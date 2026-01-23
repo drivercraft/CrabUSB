@@ -34,7 +34,7 @@ pub struct Transfer {
 }
 
 impl Transfer {
-    pub fn new_in(dma: &Kernel, kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {
+    pub(crate) fn new_in(dma: &Kernel, kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {
         let buffer_addr = buff.as_ptr() as usize;
         let buffer_len = buff.len();
         trace!(
@@ -42,6 +42,7 @@ impl Transfer {
             buffer_addr, buffer_len
         );
 
+        // 对于空切片，使用一个虚拟地址（不会被实际访问）
         let mapping = dma
             .map_single(
                 NonNull::new(buffer_addr as *mut u8).unwrap(),
@@ -54,13 +55,11 @@ impl Transfer {
             kind,
             direction: usb_if::transfer::Direction::In,
             mapping,
-            // buffer_addr,
-            // buffer_len,
             transfer_len: 0,
         }
     }
 
-    pub fn new_out(kernel: &Kernel, kind: TransferKind, buff: Pin<&[u8]>) -> Self {
+    pub(crate) fn new_out(kernel: &Kernel, kind: TransferKind, buff: Pin<&[u8]>) -> Self {
         let buffer_addr = buff.as_ptr() as usize;
         let buffer_len = buff.len();
         trace!(
@@ -68,19 +67,25 @@ impl Transfer {
             buffer_addr, buffer_len
         );
 
-        let mapping = kernel
-            .map_single(
-                NonNull::new(buffer_addr as *mut u8).unwrap(),
-                buffer_len,
-                dma_api::Direction::Bidirectional,
-            )
-            .expect("DMA mapping failed");
+        // 对于空切片，使用一个虚拟地址（不会被实际访问）
+        let mapping = if buffer_len == 0 {
+            // 创建一个零长度的映射，使用任意有效指针
+            kernel
+                .map_single(NonNull::dangling(), 0, dma_api::Direction::Bidirectional)
+                .expect("DMA mapping failed")
+        } else {
+            kernel
+                .map_single(
+                    NonNull::new(buffer_addr as *mut u8).unwrap(),
+                    buffer_len,
+                    dma_api::Direction::Bidirectional,
+                )
+                .expect("DMA mapping failed")
+        };
 
         Self {
             kind,
             direction: usb_if::transfer::Direction::Out,
-            // buffer_addr,
-            // buffer_len,
             mapping,
             transfer_len: 0,
         }

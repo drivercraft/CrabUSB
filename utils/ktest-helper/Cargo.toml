@@ -9,3 +9,4 @@ publish = false
 [dependencies]
 bare-test = {workspace = true}
 crab-usb = {workspace = true}
+log = {workspace = true}
