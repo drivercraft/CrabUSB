@@ -4,7 +4,7 @@ use core::fmt::Debug;
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
-use usb_if::host::hub::DeviceSpeed;
+use usb_if::host::hub::Speed;
 // 重新导出常用类型
 pub use device::{HubDevice, PortState};
 use id_arena::Id;
@@ -13,7 +13,7 @@ use id_arena::Id;
 pub struct PortChangeInfo {
     pub root_port_id: u8,
     pub port_id: u8,
-    pub port_speed: DeviceSpeed,
+    pub port_speed: Speed,
     /// 设备在 Hub 上的端口号（如果需要 Transaction Translator）
     pub tt_port_on_hub: Option<u8>,
 }

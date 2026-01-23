@@ -11,7 +11,7 @@ use usb_if::{
     descriptor::{Class, ConfigurationDescriptor, DeviceDescriptor, EndpointType},
     host::{
         ControlSetup, USBError,
-        hub::{DeviceSpeed, HubDescriptor, PortFeature, PortStatus, PortStatusChange},
+        hub::{Speed, HubDescriptor, PortFeature, PortStatus, PortStatusChange},
     },
     transfer::{Recipient, Request, RequestType},
 };
@@ -264,9 +264,9 @@ impl HubDevice {
         // protocol = 1/2: High Speed Hub
         // protocol = 3: SuperSpeed Hub
         let hub_speed = match device_protocol {
-            1 | 2 => DeviceSpeed::High,
-            3 => DeviceSpeed::SuperSpeed,
-            _ => DeviceSpeed::Full,
+            1 | 2 => Speed::High,
+            3 => Speed::SuperSpeed,
+            _ => Speed::Full,
         };
 
         // 构造 HubParams
@@ -442,7 +442,7 @@ impl HubDevice {
             powered: (raw & 0x0100) != 0,
             low_speed: (raw & 0x0200) != 0,
             high_speed: (raw & 0x0400) != 0,
-            speed: DeviceSpeed::from_usb2_hub_status(raw),
+            speed: Speed::from_usb2_hub_status(raw),
             change: PortStatusChange {
                 connection_changed: false,
                 enabled_changed: false,
@@ -663,9 +663,9 @@ impl HubDevice {
         // 根据 xHCI 规范，LS/FS 设备连接在 HS Hub 时需要 TT
         let hub_speed = match self.data.dev.descriptor().protocol {
             // Hub 协议值：0=FS Hub, 1/2=HS Hub, 3=SS Hub
-            1 | 2 => DeviceSpeed::High,   // HS Hub
-            3 => DeviceSpeed::SuperSpeed, // SS Hub
-            _ => DeviceSpeed::Full,       // FS Hub
+            1 | 2 => Speed::High,   // HS Hub
+            3 => Speed::SuperSpeed, // SS Hub
+            _ => Speed::Full,       // FS Hub
         };
 
         let port = &mut self.data.ports[port_id as usize - 1];
@@ -762,7 +762,7 @@ impl Port {
                 powered: false,
                 low_speed: false,
                 high_speed: false,
-                speed: usb_if::host::hub::DeviceSpeed::Full,
+                speed: usb_if::host::hub::Speed::Full,
                 change: usb_if::host::hub::PortStatusChange {
                     connection_changed: false,
                     enabled_changed: false,

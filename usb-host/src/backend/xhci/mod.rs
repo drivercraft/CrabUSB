@@ -16,17 +16,17 @@ pub(crate) use def::*;
 pub use device::Device;
 pub use host::Xhci;
 
-use usb_if::host::hub::DeviceSpeed;
+use usb_if::host::hub::Speed;
 
-fn parse_default_max_packet_size_from_port_speed(speed: DeviceSpeed) -> u16 {
+fn parse_default_max_packet_size_from_port_speed(speed: Speed) -> u16 {
     // 根据 xHCI 规范表 6-30 和 U-Boot 实现：
     // 参考 U-Boot drivers/usb/host/xhci-mem.c:730-751
     match speed {
-        DeviceSpeed::Full => 64,             // Full Speed → 64 bytes
-        DeviceSpeed::Low => 8,               // Low Speed → 8 bytes
-        DeviceSpeed::High => 64,             // High Speed → 64 bytes
-        DeviceSpeed::SuperSpeed => 512,      // SuperSpeed → 512 bytes
-        DeviceSpeed::SuperSpeedPlus => 1024, // SuperSpeedPlus → 1024 bytes
-        DeviceSpeed::Wireless => unimplemented!("Wireless"),
+        Speed::Full => 64,             // Full Speed → 64 bytes
+        Speed::Low => 8,               // Low Speed → 8 bytes
+        Speed::High => 64,             // High Speed → 64 bytes
+        Speed::SuperSpeed => 512,      // SuperSpeed → 512 bytes
+        Speed::SuperSpeedPlus => 1024, // SuperSpeedPlus → 1024 bytes
+        Speed::Wireless => unimplemented!("Wireless"),
     }
 }

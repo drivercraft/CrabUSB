@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use futures::future::{BoxFuture, LocalBoxFuture};
-use usb_if::host::{USBError, hub::DeviceSpeed};
+use usb_if::host::{USBError, hub::Speed};
 
 use crate::{
     Kernel,
@@ -71,7 +71,7 @@ pub struct DeviceAddressInfo {
     pub route_string: RouteString,
     pub root_port_id: u8,
     pub parent_hub_slot_id: u8,
-    pub port_speed: DeviceSpeed,
+    pub port_speed: Speed,
     /// TT 信息：设备在 Hub 上的端口号（LS/FS 设备需要）
     pub tt_port_on_hub: Option<u8>,
 }

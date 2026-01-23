@@ -27,7 +27,7 @@ pub(crate) mod queue;
 pub use backend::ty::Event;
 pub use host::*;
 pub use usb_if::{
-    DeviceSpeed, DrMode,
+    DrMode, Speed,
     transfer::{Direction, Recipient, Request, RequestType},
 };
 

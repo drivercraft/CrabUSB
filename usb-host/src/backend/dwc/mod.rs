@@ -13,7 +13,7 @@ use alloc::{boxed::Box, collections::BTreeMap};
 use dma_api::DArray;
 use futures::FutureExt;
 use tock_registers::interfaces::*;
-use usb_if::DeviceSpeed;
+use usb_if::Speed;
 pub use usb_if::DrMode;
 
 use crate::KernelOp;
@@ -78,7 +78,7 @@ pub struct DwcNewParams<'a, C: CruOp> {
 #[derive(Debug, Default, Clone)]
 pub struct DwcParams {
     pub dr_mode: DrMode,
-    pub max_speed: DeviceSpeed,
+    pub max_speed: Speed,
     pub hsphy_mode: UsbPhyInterfaceMode,
     pub delayed_status: bool,
     pub ep0_bounced: bool,
@@ -134,7 +134,7 @@ pub struct Dwc {
 impl Dwc {
     pub fn new(mut params: DwcNewParams<'_, impl CruOp>) -> Result<Self> {
         let mmio_base = params.ctrl.as_ptr() as usize;
-        params.params.max_speed = DeviceSpeed::SuperSpeed;
+        params.params.max_speed = Speed::SuperSpeed;
         let cru = Arc::new(params.cru);
 
         let xhci = Xhci::new(params.ctrl, params.kernel)?;
@@ -249,9 +249,9 @@ impl Dwc {
             .globals()
             .ghwparams3
             .read_as_enum(GHWPARAMS3::SSPHY_IFC)
-            && self.max_speed == DeviceSpeed::SuperSpeed
+            && self.max_speed == Speed::SuperSpeed
         {
-            self.max_speed = DeviceSpeed::High;
+            self.max_speed = Speed::High;
         }
 
         debug!("DWC3: Max speed {:?}", self.max_speed);
@@ -282,7 +282,7 @@ impl Dwc {
         if self.revistion >= DWC3_REVISION_250A {
             debug!("DWC3: Revision 250A or later detected");
 
-            if matches!(self.max_speed, DeviceSpeed::Full | DeviceSpeed::High) {
+            if matches!(self.max_speed, Speed::Full | Speed::High) {
                 self.dwc_regs
                     .globals()
                     .guctl1

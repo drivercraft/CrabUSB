@@ -10,7 +10,7 @@ use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,
     },
-    host::{ControlSetup, USBError, hub::DeviceSpeed},
+    host::{ControlSetup, USBError, hub::Speed},
     transfer::{Recipient, RequestType},
 };
 use xhci::ring::trb::command;
@@ -171,10 +171,7 @@ impl Device {
         // 直接使用 DeviceSpeed 枚举计算默认 max packet size
         let max_packet_size = parse_default_max_packet_size_from_port_speed(info.port_speed);
         // Route String is only valid for USB3.x devices; USB2.x devices must use 0.
-        let route_string = if matches!(
-            info.port_speed,
-            DeviceSpeed::SuperSpeed | DeviceSpeed::SuperSpeedPlus
-        ) {
+        let route_string = if matches!(info.port_speed, Speed::SuperSpeed | Speed::SuperSpeedPlus) {
             info.route_string.raw()
         } else {
             0
@@ -565,7 +562,7 @@ impl Device {
             // 对于 Full Speed Hub，必须清除 MTT（xHCI 规范 6.2.2）
             if params.multi_tt {
                 slot_ctx.set_multi_tt();
-            } else if matches!(params.port_speed, DeviceSpeed::Full) {
+            } else if matches!(params.port_speed, Speed::Full) {
                 slot_ctx.clear_multi_tt();
             }
 
@@ -576,7 +573,7 @@ impl Device {
             // xHCI spec: TT_THINK_TIME (Bits[16:17] of DWORD 2)
             // 0 = 8 FS bit times, 1 = 16 FS bit times, 2 = 24 FS bit times, 3 = 32 FS bit times
             // 只对 High Speed Hub 设置 TT 思考时间
-            if matches!(params.port_speed, DeviceSpeed::High) {
+            if matches!(params.port_speed, Speed::High) {
                 // params.tt_think_time_ns 已经是转换后的值 (0, 666, 1333, 1999)
                 // 需要转换为 xHCI 寄存器值
                 let think_time = if params.tt_think_time_ns > 0 {

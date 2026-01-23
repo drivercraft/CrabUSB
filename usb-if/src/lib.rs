@@ -16,4 +16,4 @@ pub enum DrMode {
 }
 
 // 重新导出 host::hub::DeviceSpeed，避免重复定义
-pub use host::hub::DeviceSpeed;
+pub use host::hub::Speed;
