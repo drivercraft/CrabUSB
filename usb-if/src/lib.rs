@@ -15,12 +15,5 @@ pub enum DrMode {
     Otg,
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DeviceSpeed {
-    #[default]
-    Low = 1,
-    Full,
-    High,
-    Wireless,
-    Super,
-}
+// 重新导出 host::hub::DeviceSpeed，避免重复定义
+pub use host::hub::DeviceSpeed;

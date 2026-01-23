@@ -237,7 +237,7 @@ pub struct PortStatusChange {
 }
 
 /// USB 设备速度
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum DeviceSpeed {
     Low = 0,
@@ -246,6 +246,12 @@ pub enum DeviceSpeed {
     Wireless = 3,
     SuperSpeed = 4,
     SuperSpeedPlus = 5,
+}
+
+impl Default for DeviceSpeed {
+    fn default() -> Self {
+        DeviceSpeed::Full
+    }
 }
 
 impl From<u8> for DeviceSpeed {

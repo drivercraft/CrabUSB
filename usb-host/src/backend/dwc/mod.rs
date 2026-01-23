@@ -134,7 +134,7 @@ pub struct Dwc {
 impl Dwc {
     pub fn new(mut params: DwcNewParams<'_, impl CruOp>) -> Result<Self> {
         let mmio_base = params.ctrl.as_ptr() as usize;
-        params.params.max_speed = DeviceSpeed::Super;
+        params.params.max_speed = DeviceSpeed::SuperSpeed;
         let cru = Arc::new(params.cru);
 
         let xhci = Xhci::new(params.ctrl, params.kernel)?;
@@ -249,7 +249,7 @@ impl Dwc {
             .globals()
             .ghwparams3
             .read_as_enum(GHWPARAMS3::SSPHY_IFC)
-            && self.max_speed == DeviceSpeed::Super
+            && self.max_speed == DeviceSpeed::SuperSpeed
         {
             self.max_speed = DeviceSpeed::High;
         }
