@@ -1,4 +1,4 @@
-use core::{pin::Pin, ptr::NonNull};
+use core::{num::NonZeroUsize, pin::Pin, ptr::NonNull};
 
 use dma_api::{DeviceDma, SingleMapping};
 use usb_if::host::ControlSetup;
@@ -26,10 +26,7 @@ impl TransferKind {
 pub struct Transfer {
     pub kind: TransferKind,
     pub direction: usb_if::transfer::Direction,
-    // pub buffer_addr: usize,
-    // pub buffer_len: usize,
-    pub mapping: SingleMapping,
-
+    pub mapping: Option<SingleMapping>,
     pub transfer_len: usize,
 }
 
@@ -42,14 +39,18 @@ impl Transfer {
             buffer_addr, buffer_len
         );
 
-        // 对于空切片，使用一个虚拟地址（不会被实际访问）
-        let mapping = dma
-            .map_single(
-                NonNull::new(buffer_addr as *mut u8).unwrap(),
-                buffer_len,
-                dma_api::Direction::Bidirectional,
+        let mapping = if let Some(len) = NonZeroUsize::new(buffer_len) {
+            Some(
+                dma.map_single(
+                    NonNull::new(buffer_addr as *mut u8).unwrap(),
+                    len,
+                    dma_api::Direction::Bidirectional,
+                )
+                .expect("DMA mapping failed"),
             )
-            .expect("DMA mapping failed");
+        } else {
+            None
+        };
 
         Self {
             kind,
@@ -67,20 +68,18 @@ impl Transfer {
             buffer_addr, buffer_len
         );
 
-        // 对于空切片，使用一个虚拟地址（不会被实际访问）
-        let mapping = if buffer_len == 0 {
-            // 创建一个零长度的映射，使用任意有效指针
-            kernel
-                .map_single(NonNull::dangling(), 0, dma_api::Direction::Bidirectional)
-                .expect("DMA mapping failed")
+        let mapping = if let Some(len) = NonZeroUsize::new(buffer_len) {
+            Some(
+                kernel
+                    .map_single(
+                        NonNull::new(buffer_addr as *mut u8).unwrap(),
+                        len,
+                        dma_api::Direction::ToDevice,
+                    )
+                    .expect("DMA mapping failed"),
+            )
         } else {
-            kernel
-                .map_single(
-                    NonNull::new(buffer_addr as *mut u8).unwrap(),
-                    buffer_len,
-                    dma_api::Direction::Bidirectional,
-                )
-                .expect("DMA mapping failed")
+            None
         };
 
         Self {
@@ -92,9 +91,32 @@ impl Transfer {
     }
 
     pub fn buffer_len(&self) -> usize {
-        self.mapping.len()
+        if let Some(ref mapping) = self.mapping {
+            mapping.len()
+        } else {
+            0
+        }
     }
 
+    pub fn dma_addr(&self) -> u64 {
+        if let Some(ref mapping) = self.mapping {
+            mapping.handle.dma_addr
+        } else {
+            0
+        }
+    }
+
+    pub fn prepare_read_all(&self) {
+        if let Some(ref mapping) = self.mapping {
+            mapping.prepare_read_all();
+        }
+    }
+
+    pub fn confirm_write_all(&self) {
+        if let Some(ref mapping) = self.mapping {
+            mapping.confirm_write_all();
+        }
+    }
     // pub(crate) fn dma_slice<'a>(&'a self) -> dma_api::DSlice<'a, u8> {
     //     dma_from_usize(self.buffer_addr, self.buffer_len)
     // }

@@ -3,7 +3,7 @@
 
 extern crate alloc;
 
-use core::{alloc::Layout, ptr::NonNull, time::Duration};
+use core::{alloc::Layout, num::NonZeroUsize, ptr::NonNull, time::Duration};
 
 use bare_test::{
     mem::{PhysAddr, VirtAddr, alloc_with_mask, page_size},
@@ -22,9 +22,10 @@ impl Osal for KernelImpl {
         &self,
         dma_mask: u64,
         addr: NonNull<u8>,
-        size: usize,
+        size: NonZeroUsize,
         _direction: crate::Direction,
     ) -> Result<MapHandle, DmaError> {
+        let size = size.get();
         let orig_phys = PhysAddr::from(VirtAddr::from(addr)).raw() as u64;
 
         if orig_phys + size as u64 > dma_mask {

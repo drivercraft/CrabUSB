@@ -92,7 +92,7 @@ impl Endpoint {
 
             if t.transfer_len > 0 {
                 // t.dma_slice().prepare_read_all();
-                t.mapping.prepare_read_all();
+                t.prepare_read_all();
             }
         } else {
             // 对于 OUT 端点，trb_transfer_length 就是实际传输长度
@@ -189,10 +189,10 @@ impl EndpointOp for Endpoint {
             // let data_slice = transfer.dma_slice();
             if matches!(transfer.direction, Direction::Out) {
                 // data_slice.confirm_write_all();
-                transfer.mapping.confirm_write_all();
+                transfer.confirm_write_all();
             }
             // data_bus_addr = data_slice.bus_addr();
-            data_bus_addr = transfer.mapping.handle.dma_addr;
+            data_bus_addr = transfer.dma_addr();
 
             // 检查缓冲区起始地址是否在 dma_mask 范围内
             assert!(
