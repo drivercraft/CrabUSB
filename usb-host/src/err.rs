@@ -1,6 +1,5 @@
 use core::fmt::Display;
 
-use alloc::format;
 pub use usb_if::err::TransferError;
 pub use usb_if::host::USBError;
 use xhci::ring::trb::event::CompletionCode;
@@ -19,11 +18,11 @@ impl ConvertXhciError for CompletionCode {
             CompletionCode::StallError => Err(TransferError::Stall),
             CompletionCode::MissedServiceError => {
                 // MissedServiceError 通常是暂时性的，可以重试
-                Err(TransferError::Other(format!(
+                Err(TransferError::Other(anyhow!(
                     "XHCI temporary error: {self:?}"
                 )))
             }
-            _ => Err(TransferError::Other(format!("XHCI error: {self:?}"))),
+            _ => Err(TransferError::Other(anyhow!("XHCI error: {self:?}"))),
         }
     }
 }

@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, string::String};
+use alloc::boxed::Box;
 
 #[derive(thiserror::Error, Debug)]
 pub enum TransferError {
@@ -11,14 +11,15 @@ pub enum TransferError {
     #[error("Cancelled")]
     Cancelled,
     #[error("Other error: {0}")]
-    Other(String),
+    Other(anyhow::Error),
 }
 
 impl From<Box<dyn core::error::Error>> for TransferError {
     fn from(err: Box<dyn core::error::Error>) -> Self {
-        TransferError::Other(alloc::format!("{err}"))
+        TransferError::Other(anyhow::anyhow!("{}", err))
     }
 }
+
 /*
 
 LIBUSB_SUCCESS

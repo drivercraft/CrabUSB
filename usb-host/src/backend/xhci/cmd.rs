@@ -65,7 +65,7 @@ impl CommandRing {
 
         match res.completion_code() {
             Ok(code) => code.to_result()?,
-            Err(e) => Err(TransferError::Other(format!("Command failed: {e:?}")))?,
+            Err(e) => Err(TransferError::Other(anyhow!("Command failed: {e:?}")))?,
         }
 
         Ok(res)

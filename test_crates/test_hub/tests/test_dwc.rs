@@ -37,6 +37,7 @@ mod tests {
     use core::ptr::NonNull;
 
     use bare_test::time::spin_delay;
+    use crab_usb::usb_if::{DrMode, descriptor::ConfigurationDescriptor};
     use ktest_helper::KernelImpl;
     use rockchip_soc::CruOp;
 

@@ -10,8 +10,7 @@ extern crate anyhow;
 
 use core::ptr::NonNull;
 
-pub use usb_if::descriptor::*;
-pub use usb_if::err::*;
+pub use usb_if;
 
 #[macro_use]
 mod _macros;
@@ -26,10 +25,6 @@ pub(crate) mod queue;
 
 pub use backend::ty::Event;
 pub use host::*;
-pub use usb_if::{
-    DrMode, Speed,
-    transfer::{Direction, Recipient, Request, RequestType},
-};
 
 #[macro_use]
 mod osal;

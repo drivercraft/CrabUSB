@@ -77,7 +77,7 @@ impl Endpoint {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e),
             },
-            Err(_e) => Err(TransferError::Other("Transfer failed".into())),
+            Err(_e) => Err(TransferError::Other(anyhow!("Transfer failed"))),
         }?;
 
         // xHCI 规范：trb_transfer_length 字段根据端点方向有不同的含义
