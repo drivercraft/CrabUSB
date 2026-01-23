@@ -5,7 +5,7 @@ use alloc::{sync::Arc, vec::Vec};
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
-use usb_if::descriptor::{DeviceDescriptorBase, LanguageId};
+use usb_if::descriptor::DeviceDescriptorBase;
 use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,

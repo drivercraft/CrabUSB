@@ -1,6 +1,6 @@
 use core::{num::NonZeroUsize, pin::Pin, ptr::NonNull};
 
-use dma_api::{DeviceDma, SingleMapping};
+use dma_api::SingleMapping;
 use usb_if::host::ControlSetup;
 
 use crate::Kernel;
@@ -67,20 +67,16 @@ impl Transfer {
             buffer_addr, buffer_len
         );
 
-        let mapping = if let Some(len) = NonZeroUsize::new(buffer_len) {
-            Some(
-                kernel
-                    .map_single(
-                        NonNull::new(buffer_addr as *mut u8).unwrap(),
-                        len,
-                        ALIGN,
-                        dma_api::Direction::ToDevice,
-                    )
-                    .expect("DMA mapping failed"),
-            )
-        } else {
-            None
-        };
+        let mapping = NonZeroUsize::new(buffer_len).map(|len| {
+            kernel
+                .map_single(
+                    NonNull::new(buffer_addr as *mut u8).unwrap(),
+                    len,
+                    ALIGN,
+                    dma_api::Direction::ToDevice,
+                )
+                .expect("DMA mapping failed")
+        });
 
         Self {
             kind,
@@ -117,16 +113,4 @@ impl Transfer {
             mapping.confirm_write_all();
         }
     }
-    // pub(crate) fn dma_slice<'a>(&'a self) -> dma_api::DSlice<'a, u8> {
-    //     dma_from_usize(self.buffer_addr, self.buffer_len)
-    // }
-
-    // pub fn in_slice(&self) -> &[u8] {
-    //     unsafe { core::slice::from_raw_parts(self.buffer_addr as *const u8, self.transfer_len) }
-    // }
 }
-
-// fn dma_from_usize<'a>(addr: usize, len: usize) -> dma_api::DSliceSingle<'a, u8> {
-//     let data_slice = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
-//     dma_api::DSlice::from(data_slice, dma_api::Direction::Bidirectional)
-// }

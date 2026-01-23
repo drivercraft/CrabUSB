@@ -1,9 +1,11 @@
+use dma_api::DArray;
 pub use dma_api::Direction;
-use dma_api::{DArray, DeviceDma};
 use xhci::ring::trb::{Link, command, transfer};
 
 use crate::{
-    BusAddr, Kernel, err::*, queue::{Finished, TWaiter}
+    BusAddr, Kernel,
+    err::*,
+    queue::{Finished, TWaiter},
 };
 
 const TRB_LEN: usize = 4;

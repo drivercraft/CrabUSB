@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use dma_api::{DArray, DBox, DeviceDma};
+use dma_api::{DArray, DBox};
 use xhci::context::{Device32Byte, Device64Byte, Input32Byte, Input64Byte, InputHandler};
 
 use crate::{Kernel, backend::xhci::SlotId, err::*};

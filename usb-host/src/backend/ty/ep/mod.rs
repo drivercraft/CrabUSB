@@ -5,9 +5,8 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
-use dma_api::DeviceDma;
 
-use crate::{Kernel, KernelOp};
+use crate::Kernel;
 
 use super::transfer::Transfer;
 use usb_if::err::TransferError;
@@ -105,7 +104,7 @@ impl EndpointBase {
     // }
 }
 
-pub trait EndpointOp: Send + Any + 'static {
+pub(crate) trait EndpointOp: Send + Any + 'static {
     fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle<'_>, TransferError>;
 
     fn query_transfer(&mut self, id: u64) -> Option<Result<Transfer, TransferError>>;
@@ -121,7 +120,7 @@ pub struct TransferHandle<'a> {
 }
 
 impl<'a> TransferHandle<'a> {
-    pub fn new(id: u64, endpoint: &'a mut dyn EndpointOp) -> Self {
+    pub(crate) fn new(id: u64, endpoint: &'a mut dyn EndpointOp) -> Self {
         Self { id, endpoint }
     }
 }

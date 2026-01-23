@@ -1,6 +1,5 @@
 use alloc::{collections::BTreeMap, sync::Arc};
 
-use dma_api::DeviceDma;
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
