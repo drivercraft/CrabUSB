@@ -1,5 +1,5 @@
 fn main() {
-    bare_test_macros::build_test_setup!();
+    // bare_test_macros::build_test_setup!();
 
     println!("cargo::rustc-check-cfg=cfg(libusb)");
 

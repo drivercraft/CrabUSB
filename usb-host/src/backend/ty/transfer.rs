@@ -39,18 +39,14 @@ impl Transfer {
             buffer_addr, buffer_len
         );
 
-        let mapping = if let Some(len) = NonZeroUsize::new(buffer_len) {
-            Some(
-                dma.map_single(
-                    NonNull::new(buffer_addr as *mut u8).unwrap(),
-                    len,
-                    dma_api::Direction::Bidirectional,
-                )
-                .expect("DMA mapping failed"),
+        let mapping = NonZeroUsize::new(buffer_len).map(|len| {
+            dma.map_single(
+                NonNull::new(buffer_addr as *mut u8).unwrap(),
+                len,
+                dma_api::Direction::Bidirectional,
             )
-        } else {
-            None
-        };
+            .expect("DMA mapping failed")
+        });
 
         Self {
             kind,

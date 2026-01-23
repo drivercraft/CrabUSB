@@ -1,8 +1,8 @@
-use core::time::Duration;
 use core::ops::Deref;
+use core::time::Duration;
 
 use dma_api::DeviceDma;
-pub use dma_api::{Direction, DmaAddr, DmaError, DmaHandle, MapHandle, Osal};
+pub use dma_api::{Direction, DmaAddr, DmaError, DmaHandle, DmaOp};
 
 // use trait_ffi::def_extern_trait;
 
@@ -39,7 +39,7 @@ impl Deref for Kernel {
     }
 }
 
-pub trait KernelOp: Osal {
+pub trait KernelOp: DmaOp {
     fn delay(&self, duration: Duration);
 }
 

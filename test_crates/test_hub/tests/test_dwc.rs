@@ -25,12 +25,11 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-use crab_usb::{impl_trait, *};
+use crab_usb::*;
 use log::info;
 use log::*;
 use rockchip_pm::RockchipPM;
 use rockchip_soc::{Cru, CruOp, GpioDirection, PinConfig, PinCtrl, PinCtrlOp, SocType};
-use usb_if::descriptor::ConfigurationDescriptor;
 
 #[bare_test::tests]
 mod tests {
@@ -38,6 +37,7 @@ mod tests {
     use core::ptr::NonNull;
 
     use bare_test::time::spin_delay;
+    use ktest_helper::KernelImpl;
     use rockchip_soc::CruOp;
 
     use super::*;
@@ -177,19 +177,6 @@ mod tests {
                 // drop(device);
             }
         });
-    }
-
-    struct KernelImpl;
-    impl_trait! {
-        impl Kernel for KernelImpl {
-            fn page_size() -> usize {
-                page_size()
-            }
-
-            fn delay(duration: Duration) {
-                spin_delay(duration);
-            }
-        }
     }
 
     struct XhciInfo {
@@ -504,7 +491,6 @@ mod tests {
                             dp_lane_mux: &dp_lane_mux,
                             rst_list: &phy_rst_list,
                         },
-
                         usb2_phy_param: Usb2PhyParam {
                             reg: usb2phy_reg,
                             port_kind: Usb2PhyPortId::from_node_name(&u2_port_name)
@@ -515,6 +501,7 @@ mod tests {
                         rst_list: &rst_list,
                         cru: CruOpImpl,
                         params,
+                        kernel: &KernelImpl,
                     })
                     .unwrap(),
                     irq,

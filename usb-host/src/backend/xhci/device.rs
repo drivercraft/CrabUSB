@@ -5,7 +5,7 @@ use alloc::{sync::Arc, vec::Vec};
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
-use usb_if::descriptor::DeviceDescriptorBase;
+use usb_if::descriptor::{DeviceDescriptorBase, LanguageId};
 use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,
@@ -299,8 +299,21 @@ impl Device {
         let mut data = alloc::vec![0u8; 8];
 
         self.ep_ctrl()
-            .get_descriptor(DescriptorType::DEVICE, 0, 0, &mut data)
+            .get_descriptor(
+                DescriptorType::DEVICE,
+                0,
+                // LanguageId::default().into(),
+                0,
+                &mut data,
+            )
             .await?;
+        // let mut data = self
+        //     .kernel
+        //     .new_array::<u8>(8, 1, dma_api::Direction::FromDevice)
+        //     .unwrap();
+        // self.ep_ctrl()
+        //     .get_descriptor(DescriptorType::DEVICE, 0, 0, unsafe { data.as_mut_slice() })
+        //     .await?;
 
         let desc = unsafe { *(data.as_ptr() as *const DeviceDescriptorBase) };
 
