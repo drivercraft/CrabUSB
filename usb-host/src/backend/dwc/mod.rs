@@ -4,17 +4,16 @@
 //! 本模块实现 Host 模式驱动，基于 xHCI 规范。
 
 use core::ops::{Deref, DerefMut};
-use core::time::Duration;
 
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use alloc::{boxed::Box, collections::BTreeMap};
-use dma_api::DArray;
+use dma_api::{DArray, DmaDirection};
 use futures::FutureExt;
 use tock_registers::interfaces::*;
-use usb_if::Speed;
 pub use usb_if::DrMode;
+use usb_if::Speed;
 
 use crate::KernelOp;
 use crate::backend::dwc::reg::GEVNTSIZ;
@@ -67,12 +66,12 @@ pub trait CruOp: Sync + Send + 'static {
 pub struct DwcNewParams<'a, C: CruOp> {
     pub ctrl: Mmio,
     pub phy: Mmio,
-    pub kernel: &'static dyn KernelOp,
     pub phy_param: UdphyParam<'a>,
     pub usb2_phy_param: Usb2PhyParam<'a>,
     pub cru: C,
     pub rst_list: &'a [(&'a str, u64)],
     pub params: DwcParams,
+    pub kernel: &'static dyn KernelOp,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -134,20 +133,14 @@ pub struct Dwc {
 impl Dwc {
     pub fn new(mut params: DwcNewParams<'_, impl CruOp>) -> Result<Self> {
         let mmio_base = params.ctrl.as_ptr() as usize;
-        params.params.max_speed = Speed::SuperSpeed;
+        params.params.max_speed = Speed::Full;
         let cru = Arc::new(params.cru);
-
         let xhci = Xhci::new(params.ctrl, params.kernel)?;
 
-        let phy = Udphy::new(
-            params.phy,
-            cru.clone(),
-            params.phy_param,
-            xhci.kernel.clone(),
-        );
-        let usb2_phy = Usb2Phy::new(cru.clone(), params.usb2_phy_param, xhci.kernel.clone());
+        let phy = Udphy::new(params.phy, cru.clone(), params.phy_param);
+        let usb2_phy = Usb2Phy::new(cru.clone(), params.usb2_phy_param, xhci.kernel().clone());
 
-        let dwc_regs = unsafe { Dwc3Regs::new(mmio_base, xhci.kernel.clone()) };
+        let dwc_regs = unsafe { Dwc3Regs::new(mmio_base) };
 
         let mut rsts = BTreeMap::new();
         for &(name, id) in params.rst_list.iter() {
@@ -260,7 +253,7 @@ impl Dwc {
 
         // PHY 软复位（包含 PHY 复位和核心复位）
         info!("DWC3: Starting core soft reset (includes PHY soft reset)");
-        self.dwc_regs.core_soft_reset().await;
+        self.dwc_regs.core_soft_reset(self.kernel()).await;
 
         // **关键调试：检查 PHY 软复位后的寄存器状态**
         use crate::backend::dwc::reg::GUSB2PHYCFG;
@@ -464,7 +457,7 @@ impl Dwc {
         // 配置 USB2 High-Speed PHY 接口模式
         self.hsphy_mode_setup();
 
-        self.xhci.kernel.delay(Duration::from_millis(100));
+        self.kernel().delay(core::time::Duration::from_millis(100));
 
         // === USB2 PHY 配置 ===
         // **关键：读取当前寄存器值（保留硬件状态）**
@@ -528,12 +521,11 @@ impl Dwc {
         let scratch_size = (self.nr_scratch as usize) * DWC3_SCRATCHBUF_SIZE;
 
         let scratchbuf = self
-            .xhci
-            .kernel
-            .new_array(
+            .kernel()
+            .array_zero_with_align(
                 scratch_size,
-                self.xhci.kernel.page_size(),
-                dma_api::Direction::Bidirectional,
+                self.kernel().page_size(),
+                DmaDirection::Bidirectional,
             )
             .map_err(|_| USBError::NoMemory)?;
 
@@ -671,7 +663,8 @@ impl Dwc {
         // 初始化 USB2 PHY（需要在 xHCI HCRST 之前）
         self.usb2_phy.setup().await?;
 
-        self.usb3_phy.setup().await?;
+        let kernel = self.kernel().clone();
+        self.usb3_phy.setup(&kernel).await?;
 
         for &id in self.rsts.values() {
             self.cru.reset_deassert(id);

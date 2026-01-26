@@ -1,7 +1,7 @@
 use core::{num::NonZeroUsize, pin::Pin, ptr::NonNull};
 
-use dma_api::SingleMapping;
-use usb_if::host::ControlSetup;
+use dma_api::{DmaDirection, SArrayPtr};
+use usb_if::{host::ControlSetup, transfer::Direction};
 
 use crate::Kernel;
 
@@ -26,7 +26,7 @@ impl TransferKind {
 pub struct Transfer {
     pub kind: TransferKind,
     pub direction: usb_if::transfer::Direction,
-    pub mapping: Option<SingleMapping>,
+    pub mapping: Option<SArrayPtr<u8>>,
     pub transfer_len: usize,
 }
 
@@ -41,15 +41,14 @@ impl Transfer {
             buffer_addr, buffer_len
         );
 
-        let mapping = NonZeroUsize::new(buffer_len).map(|len| {
-            dma.map_single(
-                NonNull::new(buffer_addr as *mut u8).unwrap(),
-                len,
-                ALIGN,
-                dma_api::Direction::FromDevice,
+        let mapping = if buffer_len > 0 {
+            Some(
+                dma.map_single_array(buff.get_mut(), ALIGN, DmaDirection::FromDevice)
+                    .expect("DMA mapping failed"),
             )
-            .expect("DMA mapping failed")
-        });
+        } else {
+            None
+        };
 
         Self {
             kind,
@@ -67,20 +66,19 @@ impl Transfer {
             buffer_addr, buffer_len
         );
 
-        let mapping = NonZeroUsize::new(buffer_len).map(|len| {
-            kernel
-                .map_single(
-                    NonNull::new(buffer_addr as *mut u8).unwrap(),
-                    len,
-                    ALIGN,
-                    dma_api::Direction::ToDevice,
-                )
-                .expect("DMA mapping failed")
-        });
+        let mapping = if buffer_len > 0 {
+            Some(
+                kernel
+                    .map_single_array(buff.get_ref(), ALIGN, DmaDirection::ToDevice)
+                    .expect("DMA mapping failed"),
+            )
+        } else {
+            None
+        };
 
         Self {
             kind,
-            direction: usb_if::transfer::Direction::Out,
+            direction: Direction::Out,
             mapping,
             transfer_len: 0,
         }
@@ -96,7 +94,7 @@ impl Transfer {
 
     pub fn dma_addr(&self) -> u64 {
         if let Some(ref mapping) = self.mapping {
-            mapping.handle.dma_addr
+            mapping.dma_addr().as_u64()
         } else {
             0
         }

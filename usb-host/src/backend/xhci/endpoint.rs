@@ -1,5 +1,6 @@
 use alloc::{collections::BTreeMap, sync::Arc};
 
+use dma_api::DmaDirection;
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
@@ -41,7 +42,7 @@ unsafe impl Sync for Endpoint {}
 
 impl Endpoint {
     pub fn new(dci: Dci, kernel: &Kernel, bell: Arc<Mutex<SlotBell>>) -> crate::err::Result<Self> {
-        let ring = SendRing::new(dma_api::Direction::Bidirectional, kernel)?;
+        let ring = SendRing::new(DmaDirection::Bidirectional, kernel)?;
 
         Ok(Self {
             dci,

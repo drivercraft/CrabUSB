@@ -1,6 +1,7 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cell::UnsafeCell;
 use core::time::Duration;
+use dma_api::DmaDirection;
 use futures::{FutureExt, future::BoxFuture};
 use spin::RwLock;
 
@@ -115,11 +116,7 @@ impl Xhci {
 
         let reg_shared = Arc::new(RwLock::new(reg.clone()));
 
-        let cmd = CommandRing::new(
-            dma_api::Direction::Bidirectional,
-            &kernel,
-            reg_shared.clone(),
-        )?;
+        let cmd = CommandRing::new(DmaDirection::Bidirectional, &kernel, reg_shared.clone())?;
         let cmd_finished = cmd.finished_handle();
         let event_ring = EventRing::new(&kernel)?;
         let event_ring_info = event_ring.info();
@@ -363,9 +360,9 @@ impl Xhci {
 
     fn setup_dcbaap(&mut self) -> Result {
         let dcbaa_addr = self.dev()?.dcbaa.dma_addr();
-        debug!("DCBAAP: {dcbaa_addr:X}");
+        debug!("DCBAAP: {dcbaa_addr}");
         self.reg.write().operational.dcbaap.update_volatile(|r| {
-            r.set(dcbaa_addr);
+            r.set(dcbaa_addr.as_u64());
         });
         Ok(())
     }

@@ -1,4 +1,4 @@
-use dma_api::DArray;
+use dma_api::{DArray, DmaDirection};
 use mbarrier::mb;
 use xhci::ring::trb::event::Allowed;
 
@@ -22,17 +22,17 @@ unsafe impl Sync for EventRing {}
 
 impl EventRing {
     pub fn new(dma: &Kernel) -> Result<Self> {
-        let ring = Ring::new(true, dma_api::Direction::Bidirectional, dma)?;
+        let ring = Ring::new(true, DmaDirection::Bidirectional, dma)?;
 
         // let mut ste = DVec::zeros(dma_mask as _, 1, 64, dma_api::Direction::Bidirectional)
         //     .map_err(|_| USBError::NoMemory)?;
 
         let mut ste = dma
-            .new_array(1, 64, dma_api::Direction::Bidirectional)
+            .array_zero_with_align(1, 64, DmaDirection::Bidirectional)
             .map_err(|_| USBError::NoMemory)?;
 
         let ste0 = EventRingSte {
-            addr: ring.trbs.dma_addr(),
+            addr: ring.trbs.dma_addr().as_u64(),
             size: ring.len() as _,
             _reserved: [0; 6],
         };
@@ -60,7 +60,7 @@ impl EventRing {
         self.ring.current_trb_addr().raw() & 0xFFFF_FFFF_FFFF_FFF0
     }
     pub fn erstba(&self) -> u64 {
-        self.ste.dma_addr()
+        self.ste.dma_addr().as_u64()
     }
 
     pub fn len(&self) -> usize {

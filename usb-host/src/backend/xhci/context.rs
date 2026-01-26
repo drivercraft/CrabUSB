@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use dma_api::{DArray, DBox};
+use dma_api::{DArray, DBox, DmaDirection};
 use xhci::context::{Device32Byte, Device64Byte, Input32Byte, Input64Byte, InputHandler};
 
 use crate::{Kernel, backend::xhci::SlotId, err::*};
@@ -33,15 +33,15 @@ impl ContextData {
             Ok(ContextData::Context64(Context64 {
                 // out: DBox::zero_with_align(dma_mask as _, dma_api::Direction::FromDevice, 64)?,
                 // input: DBox::zero_with_align(dma_mask as _, dma_api::Direction::ToDevice, 64)?,
-                out: dma.new_box(64, dma_api::Direction::FromDevice)?,
-                input: dma.new_box(64, dma_api::Direction::ToDevice)?,
+                out: dma.box_zero_with_align(64, DmaDirection::FromDevice)?,
+                input: dma.box_zero_with_align(64, DmaDirection::ToDevice)?,
             }))
         } else {
             Ok(ContextData::Context32(Context32 {
                 // out: DBox::zero_with_align(dma_mask as _, dma_api::Direction::FromDevice, 64)?,
                 // input: DBox::zero_with_align(dma_mask as _, dma_api::Direction::ToDevice, 64)?,
-                out: dma.new_box(64, dma_api::Direction::FromDevice)?,
-                input: dma.new_box(64, dma_api::Direction::ToDevice)?,
+                out: dma.box_zero_with_align(64, DmaDirection::FromDevice)?,
+                input: dma.box_zero_with_align(64, DmaDirection::ToDevice)?,
             }))
         }
     }
@@ -87,6 +87,7 @@ impl ContextData {
             ContextData::Context32(ctx) => ctx.out.dma_addr(),
             ContextData::Context64(ctx) => ctx.out.dma_addr(),
         }
+        .as_u64()
     }
 
     pub fn input_bus_addr(&self) -> u64 {
@@ -94,6 +95,7 @@ impl ContextData {
             ContextData::Context32(ctx) => ctx.input.dma_addr(),
             ContextData::Context64(ctx) => ctx.input.dma_addr(),
         }
+        .as_u64()
     }
 
     pub fn input_clean_change(&mut self) {
@@ -115,7 +117,7 @@ impl DeviceContextList {
         // let dcbaa = DVec::zeros(dma_mask as _, 256, 0x1000, dma_api::Direction::ToDevice)
         //     .map_err(|_| USBError::NoMemory)?;
         let dcbaa = dma
-            .new_array(256, dma.page_size(), dma_api::Direction::ToDevice)
+            .array_zero_with_align(256, dma.page_size(), DmaDirection::ToDevice)
             .map_err(|_| USBError::NoMemory)?;
         Ok(Self { dcbaa, max_slots })
     }
@@ -146,7 +148,7 @@ impl ScratchpadBufferArray {
         // .map_err(|_| USBError::NoMemory)?;
 
         let mut entries_vec = dma
-            .new_array(entries, 64, dma_api::Direction::Bidirectional)
+            .array_zero_with_align(entries, 64, DmaDirection::Bidirectional)
             .map_err(|_| USBError::NoMemory)?;
 
         // let pages: Vec<DVec<u8>> = (0..entries_vec.len())
@@ -163,10 +165,10 @@ impl ScratchpadBufferArray {
         let mut pages: Vec<DArray<u8>> = Vec::with_capacity(entries_vec.len());
         for _ in 0..entries_vec.len() {
             let page = dma
-                .new_array(
+                .array_zero_with_align(
                     dma.page_size(),
                     dma.page_size(),
-                    dma_api::Direction::Bidirectional,
+                DmaDirection::Bidirectional,
                 )
                 .map_err(|_| USBError::NoMemory)?;
             pages.push(page);
@@ -174,7 +176,7 @@ impl ScratchpadBufferArray {
 
         // 将每个页面的地址写入到 entries 数组中
         for (i, page) in pages.iter().enumerate() {
-            entries_vec.set(i, page.dma_addr());
+            entries_vec.set(i, page.dma_addr().as_u64());
         }
 
         Ok(Self {
@@ -184,6 +186,6 @@ impl ScratchpadBufferArray {
     }
 
     pub fn bus_addr(&self) -> u64 {
-        self.entries.dma_addr()
+        self.entries.dma_addr().as_u64()
     }
 }

@@ -1,5 +1,4 @@
-use dma_api::DArray;
-pub use dma_api::Direction;
+use dma_api::{DArray, DmaDirection};
 use xhci::ring::trb::{Link, command, transfer};
 
 use crate::{
@@ -49,11 +48,10 @@ impl Ring {
     pub fn new_with_len(
         len: usize,
         link: bool,
-        direction: Direction,
+        direction: DmaDirection,
         dma: &Kernel,
     ) -> core::result::Result<Self, HostError> {
-        // let trbs = DArray::zeros(dma_mask as _, len, page_size(), direction)?;
-        let trbs = dma.new_array(len, dma.page_size(), direction)?;
+        let trbs = dma.array_zero_with_align(len, dma.page_size(), direction)?;
 
         Ok(Self {
             link,
@@ -63,7 +61,7 @@ impl Ring {
         })
     }
 
-    pub fn new(link: bool, direction: Direction, dma: &Kernel) -> Result<Self> {
+    pub fn new(link: bool, direction: DmaDirection, dma: &Kernel) -> Result<Self> {
         let len = dma.page_size() / TRB_SIZE;
         Ok(Self::new_with_len(len, link, direction, dma)?)
     }
@@ -77,7 +75,7 @@ impl Ring {
     }
 
     pub fn bus_addr(&self) -> BusAddr {
-        self.trbs.dma_addr().into()
+        self.trbs.dma_addr().as_u64().into()
     }
 
     pub fn enque_command(&mut self, mut trb: command::Allowed) -> BusAddr {
@@ -172,7 +170,7 @@ pub struct SendRing<R> {
 }
 
 impl<R> SendRing<R> {
-    pub fn new(direction: Direction, dma: &Kernel) -> Result<Self> {
+    pub fn new(direction: DmaDirection, dma: &Kernel) -> Result<Self> {
         let ring = Ring::new(true, direction, dma)?;
         let finished = Finished::new(ring.trb_bus_addr_list());
         Ok(Self { ring, finished })

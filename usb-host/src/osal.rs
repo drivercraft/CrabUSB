@@ -2,15 +2,7 @@ use core::ops::Deref;
 use core::time::Duration;
 
 use dma_api::DeviceDma;
-pub use dma_api::{Direction as DmaDirection, DmaAddr, DmaError, DmaHandle, DmaOp};
-
-// use trait_ffi::def_extern_trait;
-
-// #[def_extern_trait]
-// pub trait Kernel {
-//     fn page_size() -> usize;
-//     fn delay(duration: Duration);
-// }
+pub use dma_api::{DmaAddr, DmaDirection, DmaError, DmaHandle, DmaMapHandle, DmaOp};
 
 #[derive(Clone)]
 pub(crate) struct Kernel {

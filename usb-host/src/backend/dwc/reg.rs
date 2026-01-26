@@ -1,6 +1,8 @@
 //! DWC3 寄存器定义
 //! 基于 Linux drivers/usb/dwc3/core.h
 
+use core::time::Duration;
+
 use tock_registers::interfaces::*;
 use tock_registers::{register_bitfields, register_structs, registers::*};
 
@@ -852,7 +854,6 @@ register_bitfields![u32,
 #[derive(Clone)]
 pub struct Dwc3Regs {
     base: usize,
-    kernel: Kernel,
 }
 
 impl Dwc3Regs {
@@ -861,8 +862,8 @@ impl Dwc3Regs {
     /// # Safety
     ///
     /// 调用者必须确保 `base` 地址有效且可以访问
-    pub unsafe fn new(base: usize, kernel: Kernel) -> Self {
-        Self { base, kernel }
+    pub unsafe fn new(base: usize) -> Self {
+        Self { base }
     }
 
     /// 获取全局寄存器
@@ -914,7 +915,7 @@ impl Dwc3Regs {
         trace!("DWC3: Device soft reset completed");
     }
 
-    pub async fn core_soft_reset(&mut self) {
+    pub async fn core_soft_reset(&self, kernel: &Kernel) {
         // Before Resetting PHY, put Core in Reset
         self.globals().gctl.modify(GCTL::CORESOFTRESET::Reset);
 
@@ -927,7 +928,7 @@ impl Dwc3Regs {
             .gusb2phycfg0
             .modify(GUSB2PHYCFG::PHYSOFTRST::Reset);
 
-        self.delay_ms(100);
+        kernel.delay(Duration::from_millis(100));
 
         // Clear USB3 PHY reset
         self.globals()
@@ -939,16 +940,11 @@ impl Dwc3Regs {
             .gusb2phycfg0
             .modify(GUSB2PHYCFG::PHYSOFTRST::Normal);
 
-        self.delay_ms(100);
+        kernel.delay(Duration::from_millis(100));
 
         // After PHYs are stable we can take Core out of reset state
         self.globals().gctl.modify(GCTL::CORESOFTRESET::Normal);
 
         debug!("DWC3: Core soft reset completed");
-    }
-
-    fn delay_ms(&self, ms: u32) {
-        self.kernel
-            .delay(core::time::Duration::from_millis(ms as _));
     }
 }

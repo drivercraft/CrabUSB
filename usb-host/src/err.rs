@@ -41,7 +41,7 @@ impl From<dma_api::DmaError> for HostError {
         match value {
             dma_api::DmaError::NoMemory => Self(USBError::NoMemory),
             dma_api::DmaError::DmaMaskNotMatch { .. } => Self(USBError::NoMemory),
-            dma_api::DmaError::LayoutError => Self(USBError::NoMemory),
+            e => Self(USBError::Other(e.into())),
         }
     }
 }
