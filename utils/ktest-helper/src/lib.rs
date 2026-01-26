@@ -51,7 +51,12 @@ impl DmaOp for KernelImpl {
             );
 
             unsafe {
-                new_virt.copy_from_nonoverlapping(addr, size);
+                let dst = core::slice::from_raw_parts_mut(new_virt.as_ptr(), size);
+                let src = core::slice::from_raw_parts(addr.as_ptr(), size);
+                dst.copy_from_slice(src);
+
+                // important: flush cache to make sure DMA can see the latest data
+                self.flush_invalidate(new_virt, size);
             }
 
             Ok(unsafe { DmaMapHandle::new(addr, new_phys.into(), layout, Some(new_virt)) })

@@ -291,22 +291,33 @@ impl Device {
         self.desc = self.ep_ctrl().get_device_descriptor().await?;
         Ok(())
     }
-
     async fn get_device_descriptor_base(&mut self) -> Result<DeviceDescriptorBase> {
-        let mut data = self
-            .kernel
-            .array_zero_with_align::<u8>(8, 8, crate::DmaDirection::FromDevice)
-            .unwrap();
+        let mut data = vec![0u8; 8];
 
         // DMA 传输
         self.ep_ctrl()
-            .get_descriptor(DescriptorType::DEVICE, 0, 0, unsafe { data.as_mut_slice() })
+            .get_descriptor(DescriptorType::DEVICE, 0, 0, data.as_mut_slice())
             .await?;
 
         let desc = unsafe { *(data.as_mut_slice().as_ptr() as *const DeviceDescriptorBase) };
 
         Ok(desc)
     }
+    // async fn get_device_descriptor_base(&mut self) -> Result<DeviceDescriptorBase> {
+    //     let mut data = self
+    //         .kernel
+    //         .array_zero_with_align::<u8>(8, 8, crate::DmaDirection::FromDevice)
+    //         .unwrap();
+
+    //     // DMA 传输
+    //     self.ep_ctrl()
+    //         .get_descriptor(DescriptorType::DEVICE, 0, 0, unsafe { data.as_mut_slice() })
+    //         .await?;
+
+    //     let desc = unsafe { *(data.as_mut_slice().as_ptr() as *const DeviceDescriptorBase) };
+
+    //     Ok(desc)
+    // }
 
     async fn get_configuration(&mut self) -> Result<u8> {
         let val = self.ep_ctrl().get_configuration().await?;
