@@ -95,7 +95,8 @@ impl Endpoint {
                 .buffer_len()
                 .saturating_sub(c.trb_transfer_length() as usize);
 
-            if t.transfer_len > 0 {
+            if transfer_len > 0 {
+                // 刷新/失效缓存，确保从 DMA 缓冲读取到有效数据
                 // t.dma_slice().prepare_read_all();
                 t.prepare_read_all();
             }
