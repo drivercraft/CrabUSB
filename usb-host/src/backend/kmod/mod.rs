@@ -10,14 +10,18 @@ mod xhci;
 use crate::err::*;
 
 use alloc::boxed::Box;
+
 use dwc::Dwc;
 use hub::RouteString;
 use kcore::*;
-pub use osal::KernelOp;
 use usb_if::Speed;
 use xhci::Xhci;
 
-pub use dwc::{CruOp, DwcNewParams};
+pub use dwc::{
+    CruOp, DwcNewParams, DwcParams, UdphyParam, Usb2PhyParam, UsbPhyInterfaceMode,
+    usb2phy::Usb2PhyPortId,
+};
+pub use osal::*;
 
 impl USBHost {
     pub fn new_xhci(mmio: Mmio, kernel: &'static dyn KernelOp) -> Result<USBHost> {

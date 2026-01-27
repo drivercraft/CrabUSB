@@ -1,6 +1,6 @@
 use tock_registers::register_bitfields;
 
-use crate::backend::dwc::consts::genmask;
+use super::super::consts::genmask;
 
 pub const CMN_LANE_MUX_AND_EN_OFFSET: u32 = 0x0288;
 

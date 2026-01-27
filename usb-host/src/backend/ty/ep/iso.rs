@@ -1,11 +1,8 @@
-use core::{pin::Pin, ptr::NonNull};
+use core::ptr::NonNull;
 
-use usb_if::err::TransferError;
+use usb_if::{err::TransferError, transfer::Direction};
 
-use crate::backend::ty::{
-    ep::TransferHandle,
-    transfer::{Transfer, TransferKind},
-};
+use crate::backend::ty::{ep::TransferHandle, transfer::TransferKind};
 
 use super::EndpointBase;
 
@@ -20,7 +17,7 @@ impl EndpointIsoIn {
         num_packets: usize,
     ) -> Result<usize, TransferError> {
         let t = self.submit(packets, num_packets)?.await?;
-        let n = t.transfer_len();
+        let n = t.transfer_len;
         Ok(n)
     }
 
@@ -29,14 +26,6 @@ impl EndpointIsoIn {
         packets: &mut [u8],
         num_packets: usize,
     ) -> Result<TransferHandle<'_>, TransferError> {
-        // let transfer = Transfer::new_in(
-        //     self.raw.kernel(),
-        //     TransferKind::Isochronous {
-        //         num_pkgs: num_packets,
-        //     },
-        //     Pin::new(packets),
-        // );
-
         let buff = if packets.is_empty() {
             None
         } else {
@@ -47,6 +36,7 @@ impl EndpointIsoIn {
             TransferKind::Isochronous {
                 num_pkgs: num_packets,
             },
+            Direction::In,
             buff,
         );
 
@@ -80,12 +70,20 @@ impl EndpointIsoOut {
         packets: &[u8],
         num_packets: usize,
     ) -> Result<TransferHandle<'_>, TransferError> {
-        let transfer = Transfer::new_out(
-            self.raw.kernel(),
+        let buff = if packets.is_empty() {
+            None
+        } else {
+            Some((
+                NonNull::new(packets.as_ptr() as *mut u8).unwrap(),
+                packets.len(),
+            ))
+        };
+        let transfer = self.raw.new_transfer(
             TransferKind::Isochronous {
                 num_pkgs: num_packets,
             },
-            Pin::new(packets),
+            Direction::Out,
+            buff,
         );
         self.raw.submit(transfer)
     }

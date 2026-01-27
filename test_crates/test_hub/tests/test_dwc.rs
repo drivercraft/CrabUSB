@@ -26,7 +26,6 @@ use core::{
     time::Duration,
 };
 use crab_usb::*;
-use log::info;
 use log::*;
 use rockchip_pm::RockchipPM;
 use rockchip_soc::{Cru, CruOp, GpioDirection, PinConfig, PinCtrl, PinCtrlOp, SocType};

@@ -1,3 +1,5 @@
+use core::ptr::NonNull;
+
 use alloc::{collections::BTreeMap, sync::Arc};
 
 use dma_api::DmaDirection;
@@ -82,12 +84,14 @@ impl Endpoint {
             Err(_e) => Err(TransferError::Other(anyhow!("Transfer failed"))),
         }?;
 
+        let transfer_len;
+
         // xHCI 规范：trb_transfer_length 字段根据端点方向有不同的含义
         // - IN 端点（设备到主机）：表示未传输的剩余字节数
         // - OUT 端点（主机到设备）：表示实际传输的字节数
         if matches!(t.direction, Direction::In) {
             // 对于 IN 端点，实际传输长度 = 请求长度 - 剩余长度
-            t.transfer_len = t
+            transfer_len = t
                 .buffer_len()
                 .saturating_sub(c.trb_transfer_length() as usize);
 
@@ -97,8 +101,9 @@ impl Endpoint {
             }
         } else {
             // 对于 OUT 端点，trb_transfer_length 就是实际传输长度
-            t.transfer_len = c.trb_transfer_length() as usize;
+            transfer_len = c.trb_transfer_length() as usize;
         }
+        t.transfer_len = transfer_len;
         trace!("Transfer data length: {}", t.transfer_len);
         Ok(t)
     }
@@ -316,9 +321,10 @@ impl EndpointOp for Endpoint {
     fn new_transfer(
         &mut self,
         kind: TransferKind,
-        buff: Option<(core::ptr::NonNull<u8>, usize)>,
+        direction: Direction,
+        buff: Option<(NonNull<u8>, usize)>,
     ) -> Transfer {
-        let transfer = 
+        Transfer::new(&self.kernel, kind, direction, buff)
     }
 }
 

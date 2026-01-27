@@ -11,25 +11,30 @@ use alloc::vec::Vec;
 use alloc::{boxed::Box, collections::BTreeMap};
 use dma_api::{DArray, DmaDirection};
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use tock_registers::interfaces::*;
 pub use usb_if::DrMode;
 use usb_if::Speed;
 
-use crate::KernelOp;
-use crate::backend::dwc::reg::GEVNTSIZ;
-use crate::backend::{CoreOp, DeviceAddressInfo};
-use crate::{
-    Mmio, Xhci,
-    backend::dwc::{
-        event::EventBuffer,
-        reg::{GCTL, GHWPARAMS0, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1},
-        udphy::Udphy,
-    },
-    err::{Result, USBError},
+use crate::backend::ty::Event;
+use crate::backend::{
+    kmod::{hub::HubOp, kcore::CoreOp, xhci::Xhci},
+    ty::{DeviceOp, EventHandlerOp},
+};
+use crate::osal::Kernel;
+use crate::{DeviceAddressInfo, KernelOp, Mmio};
+use reg::GUSB2PHYCFG;
+use {
+    event::EventBuffer,
+    reg::{GCTL, GHWPARAMS0, GHWPARAMS1, GHWPARAMS3, GHWPARAMS4, GUCTL1},
+    udphy::Udphy,
 };
 
+use crate::err::{Result, USBError};
+use reg::GEVNTSIZ;
+
 use usb2phy::Usb2Phy;
-pub use usb2phy::{Usb2PhyParam, Usb2PhyPortId};
+pub use usb2phy::Usb2PhyParam;
 
 /// USB PHY 接口模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -256,7 +261,6 @@ impl Dwc {
         self.dwc_regs.core_soft_reset(self.kernel()).await;
 
         // **关键调试：检查 PHY 软复位后的寄存器状态**
-        use crate::backend::dwc::reg::GUSB2PHYCFG;
         let gusb3_val = self.dwc_regs.globals().gusb3pipectl0.extract();
         let gusb2_val = self.dwc_regs.globals().gusb2phycfg0.extract();
         info!(
@@ -379,16 +383,13 @@ impl Dwc {
 
         info!("DWC3: Configuring PHY");
 
-        let is_mode_drd = if let Some(GHWPARAMS0::MODE::Value::DRD) = self
-            .dwc_regs
-            .globals()
-            .ghwparams0
-            .read_as_enum(GHWPARAMS0::MODE)
-        {
-            true
-        } else {
-            false
-        };
+        let is_mode_drd = matches!(
+            self.dwc_regs
+                .globals()
+                .ghwparams0
+                .read_as_enum(GHWPARAMS0::MODE),
+            Some(GHWPARAMS0::MODE::Value::DRD)
+        );
 
         // === USB3 PHY 配置 ===
         // **关键：读取当前寄存器值（保留硬件状态）**
@@ -569,7 +570,7 @@ impl Dwc {
 
     /// 输出关键寄存器状态用于调试
     fn dump_registers(&self) {
-        use crate::backend::dwc::reg::*;
+        use reg::*;
 
         let regs = self.dwc_regs.globals();
 
@@ -708,15 +709,15 @@ impl Dwc {
 // }
 
 impl CoreOp for Dwc {
-    fn init(&mut self) -> futures::future::BoxFuture<'_, Result<()>> {
+    fn init(&mut self) -> BoxFuture<'_, Result<()>> {
         self._init().boxed()
     }
 
-    fn root_hub(&mut self) -> Box<dyn super::ty::HubOp> {
+    fn root_hub(&mut self) -> Box<dyn HubOp> {
         self.xhci.root_hub()
     }
 
-    fn create_event_handler(&mut self) -> Box<dyn super::ty::EventHandlerOp> {
+    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp> {
         Box::new(DwcEventHandler {
             xhci: self.xhci.create_event_handler(),
             _dwc: self.dwc_regs.clone(),
@@ -726,11 +727,11 @@ impl CoreOp for Dwc {
     fn new_addressed_device<'a>(
         &'a mut self,
         addr: DeviceAddressInfo,
-    ) -> futures::future::BoxFuture<'a, Result<Box<dyn super::ty::DeviceOp>>> {
+    ) -> BoxFuture<'a, Result<Box<dyn DeviceOp>>> {
         self.xhci.new_addressed_device(addr)
     }
 
-    fn kernel(&self) -> &crate::Kernel {
+    fn kernel(&self) -> &Kernel {
         self.xhci.kernel()
     }
 }
@@ -750,11 +751,11 @@ impl DerefMut for Dwc {
 }
 
 pub struct DwcEventHandler {
-    xhci: Box<dyn super::ty::EventHandlerOp>,
+    xhci: Box<dyn EventHandlerOp>,
     _dwc: Dwc3Regs,
 }
-impl super::ty::EventHandlerOp for DwcEventHandler {
-    fn handle_event(&self) -> crate::Event {
+impl EventHandlerOp for DwcEventHandler {
+    fn handle_event(&self) -> Event {
         // let cnt = self.dwc.globals().gevnt[0].count.get();
         // debug!("DWC3 Event Handler: GEVNT[0] COUNT = {}", cnt);
         // self.dwc.globals().gevnt[0].count.set(0);

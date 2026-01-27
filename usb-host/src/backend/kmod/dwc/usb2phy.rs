@@ -7,15 +7,13 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
 
-use crate::{
-    Kernel, Mmio,
-    backend::dwc::{
-        CruOp,
-        consts::genmask,
-        udphy::{config::UdphyGrfReg, regmap::Regmap},
-    },
-    err::Result,
+use super::super::osal::Kernel;
+use super::{
+    CruOp,
+    consts::genmask,
+    udphy::{config::UdphyGrfReg, regmap::Regmap},
 };
+use crate::{Mmio, err::Result};
 
 /// USB2PHY 寄存器偏移
 pub mod reg_offset {

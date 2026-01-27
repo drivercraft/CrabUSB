@@ -1,7 +1,5 @@
-use crate::{
-    Mmio,
-    backend::dwc::{consts::genmask, udphy::config::UdphyGrfReg},
-};
+use super::super::{consts::genmask, udphy::config::UdphyGrfReg};
+use crate::Mmio;
 
 #[derive(Clone, Copy)]
 pub struct Regmap(usize);

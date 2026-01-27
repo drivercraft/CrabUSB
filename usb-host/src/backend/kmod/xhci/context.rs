@@ -3,7 +3,8 @@ use alloc::vec::Vec;
 use dma_api::{DArray, DBox, DmaDirection};
 use xhci::context::{Device32Byte, Device64Byte, Input32Byte, Input64Byte, InputHandler};
 
-use crate::{Kernel, backend::xhci::SlotId, err::*};
+use super::SlotId;
+use crate::{err::*, osal::Kernel};
 
 pub struct DeviceContextList {
     pub dcbaa: DArray<u64>,
@@ -168,7 +169,7 @@ impl ScratchpadBufferArray {
                 .array_zero_with_align(
                     dma.page_size(),
                     dma.page_size(),
-                DmaDirection::Bidirectional,
+                    DmaDirection::Bidirectional,
                 )
                 .map_err(|_| USBError::NoMemory)?;
             pages.push(page);

@@ -1,11 +1,8 @@
-use core::{pin::Pin, ptr::NonNull};
+use core::ptr::NonNull;
 
-use usb_if::err::TransferError;
+use usb_if::{err::TransferError, transfer::Direction};
 
-use crate::backend::ty::{
-    ep::TransferHandle,
-    transfer::{Transfer, TransferKind},
-};
+use crate::backend::ty::{ep::TransferHandle, transfer::TransferKind};
 
 use super::EndpointBase;
 
@@ -16,7 +13,7 @@ pub struct EndpointBulkIn {
 impl EndpointBulkIn {
     pub async fn submit_and_wait(&mut self, buff: &mut [u8]) -> Result<usize, TransferError> {
         let t = self.submit(buff)?.await?;
-        let n = t.transfer_len();
+        let n = t.transfer_len;
         Ok(n)
     }
 
@@ -27,7 +24,9 @@ impl EndpointBulkIn {
             Some((NonNull::new(buff.as_mut_ptr()).unwrap(), buff.len()))
         };
 
-        let transfer = self.raw.new_transfer(TransferKind::Bulk, buff);
+        let transfer = self
+            .raw
+            .new_transfer(TransferKind::Bulk, Direction::In, buff);
 
         self.raw.submit(transfer)
     }
@@ -51,7 +50,15 @@ impl EndpointBulkOut {
     }
 
     pub fn submit(&mut self, buff: &[u8]) -> Result<TransferHandle<'_>, TransferError> {
-        let transfer = Transfer::new_out(self.raw.kernel(), TransferKind::Bulk, Pin::new(buff));
+        let buff = if buff.is_empty() {
+            None
+        } else {
+            Some((NonNull::new(buff.as_ptr() as *mut u8).unwrap(), buff.len()))
+        };
+        let transfer = self
+            .raw
+            .new_transfer(TransferKind::Bulk, Direction::Out, buff);
+
         self.raw.submit(transfer)
     }
 }

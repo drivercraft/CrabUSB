@@ -1,6 +1,3 @@
-use core::ops::{Deref, DerefMut};
-
-use alloc::boxed::Box;
 use usb_if::host::ControlSetup;
 
 #[derive(Clone)]
@@ -20,23 +17,13 @@ impl TransferKind {
     }
 }
 
-#[repr(transparent)]
-pub struct Transfer(Box<dyn TransferOp>);
-
-impl Deref for Transfer {
-    type Target = dyn TransferOp;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref()
-    }
-}
-
-impl DerefMut for Transfer {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut()
-    }
-}
-
-pub trait TransferOp: Send + 'static {
-    fn transfer_len(&self) -> usize;
+#[cfg_attr(umod, Clone)]
+pub struct Transfer {
+    pub kind: TransferKind,
+    pub direction: usb_if::transfer::Direction,
+    #[cfg(kmod)]
+    pub mapping: Option<dma_api::SArrayPtr<u8>>,
+    #[cfg(umod)]
+    pub buffer: Option<(NonNull<u8>, usize)>,
+    pub transfer_len: usize,
 }

@@ -25,7 +25,6 @@ use super::{
 use crate::{
     DeviceAddressInfo, KernelOp, Mmio,
     backend::{
-        PortId,
         kmod::{hub::HubOp, kcore::CoreOp, xhci::reg::SlotBell},
         ty::{DeviceOp, Event, EventHandlerOp},
     },
@@ -514,15 +513,6 @@ impl Xhci {
         let slot_id = result.slot_id();
         trace!("assigned slot id: {slot_id}");
         Ok(slot_id.into())
-    }
-
-    pub fn port_speed(&self, port: PortId) -> u8 {
-        self.reg
-            .read()
-            .port_register_set
-            .read_volatile_at(port.raw() - 1)
-            .portsc
-            .port_speed()
     }
 }
 

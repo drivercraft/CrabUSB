@@ -21,10 +21,12 @@ pub mod err;
 mod host;
 pub(crate) mod queue;
 
-pub use backend::ty::Event;
+pub use crate::backend::ty::Event;
 pub use host::*;
 
-// pub use trait_ffi::impl_extern_trait;
+#[allow(unused_imports)]
+#[cfg(kmod)]
+pub use crate::backend::kmod::*;
 
 define_int_type!(BusAddr, u64);
 

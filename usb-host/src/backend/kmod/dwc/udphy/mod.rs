@@ -5,14 +5,14 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
 
-use super::CruOp;
+use super::{
+    CruOp,
+    udphy::regmap::{RK3588_UDPHY_24M_REFCLK_CFG, RK3588_UDPHY_INIT_SEQUENCE, Regmap},
+};
 use crate::{
-    Kernel, Mmio,
-    backend::dwc::udphy::regmap::{
-        RK3588_UDPHY_24M_REFCLK_CFG, RK3588_UDPHY_INIT_SEQUENCE, Regmap,
-    },
+    Mmio,
     err::Result,
-    osal::SpinWhile,
+    osal::{Kernel, SpinWhile},
 };
 
 pub mod config;

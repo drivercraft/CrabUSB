@@ -1,10 +1,9 @@
 use core::any::Any;
 
-use alloc::boxed::Box;
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 
 use futures::future::{BoxFuture, LocalBoxFuture};
-use usb_if::{err::USBError, host::hub::Speed};
+use usb_if::err::USBError;
 
 use crate::backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp};
 

@@ -6,34 +6,35 @@ use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::descriptor::DeviceDescriptorBase;
+use usb_if::err::USBError;
 use usb_if::{
     descriptor::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, EndpointDescriptor, EndpointType,
     },
-    host::{ControlSetup, USBError, hub::Speed},
+    host::{ControlSetup, hub::Speed},
     transfer::{Recipient, RequestType},
 };
 use xhci::ring::trb::command;
 
-use crate::Kernel;
-use crate::backend::DeviceAddressInfo;
+use super::{
+    SlotId, Xhci,
+    cmd::CommandRing,
+    context::ContextData,
+    endpoint::{Endpoint, EndpointDescriptorExt},
+    parse_default_max_packet_size_from_port_speed,
+    reg::SlotBell,
+    transfer::TransferResultHandler,
+};
+use crate::DeviceAddressInfo;
 use crate::backend::ty::HubParams;
-use crate::backend::xhci::cmd::CommandRing;
+
+use crate::osal::Kernel;
 use crate::{
-    Xhci,
     backend::{
         Dci,
         ty::{
             DeviceOp,
             ep::{EndpointBase, EndpointControl},
-        },
-        xhci::{
-            SlotId,
-            context::ContextData,
-            endpoint::{Endpoint, EndpointDescriptorExt},
-            parse_default_max_packet_size_from_port_speed,
-            reg::SlotBell,
-            transfer::TransferResultHandler,
         },
     },
     err::Result,
@@ -303,21 +304,6 @@ impl Device {
 
         Ok(desc)
     }
-    // async fn get_device_descriptor_base(&mut self) -> Result<DeviceDescriptorBase> {
-    //     let mut data = self
-    //         .kernel
-    //         .array_zero_with_align::<u8>(8, 8, crate::DmaDirection::FromDevice)
-    //         .unwrap();
-
-    //     // DMA 传输
-    //     self.ep_ctrl()
-    //         .get_descriptor(DescriptorType::DEVICE, 0, 0, unsafe { data.as_mut_slice() })
-    //         .await?;
-
-    //     let desc = unsafe { *(data.as_mut_slice().as_ptr() as *const DeviceDescriptorBase) };
-
-    //     Ok(desc)
-    // }
 
     async fn get_configuration(&mut self) -> Result<u8> {
         let val = self.ep_ctrl().get_configuration().await?;

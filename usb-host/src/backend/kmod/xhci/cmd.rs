@@ -8,12 +8,8 @@ use xhci::{
     ring::trb::{command, event::CommandCompletion},
 };
 
-use crate::{
-    Kernel,
-    backend::xhci::{reg::XhciRegisters, ring::SendRing},
-    err::ConvertXhciError,
-    queue::Finished,
-};
+use super::{reg::XhciRegisters, ring::SendRing};
+use crate::{err::ConvertXhciError, osal::Kernel, queue::Finished};
 
 #[derive(Clone)]
 pub struct CommandRing(Arc<Mutex<Inner>>);

@@ -6,7 +6,7 @@ use core::time::Duration;
 use tock_registers::interfaces::*;
 use tock_registers::{register_bitfields, register_structs, registers::*};
 
-use crate::Kernel;
+use super::super::osal::Kernel;
 use crate::osal::SpinWhile;
 
 /// DWC3 全局寄存器基址偏移 (相对于 xHCI 寄存器区域)

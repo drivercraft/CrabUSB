@@ -6,6 +6,7 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
+use usb_if::transfer::Direction;
 
 use crate::backend::ty::transfer::TransferKind;
 
@@ -44,9 +45,10 @@ impl EndpointBase {
     pub fn new_transfer(
         &mut self,
         kind: TransferKind,
+        direction: Direction,
         buff: Option<(NonNull<u8>, usize)>,
     ) -> Transfer {
-        self.raw.new_transfer(kind, buff)
+        self.raw.new_transfer(kind, direction, buff)
     }
 
     pub fn submit_and_wait(
@@ -72,7 +74,12 @@ impl EndpointBase {
 }
 
 pub(crate) trait EndpointOp: Send + Any + 'static {
-    fn new_transfer(&mut self, kind: TransferKind, buff: Option<(NonNull<u8>, usize)>) -> Transfer;
+    fn new_transfer(
+        &mut self,
+        kind: TransferKind,
+        direction: Direction,
+        buff: Option<(NonNull<u8>, usize)>,
+    ) -> Transfer;
 
     fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle<'_>, TransferError>;
 

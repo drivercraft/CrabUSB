@@ -1,6 +1,6 @@
 use dma_api::{DArray, DmaDirection};
 
-use crate::Kernel;
+use crate::osal::Kernel;
 
 pub struct EventBuffer {
     pub buffer: DArray<u8>,
