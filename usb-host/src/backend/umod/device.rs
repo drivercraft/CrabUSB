@@ -130,16 +130,6 @@ fn libusb_get_configuration_descriptors(
                 });
             }
 
-            // 提取类特定描述符（如 UVC 的格式和帧描述符）
-            let extra = if !alt_desc.extra.is_null() && alt_desc.extra_length > 0 {
-                unsafe {
-                    core::slice::from_raw_parts(alt_desc.extra, alt_desc.extra_length as usize)
-                        .to_vec()
-                }
-            } else {
-                Vec::new()
-            };
-
             alt_settings.push(InterfaceDescriptor {
                 interface_number: alt_desc.bInterfaceNumber,
                 alternate_setting: alt_desc.bAlternateSetting,
@@ -150,7 +140,6 @@ fn libusb_get_configuration_descriptors(
                 string: None,
                 num_endpoints: alt_desc.bNumEndpoints,
                 endpoints,
-                extra,
             });
         }
 
