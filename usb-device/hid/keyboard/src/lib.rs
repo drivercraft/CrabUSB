@@ -3,11 +3,18 @@
 extern crate alloc;
 use alloc::{string::ToString, vec::Vec};
 
-use crab_usb::device::{Device, DeviceInfo};
-use crab_usb::{Class, Direction, EndpointKind, EndpointType, err::USBError};
+use anyhow::bail;
+use crab_usb::{
+    EndpointKind,
+    device::{Device, DeviceInfo},
+    err::USBError,
+};
 use keyboard_types::{Key, Modifiers, NamedKey};
 use log::debug;
-use usb_if::err::TransferError;
+use usb_if::{
+    descriptor::{Class, EndpointType},
+    transfer::Direction,
+};
 
 /// 键盘事件类型
 #[derive(Debug, Clone, PartialEq)]
@@ -180,13 +187,9 @@ impl KeyBoard {
     }
 
     /// 接收并解析键盘事件
-    pub async fn recv_events(&mut self) -> Result<Vec<KeyEvent>, TransferError> {
+    pub async fn recv_events(&mut self) -> Result<Vec<KeyEvent>, anyhow::Error> {
         // 每次接收时获取端点
-        let endpoint_kind = self
-            ._device
-            .get_endpoint(self.endpoint_address)
-            .await
-            .map_err(|e| TransferError::Other(alloc::format!("Failed to get endpoint: {e}")))?;
+        let endpoint_kind = self._device.get_endpoint(self.endpoint_address).await?;
 
         let mut buf = [0u8; 8];
         let n = match endpoint_kind {
@@ -194,11 +197,13 @@ impl KeyBoard {
                 // 使用 submit_and_wait 方法进行同步等待
                 ep.submit_and_wait(&mut buf).await?
             }
-            _ => return Err(TransferError::Other("Unexpected endpoint type".into())),
+            _ => {
+                bail!("Invalid endpoint kind for keyboard")
+            }
         };
 
         if n == 0 {
-            return Err(TransferError::Other("Transfer returned zero bytes".into()));
+            bail!("No data received from keyboard");
         }
 
         let events = self.parse_keyboard_report(&buf);

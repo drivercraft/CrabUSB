@@ -44,4 +44,4 @@ jobs:
 
       - run: cargo install ostool
       - name: Test no-std
-        run: cargo test -p crab-usb --test test --target aarch64-unknown-none-softfloat -- -c qemu.toml --show-output
+        run: cargo test-hub

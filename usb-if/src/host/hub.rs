@@ -211,7 +211,7 @@ pub struct PortStatus {
     pub high_speed: bool,
 
     /// 端口速度
-    pub speed: DeviceSpeed,
+    pub speed: Speed,
 
     /// 端口状态变化标志
     pub change: PortStatusChange,
@@ -237,10 +237,11 @@ pub struct PortStatusChange {
 }
 
 /// USB 设备速度
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
-pub enum DeviceSpeed {
+pub enum Speed {
     Low = 0,
+    #[default]
     Full = 1,
     High = 2,
     Wireless = 3,
@@ -248,21 +249,21 @@ pub enum DeviceSpeed {
     SuperSpeedPlus = 5,
 }
 
-impl From<u8> for DeviceSpeed {
+impl From<u8> for Speed {
     fn from(value: u8) -> Self {
         match value {
-            0 => DeviceSpeed::Low,
-            1 => DeviceSpeed::Full,
-            2 => DeviceSpeed::High,
-            3 => DeviceSpeed::Wireless,
-            4 => DeviceSpeed::SuperSpeed,
-            5 => DeviceSpeed::SuperSpeedPlus,
-            _ => DeviceSpeed::Full,
+            0 => Speed::Low,
+            1 => Speed::Full,
+            2 => Speed::High,
+            3 => Speed::Wireless,
+            4 => Speed::SuperSpeed,
+            5 => Speed::SuperSpeedPlus,
+            _ => Speed::Full,
         }
     }
 }
 
-impl DeviceSpeed {
+impl Speed {
     /// 从 USB 2.0 Hub wPortStatus 解析速度
     ///
     /// 根据 USB 2.0 规范（第 11.24.2.7 节）：
@@ -272,13 +273,13 @@ impl DeviceSpeed {
     /// - 默认: Full Speed
     pub fn from_usb2_hub_status(raw: u16) -> Self {
         if (raw & 0x0200) != 0 {
-            DeviceSpeed::Low
+            Speed::Low
         } else if (raw & 0x0400) != 0 {
-            DeviceSpeed::High
+            Speed::High
         } else if (raw & 0x0800) != 0 {
-            DeviceSpeed::SuperSpeed
+            Speed::SuperSpeed
         } else {
-            DeviceSpeed::Full
+            Speed::Full
         }
     }
 
@@ -292,12 +293,12 @@ impl DeviceSpeed {
     /// - 5 = SuperSpeedPlus
     pub fn from_xhci_portsc(speed_value: u8) -> Self {
         match speed_value {
-            1 => DeviceSpeed::Full,
-            2 => DeviceSpeed::Low,
-            3 => DeviceSpeed::High,
-            4 => DeviceSpeed::SuperSpeed,
-            5 => DeviceSpeed::SuperSpeedPlus,
-            _ => DeviceSpeed::Full, // Reserved/Unknown
+            1 => Speed::Full,
+            2 => Speed::Low,
+            3 => Speed::High,
+            4 => Speed::SuperSpeed,
+            5 => Speed::SuperSpeedPlus,
+            _ => Speed::Full, // Reserved/Unknown
         }
     }
 
@@ -310,12 +311,12 @@ impl DeviceSpeed {
     /// - 4 = Super Speed
     pub fn to_xhci_slot_value(&self) -> u8 {
         match self {
-            DeviceSpeed::Low => 2,
-            DeviceSpeed::Full => 1,
-            DeviceSpeed::High => 3,
-            DeviceSpeed::SuperSpeed => 4,
-            DeviceSpeed::SuperSpeedPlus => 5,
-            DeviceSpeed::Wireless => 3,
+            Speed::Low => 2,
+            Speed::Full => 1,
+            Speed::High => 3,
+            Speed::SuperSpeed => 4,
+            Speed::SuperSpeedPlus => 5,
+            Speed::Wireless => 3,
         }
     }
 
@@ -324,12 +325,12 @@ impl DeviceSpeed {
     /// Values follow xHCI 4.19.2: 1=FS, 2=LS, 3=HS, 4=SS, 5=SS+.
     pub fn to_xhci_portsc_value(&self) -> u8 {
         match self {
-            DeviceSpeed::Full => 1,
-            DeviceSpeed::Low => 2,
-            DeviceSpeed::High => 3,
-            DeviceSpeed::SuperSpeed => 4,
-            DeviceSpeed::SuperSpeedPlus => 5,
-            DeviceSpeed::Wireless => 3,
+            Speed::Full => 1,
+            Speed::Low => 2,
+            Speed::High => 3,
+            Speed::SuperSpeed => 4,
+            Speed::SuperSpeedPlus => 5,
+            Speed::Wireless => 3,
         }
     }
 

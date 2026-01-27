@@ -7,11 +7,11 @@ use core::{
 
 use usb_if::{
     descriptor::{
-        ConfigurationDescriptor, DescriptorType, InterfaceDescriptor, LanguageId,
+        ConfigurationDescriptor, DescriptorType, DeviceDescriptor, InterfaceDescriptor, LanguageId,
         decode_string_descriptor,
     },
-    err::TransferError,
-    host::{ControlSetup, USBError},
+    err::{TransferError, USBError},
+    host::ControlSetup,
 };
 
 use crate::backend::ty::ep::EndpointKind;
@@ -22,11 +22,11 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
-    pub fn descriptor(&self) -> &crate::DeviceDescriptor {
+    pub fn descriptor(&self) -> &DeviceDescriptor {
         self.inner.descriptor()
     }
 
-    pub fn configurations(&self) -> &[crate::ConfigurationDescriptor] {
+    pub fn configurations(&self) -> &[ConfigurationDescriptor] {
         self.inner.configuration_descriptors()
     }
 
@@ -135,11 +135,11 @@ impl Device {
         Ok(())
     }
 
-    pub fn descriptor(&self) -> &crate::DeviceDescriptor {
+    pub fn descriptor(&self) -> &DeviceDescriptor {
         self.inner.descriptor()
     }
 
-    pub fn configurations(&self) -> &[crate::ConfigurationDescriptor] {
+    pub fn configurations(&self) -> &[ConfigurationDescriptor] {
         self.inner.configuration_descriptors()
     }
 

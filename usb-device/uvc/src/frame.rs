@@ -1,7 +1,7 @@
 use crate::descriptors::payload_header_flags as flags;
 use alloc::vec::Vec;
 use core::fmt::Debug;
-use crab_usb::TransferError;
+use crab_usb::err::TransferError;
 use log::{debug, warn};
 
 /// UVC 载荷头（2.4.3.3）

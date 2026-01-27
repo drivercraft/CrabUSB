@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(windows, unix)), no_std)]
+#![cfg_attr(target_os = "none", no_std)]
 #![feature(iterator_try_collect)]
 
 #[macro_use]
@@ -10,9 +10,7 @@ extern crate anyhow;
 
 use core::ptr::NonNull;
 
-pub use usb_if::descriptor::*;
-pub use usb_if::err::*;
-pub use usb_if::transfer::*;
+pub use usb_if;
 
 #[macro_use]
 mod _macros;
@@ -21,18 +19,17 @@ pub(crate) mod backend;
 pub mod device;
 pub mod err;
 mod host;
-pub(crate) mod hub;
-mod kcore;
-pub(crate) mod queue;
 
-pub use backend::ty::Event;
+pub use crate::backend::ty::Event;
+pub use crate::backend::ty::ep::{
+    EndpointBulkIn, EndpointBulkOut, EndpointControl, EndpointInterruptIn, EndpointInterruptOut,
+    EndpointIsoIn, EndpointIsoOut, EndpointKind,
+};
 pub use host::*;
-pub use usb_if::{DeviceSpeed, DrMode};
 
-#[macro_use]
-mod osal;
-pub use osal::Kernel;
-pub use trait_ffi::impl_extern_trait;
+#[allow(unused_imports)]
+#[cfg(kmod)]
+pub use crate::backend::kmod::*;
 
 define_int_type!(BusAddr, u64);
 

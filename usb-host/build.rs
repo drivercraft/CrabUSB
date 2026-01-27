@@ -1,13 +1,11 @@
 fn main() {
-    bare_test_macros::build_test_setup!();
+    println!("cargo::rustc-check-cfg=cfg(umod)");
+    println!("cargo::rustc-check-cfg=cfg(kmod)");
 
-    println!("cargo::rustc-check-cfg=cfg(libusb)");
-
-    let target = std::env::var("TARGET").unwrap_or_default();
-
-    if std::env::var("CARGO_FEATURE_LIBUSB").is_ok()
-        && (target.contains("windows") || target.contains("linux") || target.contains("apple"))
-    {
-        println!("cargo::rustc-cfg=libusb");
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if os == "none" {
+        println!("cargo::rustc-cfg=kmod");
+    } else {
+        println!("cargo::rustc-cfg=umod");
     }
 }

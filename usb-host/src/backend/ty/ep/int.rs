@@ -1,11 +1,8 @@
-use core::pin::Pin;
+use core::ptr::NonNull;
 
-use usb_if::err::TransferError;
+use usb_if::{err::TransferError, transfer::Direction};
 
-use crate::{
-    TransferHandle,
-    backend::ty::transfer::{Transfer, TransferKind},
-};
+use crate::backend::ty::{ep::TransferHandle, transfer::TransferKind};
 
 use super::EndpointBase;
 
@@ -21,7 +18,17 @@ impl EndpointInterruptIn {
     }
 
     pub fn submit(&mut self, buff: &mut [u8]) -> Result<TransferHandle<'_>, TransferError> {
-        let transfer = Transfer::new_in(TransferKind::Interrupt, Pin::new(buff));
+        // let transfer = Transfer::new_in(self.raw.kernel(), TransferKind::Interrupt, Pin::new(buff));
+        let buff = if buff.is_empty() {
+            None
+        } else {
+            Some((NonNull::new(buff.as_mut_ptr()).unwrap(), buff.len()))
+        };
+
+        let transfer = self
+            .raw
+            .new_transfer(TransferKind::Interrupt, Direction::In, buff);
+
         self.raw.submit(transfer)
     }
 }
@@ -44,7 +51,14 @@ impl EndpointInterruptOut {
     }
 
     pub fn submit(&mut self, buff: &[u8]) -> Result<TransferHandle<'_>, TransferError> {
-        let transfer = Transfer::new_out(TransferKind::Interrupt, Pin::new(buff));
+        let buff = if buff.is_empty() {
+            None
+        } else {
+            Some((NonNull::new(buff.as_ptr() as *mut u8).unwrap(), buff.len()))
+        };
+        let transfer = self
+            .raw
+            .new_transfer(TransferKind::Interrupt, Direction::Out, buff);
         self.raw.submit(transfer)
     }
 }

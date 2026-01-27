@@ -3,16 +3,12 @@ use core::fmt::Debug;
 
 use futures::future::BoxFuture;
 use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
-use usb_if::host::hub::DeviceSpeed;
+use usb_if::host::hub::Speed;
 
 use crate::{backend::ty::ep::EndpointControl, err::USBError};
 
-// pub mod hub;
 pub mod ep;
-mod hub;
 pub mod transfer;
-
-pub use hub::*;
 
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -25,6 +21,7 @@ pub(crate) trait EventHandlerOp: Send + Any + Sync + 'static {
     fn handle_event(&self) -> Event;
 }
 
+#[allow(dead_code)]
 pub(crate) trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
     fn id(&self) -> usize;
     fn backend_name(&self) -> &str;
@@ -81,5 +78,5 @@ pub struct HubParams {
     pub root_hub_port_number: u8,
 
     /// 设备速度
-    pub port_speed: DeviceSpeed,
+    pub port_speed: Speed,
 }

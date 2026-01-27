@@ -11,14 +11,51 @@ pub enum TransferError {
     #[error("Cancelled")]
     Cancelled,
     #[error("Other error: {0}")]
-    Other(String),
+    Other(#[from] anyhow::Error),
 }
 
 impl From<Box<dyn core::error::Error>> for TransferError {
     fn from(err: Box<dyn core::error::Error>) -> Self {
-        TransferError::Other(alloc::format!("{err}"))
+        TransferError::Other(anyhow::anyhow!("{}", err))
     }
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum USBError {
+    #[error("Timeout")]
+    Timeout,
+    #[error("No memory available")]
+    NoMemory,
+    #[error("Transfer error: {0}")]
+    TransferError(#[from] TransferError),
+    #[error("Not initialized")]
+    NotInitialized,
+    #[error("Not found")]
+    NotFound,
+    #[error("Invalid parameter")]
+    InvalidParameter,
+    #[error("Slot limit reached")]
+    SlotLimitReached,
+    #[error("Configuration not set")]
+    ConfigurationNotSet,
+    #[error("Not supported")]
+    NotSupported,
+    #[error("Other error: {0}")]
+    Other(#[from] anyhow::Error),
+}
+
+impl From<&str> for USBError {
+    fn from(value: &str) -> Self {
+        USBError::Other(anyhow::anyhow!("{value}"))
+    }
+}
+
+impl From<String> for USBError {
+    fn from(value: String) -> Self {
+        USBError::Other(anyhow::anyhow!(value))
+    }
+}
+
 /*
 
 LIBUSB_SUCCESS

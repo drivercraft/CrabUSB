@@ -7,13 +7,18 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+
 use crab_usb::{
-    Class, Direction, EndpointKind, EndpointType, Recipient, Request, RequestType,
+    EndpointKind,
     device::{Device, DeviceInfo},
     err::USBError,
 };
 use log::{debug, info, trace};
-use usb_if::host::ControlSetup;
+use usb_if::{
+    descriptor::{Class, EndpointType},
+    host::ControlSetup,
+    transfer::{Direction, Recipient, Request, RequestType},
+};
 
 // 导入描述符解析模块
 pub mod descriptors;

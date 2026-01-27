@@ -1,8 +1,6 @@
 use core::fmt::Display;
 
-use alloc::format;
-pub use usb_if::err::TransferError;
-pub use usb_if::host::USBError;
+pub use usb_if::err::{TransferError, USBError};
 use xhci::ring::trb::event::CompletionCode;
 
 pub type Result<T = ()> = core::result::Result<T, USBError>;
@@ -19,11 +17,11 @@ impl ConvertXhciError for CompletionCode {
             CompletionCode::StallError => Err(TransferError::Stall),
             CompletionCode::MissedServiceError => {
                 // MissedServiceError 通常是暂时性的，可以重试
-                Err(TransferError::Other(format!(
+                Err(TransferError::Other(anyhow!(
                     "XHCI temporary error: {self:?}"
                 )))
             }
-            _ => Err(TransferError::Other(format!("XHCI error: {self:?}"))),
+            _ => Err(TransferError::Other(anyhow!("XHCI error: {self:?}"))),
         }
     }
 }
@@ -37,12 +35,12 @@ impl Display for HostError {
     }
 }
 
-impl From<dma_api::DError> for HostError {
-    fn from(value: dma_api::DError) -> Self {
+impl From<dma_api::DmaError> for HostError {
+    fn from(value: dma_api::DmaError) -> Self {
         match value {
-            dma_api::DError::NoMemory => Self(USBError::NoMemory),
-            dma_api::DError::DmaMaskNotMatch { .. } => Self(USBError::NoMemory),
-            dma_api::DError::LayoutError => Self(USBError::NoMemory),
+            dma_api::DmaError::NoMemory => Self(USBError::NoMemory),
+            dma_api::DmaError::DmaMaskNotMatch { .. } => Self(USBError::NoMemory),
+            e => Self(USBError::Other(e.into())),
         }
     }
 }

@@ -1,8 +1,6 @@
 #![cfg(not(target_os = "none"))]
 
-use std::{hint::spin_loop, thread};
-
-use crab_usb::{Class, USBHost, device::DeviceInfo};
+use crab_usb::{USBHost, device::DeviceInfo, usb_if::descriptor::Class};
 use log::info;
 
 #[tokio::test]
@@ -36,7 +34,7 @@ async fn test() {
             }
         }
     }
-    let mut info = info.unwrap();
+    let info = info.unwrap();
 
     let mut device = host.open_device(&info).await.unwrap();
     info!("Opened device: {}", device.descriptor().product_id);
@@ -51,7 +49,7 @@ async fn test() {
         let iface = iface.first_alt_setting();
 
         info!("Interface: {iface:?}");
-        let interface = device
+        device
             .claim_interface(iface.interface_number, 0)
             .await
             .unwrap();

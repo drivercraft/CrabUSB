@@ -1,5 +1,5 @@
 [workspace]
-members = ["test_crates/*", "usb-device/hid/keyboard", "usb-device/uvc", "usb-host", "usb-if", "utils/uvc-frame-parser"]
+members = ["test_crates/*", "usb-device/hid/keyboard", "usb-device/uvc", "usb-host", "usb-if", "utils/ktest-helper", "utils/uvc-frame-parser"]
 resolver = "3"
 
 [workspace.package]
@@ -18,3 +18,4 @@ tock-registers = "0.10"
 bare-test = {version = "0.7"}
 rockchip-pm = "0.4"
 rockchip-soc = "0.1"
+ktest-helper = {path = "utils/ktest-helper", version = "0.1" }

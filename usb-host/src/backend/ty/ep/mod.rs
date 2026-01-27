@@ -1,10 +1,14 @@
 use alloc::boxed::Box;
 use core::any::Any;
+use core::ptr::NonNull;
 use core::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
+use usb_if::transfer::Direction;
+
+use crate::backend::ty::transfer::TransferKind;
 
 use super::transfer::Transfer;
 use usb_if::err::TransferError;
@@ -29,38 +33,6 @@ pub enum EndpointKind {
     InterruptOut(EndpointInterruptOut),
 }
 
-impl EndpointKind {
-    // pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {
-    //     match self {
-    //         EndpointKind::Control(ep) => ep.raw.as_raw_mut::<T>(),
-    //         EndpointKind::Isochronous => {
-    //             panic!("EndpointType::as_type_mut: Isochronous endpoint not implemented")
-    //         }
-    //         EndpointKind::Bulk => {
-    //             panic!("EndpointType::as_type_mut: Bulk endpoint not implemented")
-    //         }
-    //         EndpointKind::Interrupt => {
-    //             panic!("EndpointType::as_type_mut: Interrupt endpoint not implemented")
-    //         }
-    //     }
-    // }
-
-    // pub(crate) fn as_raw_ref<T: EndpointOp>(&self) -> &T {
-    //     match self {
-    //         EndpointKind::Control(ep) => ep.raw.as_raw_ref::<T>(),
-    //         EndpointKind::Isochronous => {
-    //             panic!("EndpointType::as_type_ref: Isochronous endpoint not implemented")
-    //         }
-    //         EndpointKind::Bulk => {
-    //             panic!("EndpointType::as_type_ref: Bulk endpoint not implemented")
-    //         }
-    //         EndpointKind::Interrupt => {
-    //             panic!("EndpointType::as_type_ref: Interrupt endpoint not implemented")
-    //         }
-    //     }
-    // }
-}
-
 pub(crate) struct EndpointBase {
     raw: Box<dyn EndpointOp>,
 }
@@ -68,6 +40,15 @@ pub(crate) struct EndpointBase {
 impl EndpointBase {
     pub fn new(raw: impl EndpointOp) -> Self {
         Self { raw: Box::new(raw) }
+    }
+
+    pub fn new_transfer(
+        &mut self,
+        kind: TransferKind,
+        direction: Direction,
+        buff: Option<(NonNull<u8>, usize)>,
+    ) -> Transfer {
+        self.raw.new_transfer(kind, direction, buff)
     }
 
     pub fn submit_and_wait(
@@ -85,20 +66,22 @@ impl EndpointBase {
         self.raw.submit(transfer)
     }
 
+    #[allow(unused)]
     pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {
         let d = self.raw.as_mut() as &mut dyn Any;
         d.downcast_mut::<T>()
             .expect("EndpointBase downcast_mut failed")
     }
-
-    // pub(crate) fn as_raw_ref<T: EndpointOp>(&self) -> &T {
-    //     let d = self.raw.as_ref() as &dyn Any;
-    //     d.downcast_ref::<T>()
-    //         .expect("EndpointBase downcast_ref failed")
-    // }
 }
 
-pub trait EndpointOp: Send + Any + 'static {
+pub(crate) trait EndpointOp: Send + Any + 'static {
+    fn new_transfer(
+        &mut self,
+        kind: TransferKind,
+        direction: Direction,
+        buff: Option<(NonNull<u8>, usize)>,
+    ) -> Transfer;
+
     fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle<'_>, TransferError>;
 
     fn query_transfer(&mut self, id: u64) -> Option<Result<Transfer, TransferError>>;
@@ -112,7 +95,7 @@ pub struct TransferHandle<'a> {
 }
 
 impl<'a> TransferHandle<'a> {
-    pub fn new(id: u64, endpoint: &'a mut dyn EndpointOp) -> Self {
+    pub(crate) fn new(id: u64, endpoint: &'a mut dyn EndpointOp) -> Self {
         Self { id, endpoint }
     }
 }

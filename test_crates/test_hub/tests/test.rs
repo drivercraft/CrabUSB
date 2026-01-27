@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(used_with_arg)]
 #![allow(dead_code)]
+#![cfg(target_os = "none")]
 
 extern crate alloc;
 
@@ -14,16 +15,16 @@ mod tests {
         fdt_parser::{PciSpace, Status},
         globals::{PlatformInfoKind, global_val},
         irq::{IrqHandleResult, IrqInfo, IrqParam},
-        mem::{iomap, page_size},
+        mem::iomap,
         platform::fdt::GetPciIrqConfig,
         println,
-        time::spin_delay,
     };
     use core::{
         sync::atomic::{AtomicBool, Ordering},
         time::Duration,
     };
-    use crab_usb::{impl_trait, *};
+    use crab_usb::{usb_if::descriptor::ConfigurationDescriptor, *};
+    use ktest_helper::*;
 
     use log::info;
     use log::*;
@@ -147,19 +148,6 @@ mod tests {
         });
     }
 
-    struct KernelImpl;
-    impl_trait! {
-           impl Kernel for KernelImpl {
-               fn page_size() -> usize {
-                   page_size()
-               }
-    fn delay(duration: Duration){
-                   spin_delay(duration);
-    }
-
-           }
-       }
-
     struct XhciInfo {
         usb: USBHost,
         irq: Option<IrqInfo>,
@@ -269,7 +257,7 @@ mod tests {
                     println!("irq: {irq:?}");
 
                     return Some(XhciInfo {
-                        usb: USBHost::new_xhci(addr).unwrap(),
+                        usb: USBHost::new_xhci(addr, &KernelImpl).unwrap(),
                         irq,
                     });
                 }
@@ -316,7 +304,7 @@ mod tests {
                 let irq = node.irq_info();
 
                 return XhciInfo {
-                    usb: USBHost::new_xhci(addr).unwrap(),
+                    usb: USBHost::new_xhci(addr, &KernelImpl).unwrap(),
                     irq,
                 };
             }
