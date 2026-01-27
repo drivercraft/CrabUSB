@@ -171,12 +171,8 @@ impl Device {
     async fn address(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
         // 直接使用 DeviceSpeed 枚举计算默认 max packet size
         let max_packet_size = parse_default_max_packet_size_from_port_speed(info.port_speed);
-        // Route String is only valid for USB3.x devices; USB2.x devices must use 0.
-        let route_string = if matches!(info.port_speed, Speed::SuperSpeed | Speed::SuperSpeedPlus) {
-            info.route_string.raw()
-        } else {
-            0
-        };
+
+        let route_string = info.route_string.raw();
 
         let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
         // ctrl dci
