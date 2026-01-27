@@ -231,7 +231,7 @@ struct StreamControl {
 
 pub struct UvcDevice {
     device: Device,
-    video_control_interface_num: u8,
+
     video_streaming_interface_num: u8,
     processing_unit_id: Option<u8>, // 处理单元ID
     // ep_in: Option<EndpointIsoIn>,
@@ -313,40 +313,12 @@ impl UvcDevice {
 
         debug!("Using Video Control interface: {video_control_info:?}");
 
-        let video_control_interface = device
+        device
             .claim_interface(video_control_info.0, video_control_info.1)
             .await?;
 
-        // let mut video_streaming_interface = None;
-        // let mut ep_in = None;
-
-        // if let Some((vs_interface_num, vs_alt_setting)) = video_streaming_info {
-        //     debug!("Using Video Streaming interface: {vs_interface_num} alt {vs_alt_setting}");
-
-        //     let mut vs_interface = device
-        //         .claim_interface(vs_interface_num, vs_alt_setting)
-        //         .await?;
-
-        //     // 查找同步 IN 端点用于视频数据传输
-        //     for endpoint in vs_interface.descriptor.endpoints.clone().into_iter() {
-        //         match (endpoint.transfer_type, endpoint.direction) {
-        //             (EndpointType::Isochronous, Direction::In) => {
-        //                 debug!("Found isochronous IN endpoint: {endpoint:?}");
-        //                 ep_in = Some(vs_interface.endpoint_iso_in(endpoint.address)?);
-        //                 break;
-        //             }
-        //             _ => {
-        //                 debug!("Ignoring endpoint: {endpoint:?}");
-        //             }
-        //         }
-        //     }
-
-        //     video_streaming_interface = Some(vs_interface);
-        // }
-
         Ok(Self {
             device,
-            video_control_interface_num: video_control_info.0,
             // video_streaming_interface,
             video_streaming_interface_num: video_streaming_info
                 .map(|(num, _)| num)
