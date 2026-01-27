@@ -21,6 +21,7 @@ pub(crate) trait EventHandlerOp: Send + Any + Sync + 'static {
     fn handle_event(&self) -> Event;
 }
 
+#[allow(dead_code)]
 pub(crate) trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
     fn id(&self) -> usize;
     fn backend_name(&self) -> &str;

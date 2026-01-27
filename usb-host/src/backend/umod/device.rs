@@ -7,14 +7,10 @@ use usb_if::descriptor::{
     ConfigurationDescriptor, DeviceDescriptor, InterfaceDescriptor, InterfaceDescriptors,
 };
 
+use super::{context::Context, endpoint::EndpointImpl};
+use crate::backend::ty::ep::{EndpointBase, EndpointControl};
+use crate::backend::ty::{DeviceInfoOp, DeviceOp};
 use crate::err::*;
-use crate::{
-    EndpointBase, EndpointControl,
-    backend::{
-        libusb::{context::Context, endpoint::EndpointImpl},
-        ty::{DeviceInfoOp, DeviceOp},
-    },
-};
 
 pub struct DeviceInfo {
     pub(crate) raw: *mut libusb_device,
@@ -272,7 +268,7 @@ impl DeviceOp for Device {
         async move { self._claim_interface(interface, alternate).await }.boxed()
     }
 
-    fn ep_ctrl(&mut self) -> &mut crate::EndpointControl {
+    fn ep_ctrl(&mut self) -> &mut EndpointControl {
         &mut self.ctrl_ep
     }
 

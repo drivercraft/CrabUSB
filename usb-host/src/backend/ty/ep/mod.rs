@@ -66,6 +66,7 @@ impl EndpointBase {
         self.raw.submit(transfer)
     }
 
+    #[allow(unused)]
     pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {
         let d = self.raw.as_mut() as &mut dyn Any;
         d.downcast_mut::<T>()

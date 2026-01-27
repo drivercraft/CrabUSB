@@ -1,8 +1,9 @@
 use std::{sync::Arc, thread};
 
 use futures::FutureExt;
+use usb_if::err::USBError;
 
-use crate::backend::BackendOp;
+use crate::{USBHost, backend::BackendOp};
 
 #[macro_use]
 mod err;
@@ -10,6 +11,15 @@ mod err;
 mod context;
 mod device;
 mod endpoint;
+
+impl USBHost {
+    pub fn new_libusb() -> Result<USBHost, USBError> {
+        let host = USBHost {
+            backend: Box::new(Libusb::new()),
+        };
+        Ok(host)
+    }
+}
 
 pub struct Libusb {
     ctx: Arc<context::Context>,
@@ -34,9 +44,7 @@ impl Libusb {
         Self { ctx }
     }
 
-    async fn device_list(
-        &mut self,
-    ) -> Result<Vec<Box<dyn super::ty::DeviceInfoOp>>, usb_if::host::USBError> {
+    async fn device_list(&mut self) -> Result<Vec<Box<dyn super::ty::DeviceInfoOp>>, USBError> {
         let ctx = self.ctx.clone();
         let devices = ctx.device_list()?;
         let mut infos = Vec::new();
@@ -50,7 +58,7 @@ impl Libusb {
     async fn _open_device(
         &mut self,
         dev: &dyn super::ty::DeviceInfoOp,
-    ) -> Result<Box<dyn super::ty::DeviceOp>, usb_if::host::USBError> {
+    ) -> Result<Box<dyn super::ty::DeviceOp>, USBError> {
         let dev_info = (dev as &dyn core::any::Any)
             .downcast_ref::<device::DeviceInfo>()
             .unwrap();
@@ -67,32 +75,21 @@ impl Default for Libusb {
 }
 
 impl BackendOp for Libusb {
-    fn init<'a>(
-        &'a mut self,
-    ) -> futures::future::BoxFuture<'a, Result<(), usb_if::host::USBError>> {
+    fn init<'a>(&'a mut self) -> futures::future::BoxFuture<'a, Result<(), USBError>> {
         async { Ok(()) }.boxed()
     }
 
     fn device_list<'a>(
         &'a mut self,
-    ) -> futures::future::BoxFuture<
-        'a,
-        Result<Vec<Box<dyn super::ty::DeviceInfoOp>>, usb_if::host::USBError>,
-    > {
+    ) -> futures::future::BoxFuture<'a, Result<Vec<Box<dyn super::ty::DeviceInfoOp>>, USBError>>
+    {
         self.device_list().boxed()
     }
 
     fn open_device<'a>(
         &'a mut self,
         dev: &'a dyn super::ty::DeviceInfoOp,
-    ) -> futures::future::LocalBoxFuture<
-        'a,
-        Result<Box<dyn super::ty::DeviceOp>, usb_if::host::USBError>,
-    > {
+    ) -> futures::future::LocalBoxFuture<'a, Result<Box<dyn super::ty::DeviceOp>, USBError>> {
         async move { self._open_device(dev).await }.boxed_local()
-    }
-
-    fn create_event_handler(&mut self) -> Box<dyn super::ty::EventHandlerOp> {
-        unimplemented!("Libusb does not need an event handler")
     }
 }

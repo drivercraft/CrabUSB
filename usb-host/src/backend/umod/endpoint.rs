@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    ptr::null_mut,
     sync::{Arc, Weak, atomic::AtomicBool},
 };
 
@@ -15,12 +16,10 @@ use usb_if::{
     transfer::{BmRequestType, Direction},
 };
 
-use crate::{
-    EndpointOp,
-    backend::{
-        libusb::{device::DeviceHandle, err::transfer_status_to_result},
-        ty::transfer::{Transfer, TransferKind},
-    },
+use super::{device::DeviceHandle, err::transfer_status_to_result};
+use crate::backend::ty::{
+    ep::{EndpointOp, TransferHandle},
+    transfer::{Transfer, TransferKind},
 };
 
 pub struct EndpointImpl {
@@ -50,14 +49,23 @@ impl EndpointImpl {
 
         let trans_ptr = unsafe { libusb1_sys::libusb_alloc_transfer(iso_packets) };
         if trans_ptr.is_null() {
-            return Err(TransferError::Other("no memory".into()));
+            return Err(TransferError::Other(anyhow!(
+                "Failed to allocate libusb transfer"
+            )));
         }
 
         // 保存类型和方向
         let direction = transfer.direction;
-        let mut buffer = transfer.buffer_addr as *mut u8;
-        let data_len = transfer.buffer_len;
+        let mut buffer = null_mut();
+        let data_len;
         let timeout = 1000; // TODO: make it configurable
+
+        if let Some((buff_ptr, buff_len)) = transfer.buffer {
+            buffer = buff_ptr.as_ptr();
+            data_len = buff_len;
+        } else {
+            data_len = 0;
+        }
 
         // 判断是否为控制传输
         let temp_buff = if matches!(transfer.kind, TransferKind::Control(_)) {
@@ -87,12 +95,11 @@ impl EndpointImpl {
                     buffer = temp_buff_ptr;
 
                     // OUT 传输：复制用户数据到 buffer[8..]
-                    if direction == Direction::Out && data_len > 0 {
-                        core::ptr::copy_nonoverlapping(
-                            trans_handle.origin.buffer_addr as *const u8,
-                            buffer.add(8),
-                            data_len,
-                        );
+                    if direction == Direction::Out
+                        && data_len > 0
+                        && let Some((ptr, _len)) = trans_handle.origin.buffer
+                    {
+                        core::ptr::copy_nonoverlapping(ptr.as_ptr(), buffer.add(8), data_len);
                     }
 
                     // 填充 setup 包到 buffer[0..8]
@@ -181,21 +188,21 @@ unsafe impl Send for EndpointImpl {}
 impl EndpointOp for EndpointImpl {
     fn submit(
         &mut self,
-        transfer: crate::backend::ty::transfer::Transfer,
-    ) -> Result<crate::TransferHandle<'_>, usb_if::err::TransferError> {
+        transfer: Transfer,
+    ) -> Result<TransferHandle<'_>, usb_if::err::TransferError> {
         let trans = self.make_transfer(transfer)?;
         let id = trans.id();
         let ptr = trans.transfer;
         self.transfers.insert(id, trans);
         let submit_result = usb!(libusb_submit_transfer(ptr))
-            .map_err(|e| TransferError::Other(format!("Failed to submit transfer: {e:?}")));
+            .map_err(|e| TransferError::Other(anyhow!("Failed to submit transfer: {e:?}")));
 
         if submit_result.is_err() {
             self.transfers.remove(&id);
             return Err(submit_result.err().unwrap());
         }
         trace!("Submitted libusb transfer id {:#x}, ptr{:p}", id, ptr);
-        Ok(crate::TransferHandle::new(id, self))
+        Ok(TransferHandle::new(id, self))
     }
 
     fn query_transfer(
@@ -213,6 +220,20 @@ impl EndpointOp for EndpointImpl {
     fn register_cx(&self, id: u64, cx: &mut std::task::Context<'_>) {
         if let Some(trans) = self.transfers.get(&id) {
             trans.register_waker(cx);
+        }
+    }
+
+    fn new_transfer(
+        &mut self,
+        kind: TransferKind,
+        direction: Direction,
+        buff: Option<(std::ptr::NonNull<u8>, usize)>,
+    ) -> Transfer {
+        Transfer {
+            kind,
+            direction,
+            buffer: buff,
+            transfer_len: 0,
         }
     }
 }
@@ -239,16 +260,14 @@ impl TransferHandleRaw {
         transfer_status_to_result(unsafe { (*self.transfer).status })?;
         let trans_raw = unsafe { &*self.transfer };
 
-        if matches!(self.origin.kind, TransferKind::Control(_)) {
+        if matches!(self.origin.kind, TransferKind::Control(_))
+            && let Some((ptr, _len)) = self.origin.buffer
+        {
             // 控制传输，提取数据部分
             let data_ptr = unsafe { libusb_control_transfer_get_data(self.transfer) };
             let data_len = trans_raw.actual_length as usize;
             unsafe {
-                core::ptr::copy_nonoverlapping(
-                    data_ptr,
-                    self.origin.buffer_addr as *mut u8,
-                    data_len,
-                );
+                core::ptr::copy_nonoverlapping(data_ptr, ptr.as_ptr(), data_len);
             }
         }
 

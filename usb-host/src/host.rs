@@ -19,21 +19,6 @@ pub struct USBHost {
 }
 
 impl USBHost {
-    #[cfg(umod)]
-    pub fn new_libusb() -> Result<USBHost> {
-        let host = USBHost::new_user(crate::backend::libusb::Libusb::new());
-        Ok(host)
-    }
-}
-
-impl USBHost {
-    #[cfg(umod)]
-    pub(crate) fn new_user(backend: impl BackendOp) -> Self {
-        Self {
-            backend: Box::new(backend),
-        }
-    }
-
     /// 初始化主机控制器
     pub async fn init(&mut self) -> Result<()> {
         self.backend.init().await?;
@@ -50,6 +35,7 @@ impl USBHost {
         Ok(devices)
     }
 
+    #[cfg(kmod)]
     pub fn create_event_handler(&mut self) -> EventHandler {
         let handler = self.backend.create_event_handler();
         EventHandler { handler }

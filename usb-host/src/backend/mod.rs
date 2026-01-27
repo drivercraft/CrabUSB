@@ -5,7 +5,7 @@ use alloc::{boxed::Box, vec::Vec};
 use futures::future::{BoxFuture, LocalBoxFuture};
 use usb_if::err::USBError;
 
-use crate::backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp};
+use crate::backend::ty::{DeviceInfoOp, DeviceOp};
 
 #[cfg(umod)]
 pub mod umod;
@@ -44,5 +44,6 @@ pub(crate) trait BackendOp: Send + Any + 'static {
         dev: &'a dyn DeviceInfoOp,
     ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
 
-    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
+    #[cfg(kmod)]
+    fn create_event_handler(&mut self) -> Box<dyn crate::backend::ty::EventHandlerOp>;
 }
