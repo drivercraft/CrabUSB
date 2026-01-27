@@ -13,7 +13,6 @@ use keyboard_types::{Key, Modifiers, NamedKey};
 use log::debug;
 use usb_if::{
     descriptor::{Class, EndpointType},
-    err::TransferError,
     transfer::Direction,
 };
 
