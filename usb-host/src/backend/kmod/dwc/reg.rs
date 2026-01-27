@@ -499,7 +499,6 @@ register_bitfields![u32,
     ]
 ];
 
-/// GUID Register (GUID) - 0xc128
 register_bitfields![u32,
     GUID [
         /// GUID 值
@@ -511,8 +510,6 @@ register_bitfields![u32,
 // Global Hardware Parameters Registers (GHWPARAMS0-7)
 // =============================================================================
 
-/// Global Hardware Parameters 0 Register (GHWPARAMS0) - 0xc140
-/// 描述 DWC3 控制器的基本硬件配置
 register_bitfields![u32,
     pub GHWPARAMS0 [
         /// 操作模式 (bits 0-1)
@@ -567,8 +564,6 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global Hardware Parameters 2 Register (GHWPARAMS2) - 0xc148
-/// 描述端点和 FIFO 特性
 register_bitfields![u32,
     pub GHWPARAMS2 [
         /// 事务类型 (bits 0-1)
@@ -582,8 +577,6 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global Hardware Parameters 3 Register (GHWPARAMS3) - 0xc14c
-/// 描述 PHY 接口类型
 register_bitfields![u32,
     pub GHWPARAMS3 [
         /// SuperSpeed PHY 接口类型 (bits 0-1)
@@ -615,8 +608,6 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global Hardware Parameters 4 Register (GHWPARAMS4) - 0xc150
-/// 描述休眠模式和其他特性
 register_bitfields![u32,
     pub GHWPARAMS4 [
         /// 休眠 Scratch Buffer 数量 (bits 13-16)
@@ -630,8 +621,6 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global Hardware Parameters 5 Register (GHWPARAMS5) - 0xc154
-/// 描述超时和其他时序参数
 register_bitfields![u32,
     pub GHWPARAMS5 [
         /// 超时值 (bits 0-15)
@@ -642,8 +631,6 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global Hardware Parameters 6 Register (GHWPARAMS6) - 0xc158
-/// 描述 OTG、ADP 和其他高级特性
 register_bitfields![u32,
     pub GHWPARAMS6 [
         /// 充电支持 (bit 14)
@@ -691,8 +678,6 @@ register_bitfields![u32,
     ]
 ];
 
-/// Global Hardware Parameters 7 Register (GHWPARAMS7) - 0xc15c
-/// 描述 RAM 深度
 register_bitfields![u32,
     pub GHWPARAMS7 [
         /// RAM1 深度 (bits 0-15)
@@ -705,7 +690,6 @@ register_bitfields![u32,
     ]
 ];
 
-/// Device Control Register (DCTL) - 0xc704
 register_bitfields![u32,
     DCTL [
         /// 运行/停止 (bit 31)

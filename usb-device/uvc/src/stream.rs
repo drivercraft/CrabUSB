@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use crab_usb::EndpointIsoIn;
+use crab_usb::{EndpointIsoIn, err::USBError};
 use log::debug;
 
 use crate::{
@@ -52,7 +52,7 @@ impl VideoStream {
     }
 
     /// 接收一帧或多帧视频数据
-    pub async fn recv(&mut self) -> Result<Vec<FrameEvent>, usb_if::host::USBError> {
+    pub async fn recv(&mut self) -> Result<Vec<FrameEvent>, USBError> {
         self.buffer.fill(0);
 
         self.ep

@@ -21,6 +21,10 @@ pub mod err;
 mod host;
 
 pub use crate::backend::ty::Event;
+pub use crate::backend::ty::ep::{
+    EndpointBulkIn, EndpointBulkOut, EndpointControl, EndpointInterruptIn,
+    EndpointInterruptOut, EndpointIsoIn, EndpointIsoOut, EndpointKind,
+};
 pub use host::*;
 
 #[allow(unused_imports)]
