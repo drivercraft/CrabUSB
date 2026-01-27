@@ -1,7 +1,6 @@
 use core::fmt::Display;
 
-pub use usb_if::err::TransferError;
-pub use usb_if::host::USBError;
+pub use usb_if::err::{TransferError, USBError};
 use xhci::ring::trb::event::CompletionCode;
 
 pub type Result<T = ()> = core::result::Result<T, USBError>;

@@ -1,46 +1,38 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use core::cell::UnsafeCell;
-use core::time::Duration;
-use dma_api::DmaDirection;
-use futures::{FutureExt, future::BoxFuture};
-use spin::RwLock;
+use core::{cell::UnsafeCell, time::Duration};
 
-use mbarrier::mb;
-use usb_if::{err::TransferError, host::USBError};
-use xhci::{
+use ::xhci::{
     ExtendedCapability,
     extended_capabilities::{List, usb_legacy_support_capability::UsbLegacySupport},
     registers::doorbell,
     ring::trb::{command, event::CommandCompletion},
 };
+use dma_api::DmaDirection;
+use futures::{FutureExt, future::BoxFuture};
+use mbarrier::mb;
+use spin::RwLock;
+use usb_if::err::{TransferError, USBError};
 
-use super::Device;
-use super::hub::XhciRootHub;
-use super::reg::{MemMapper, XhciRegisters};
-use crate::{
-    Kernel, KernelOp,
-    backend::{
-        CoreOp,
-        ty::{Event, EventHandlerOp},
-        xhci::{
-            SlotId,
-            context::{DeviceContextList, ScratchpadBufferArray},
-            event::{EventRing, EventRingInfo},
-            hub::PortChangeWaker,
-        },
-    },
+use super::{
+    Device, SlotId,
+    cmd::CommandRing,
+    context::{DeviceContextList, ScratchpadBufferArray},
+    event::{EventRing, EventRingInfo},
+    hub::{PortChangeWaker, XhciRootHub},
+    reg::{MemMapper, XhciRegisters},
+    transfer::TransferResultHandler,
 };
 use crate::{
-    Mmio,
+    DeviceAddressInfo, KernelOp, Mmio,
     backend::{
-        DeviceAddressInfo,
-        ty::DeviceOp,
-        xhci::{cmd::CommandRing, transfer::TransferResultHandler},
+        PortId,
+        kmod::{hub::HubOp, kcore::CoreOp, xhci::reg::SlotBell},
+        ty::{DeviceOp, Event, EventHandlerOp},
     },
     err::Result,
+    osal::{Kernel, SpinWhile},
+    queue::Finished,
 };
-use crate::{backend::PortId, osal::SpinWhile};
-use crate::{backend::xhci::reg::SlotBell, queue::Finished};
 
 pub struct Xhci {
     pub(crate) reg: Arc<RwLock<XhciRegisters>>,
@@ -58,7 +50,7 @@ unsafe impl Send for Xhci {}
 unsafe impl Sync for Xhci {}
 
 impl CoreOp for Xhci {
-    fn root_hub(&mut self) -> Box<dyn crate::backend::ty::HubOp> {
+    fn root_hub(&mut self) -> Box<dyn HubOp> {
         Box::new(
             self.root_hub
                 .take()

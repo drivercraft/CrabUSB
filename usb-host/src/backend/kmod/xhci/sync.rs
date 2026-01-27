@@ -3,7 +3,7 @@ use core::cell::UnsafeCell;
 
 use spin::{Mutex, RwLock};
 
-use crate::backend::xhci::reg::{DisableIrqGuard, XhciRegisters};
+use super::reg::{DisableIrqGuard, XhciRegisters};
 
 pub(crate) struct IrqLock<T> {
     inner: Mutex<()>,

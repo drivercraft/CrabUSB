@@ -10,8 +10,8 @@ use usb_if::{
         ConfigurationDescriptor, DescriptorType, DeviceDescriptor, InterfaceDescriptor, LanguageId,
         decode_string_descriptor,
     },
-    err::TransferError,
-    host::{ControlSetup, USBError},
+    err::{TransferError, USBError},
+    host::ControlSetup,
 };
 
 use crate::backend::ty::ep::EndpointKind;

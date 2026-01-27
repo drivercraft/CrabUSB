@@ -9,14 +9,16 @@ use futures::{FutureExt, future::BoxFuture};
 
 use usb_if::{
     descriptor::{Class, ConfigurationDescriptor, DeviceDescriptor, EndpointType},
+    err::USBError,
     host::{
-        ControlSetup, USBError,
-        hub::{Speed, HubDescriptor, PortFeature, PortStatus, PortStatusChange},
+        ControlSetup,
+        hub::{HubDescriptor, PortFeature, PortStatus, PortStatusChange, Speed},
     },
     transfer::{Recipient, Request, RequestType},
 };
 
-use crate::{Device, Kernel, backend::ty::HubOp, hub::PortChangeInfo};
+use super::HubOp;
+use crate::{Device, backend::kmod::hub::PortChangeInfo, osal::Kernel};
 
 // Hub 枚举常量 (参照 Linux 内核)
 
@@ -710,7 +712,7 @@ impl HubDevice {
                 return Err(USBError::from("Device disconnected during enable wait"));
             }
 
-            self.kernel.delay(Duration::from_millis(CHECK_INTERVAL_MS));
+            // self.kernel.delay(Duration::from_millis(CHECK_INTERVAL_MS));
         }
 
         warn!("Port {} enable timeout after {}ms", port_id, MAX_WAIT_MS);

@@ -1,13 +1,23 @@
 pub mod device;
 
+use core::any::Any;
 use core::fmt::Debug;
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use futures::future::BoxFuture;
+use usb_if::err::USBError;
 use usb_if::host::hub::Speed;
 // 重新导出常用类型
 pub use device::{HubDevice, PortState};
 use id_arena::Id;
+
+pub trait HubOp: Send + 'static + Any {
+    fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>>;
+    fn changed_ports<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<PortChangeInfo>, USBError>>;
+    fn slot_id(&self) -> u8;
+}
 
 #[derive(Debug, Clone)]
 pub struct PortChangeInfo {
@@ -83,13 +93,10 @@ pub struct Hub {
     pub parent: Option<Id<Hub>>,
     /// Roothub 为 `None`
     pub route_string: Option<RouteString>,
-    pub backend: Box<dyn crate::backend::ty::HubOp>,
+    pub backend: Box<dyn HubOp>,
 }
 impl Hub {
-    pub fn new(
-        backend: Box<dyn crate::backend::ty::HubOp>,
-        route_string: Option<RouteString>,
-    ) -> Self {
+    pub fn new(backend: Box<dyn HubOp>, route_string: Option<RouteString>) -> Self {
         Self {
             route_string,
             backend,

@@ -1,11 +1,11 @@
-use core::pin::Pin;
+use core::ptr::NonNull;
 
 use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
-use usb_if::err::TransferError;
-use usb_if::host::{ControlSetup, USBError};
+use usb_if::err::{TransferError, USBError};
+use usb_if::host::ControlSetup;
 use usb_if::transfer::{Recipient, Request, RequestType};
 
-use crate::backend::ty::transfer::{Transfer, TransferKind};
+use crate::backend::ty::transfer::TransferKind;
 
 use super::{EndpointBase, EndpointOp};
 
@@ -25,13 +25,16 @@ impl EndpointControl {
         param: usb_if::host::ControlSetup,
         buff: &mut [u8],
     ) -> Result<usize, TransferError> {
-        let transfer = Transfer::new_in(
-            self.raw.kernel(),
-            TransferKind::Control(param),
-            Pin::new(buff),
-        );
+        let buff = if buff.is_empty() {
+            None
+        } else {
+            Some((NonNull::new(buff.as_mut_ptr()).unwrap(), buff.len()))
+        };
+
+        let transfer = self.raw.new_transfer(TransferKind::Control(param), buff);
+
         let t = self.raw.submit_and_wait(transfer).await?;
-        let n = t.transfer_len;
+        let n = t.transfer_len();
         Ok(n)
     }
 
@@ -40,11 +43,17 @@ impl EndpointControl {
         param: usb_if::host::ControlSetup,
         buff: &[u8],
     ) -> Result<usize, TransferError> {
-        let transfer = Transfer::new_out(
-            self.raw.kernel(),
-            TransferKind::Control(param),
-            Pin::new(buff),
-        );
+        let buff = if buff.is_empty() {
+            None
+        } else {
+            Some((
+                NonNull::new(buff.as_ptr() as usize as *mut u8).unwrap(),
+                buff.len(),
+            ))
+        };
+
+        let transfer = self.raw.new_transfer(TransferKind::Control(param), buff);
+
         let t = self.raw.submit_and_wait(transfer).await?;
         let n = t.transfer_len;
         Ok(n)

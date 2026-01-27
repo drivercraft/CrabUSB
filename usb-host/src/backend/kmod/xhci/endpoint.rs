@@ -16,17 +16,18 @@ use xhci::{
     },
 };
 
+use super::{DirectionExt, reg::SlotBell, ring::SendRing, transfer::TransferId};
 use crate::{
-    BusAddr, Kernel,
+    BusAddr,
     backend::{
         Dci,
         ty::{
             ep::{EndpointOp, TransferHandle},
             transfer::{Transfer, TransferKind},
         },
-        xhci::{DirectionExt, reg::SlotBell, ring::SendRing, transfer::TransferId},
     },
     err::ConvertXhciError,
+    osal::Kernel,
 };
 
 pub struct Endpoint {
@@ -312,8 +313,12 @@ impl EndpointOp for Endpoint {
         self.ring.register_cx(BusAddr(id), cx);
     }
 
-    fn kernel(&self) -> &Kernel {
-        &self.kernel
+    fn new_transfer(
+        &mut self,
+        kind: TransferKind,
+        buff: Option<(core::ptr::NonNull<u8>, usize)>,
+    ) -> Transfer {
+        let transfer = 
     }
 }
 

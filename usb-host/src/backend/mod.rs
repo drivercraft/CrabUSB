@@ -4,18 +4,15 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use futures::future::{BoxFuture, LocalBoxFuture};
-use usb_if::host::{USBError, hub::Speed};
+use usb_if::{err::USBError, host::hub::Speed};
 
-use crate::{
-    Kernel,
-    backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp, HubOp},
-    hub::RouteString,
-};
+use crate::backend::ty::{DeviceInfoOp, DeviceOp, EventHandlerOp};
 
-pub mod dwc;
-#[cfg(libusb)]
-pub mod libusb;
-pub mod xhci;
+#[cfg(umod)]
+pub mod umod;
+
+#[cfg(kmod)]
+pub mod kmod;
 
 pub(crate) mod ty;
 
@@ -49,29 +46,4 @@ pub(crate) trait BackendOp: Send + Any + 'static {
     ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
 
     fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
-}
-
-pub(crate) trait CoreOp: Send + 'static {
-    /// 初始化后端
-    fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>>;
-
-    fn root_hub(&mut self) -> Box<dyn HubOp>;
-
-    fn new_addressed_device<'a>(
-        &'a mut self,
-        addr: DeviceAddressInfo,
-    ) -> BoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
-
-    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
-
-    fn kernel(&self) -> &Kernel;
-}
-
-pub struct DeviceAddressInfo {
-    pub route_string: RouteString,
-    pub root_port_id: u8,
-    pub parent_hub_slot_id: u8,
-    pub port_speed: Speed,
-    /// TT 信息：设备在 Hub 上的端口号（LS/FS 设备需要）
-    pub tt_port_on_hub: Option<u8>,
 }

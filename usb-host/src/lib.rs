@@ -19,16 +19,10 @@ pub(crate) mod backend;
 pub mod device;
 pub mod err;
 mod host;
-pub(crate) mod hub;
-mod kcore;
 pub(crate) mod queue;
 
 pub use backend::ty::Event;
 pub use host::*;
-
-#[macro_use]
-mod osal;
-pub use osal::*;
 
 // pub use trait_ffi::impl_extern_trait;
 

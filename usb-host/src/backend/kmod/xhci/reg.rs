@@ -6,7 +6,7 @@ use core::{
 
 use xhci::accessor::Mapper;
 
-use crate::backend::xhci::SlotId;
+use super::SlotId;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MemMapper;

@@ -5,16 +5,36 @@ use futures::{
     future::{BoxFuture, LocalBoxFuture},
 };
 use id_arena::{Arena, Id};
-use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
+use usb_if::{
+    descriptor::{ConfigurationDescriptor, DeviceDescriptor},
+    err::USBError,
+};
 
+use super::osal::Kernel;
 use crate::{
-    Device,
+    Device, DeviceAddressInfo,
     backend::{
-        BackendOp, CoreOp, DeviceAddressInfo,
+        BackendOp,
+        kmod::hub::{Hub, HubDevice, HubOp, PortChangeInfo, RouteString},
         ty::{DeviceInfoOp, DeviceOp, EventHandlerOp},
     },
-    hub::{Hub, HubDevice, PortChangeInfo, RouteString},
 };
+
+pub trait CoreOp: Send + 'static {
+    /// 初始化后端
+    fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>>;
+
+    fn root_hub(&mut self) -> Box<dyn HubOp>;
+
+    fn new_addressed_device<'a>(
+        &'a mut self,
+        addr: DeviceAddressInfo,
+    ) -> BoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>>;
+
+    fn create_event_handler(&mut self) -> Box<dyn EventHandlerOp>;
+
+    fn kernel(&self) -> &Kernel;
+}
 
 pub struct Core {
     pub(crate) backend: Box<dyn CoreOp>,
@@ -33,9 +53,7 @@ impl Core {
         }
     }
 
-    async fn _probe_devices(
-        &mut self,
-    ) -> Result<(bool, Vec<Box<dyn DeviceInfoOp>>), usb_if::host::Error> {
+    async fn _probe_devices(&mut self) -> Result<(bool, Vec<Box<dyn DeviceInfoOp>>), USBError> {
         let mut is_have_new_hub = false;
         let mut out = Vec::new();
 
@@ -114,12 +132,12 @@ impl Core {
     async fn hub_changed_ports(
         &mut self,
         hub_id: Id<Hub>,
-    ) -> Result<Vec<PortChangeInfo>, usb_if::host::Error> {
+    ) -> Result<Vec<PortChangeInfo>, USBError> {
         let hub = self.hubs.get_mut(hub_id).expect("Hub id should be valid");
         hub.backend.changed_ports().await
     }
 
-    async fn probe_devices(&mut self) -> Result<Vec<Box<dyn DeviceInfoOp>>, usb_if::host::Error> {
+    async fn probe_devices(&mut self) -> Result<Vec<Box<dyn DeviceInfoOp>>, USBError> {
         let mut result = Vec::new();
 
         loop {
@@ -134,7 +152,7 @@ impl Core {
 }
 
 impl BackendOp for Core {
-    fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), usb_if::host::Error>> {
+    fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>> {
         async {
             self.backend.init().await?;
             let mut root_hub = Hub::new(self.backend.root_hub(), None);
@@ -149,14 +167,14 @@ impl BackendOp for Core {
 
     fn device_list<'a>(
         &'a mut self,
-    ) -> BoxFuture<'a, Result<Vec<Box<dyn DeviceInfoOp>>, usb_if::host::Error>> {
+    ) -> BoxFuture<'a, Result<Vec<Box<dyn DeviceInfoOp>>, USBError>> {
         self.probe_devices().boxed()
     }
 
     fn open_device<'a>(
         &'a mut self,
         dev: &'a dyn crate::backend::ty::DeviceInfoOp,
-    ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>, usb_if::host::Error>> {
+    ) -> LocalBoxFuture<'a, Result<Box<dyn DeviceOp>, USBError>> {
         async {
             let device = self.inited_devices.remove(&dev.id()).unwrap_or_else(|| {
                 panic!("Device id {} not found in inited_devices", dev.id());

@@ -7,12 +7,8 @@ use usb_if::host::hub::Speed;
 
 use crate::{backend::ty::ep::EndpointControl, err::USBError};
 
-// pub mod hub;
 pub mod ep;
-mod hub;
 pub mod transfer;
-
-pub use hub::*;
 
 #[derive(Debug, Clone)]
 pub enum Event {

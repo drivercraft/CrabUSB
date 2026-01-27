@@ -1,11 +1,9 @@
 use alloc::{collections::BTreeMap, sync::Arc};
 use xhci::ring::trb::event::TransferEvent;
 
-use crate::{
-    BusAddr,
-    backend::xhci::{reg::XhciRegistersShared, ring::SendRing, sync::IrqLock},
-    queue::Finished,
-};
+use crate::{BusAddr, queue::Finished};
+
+use super::{reg::XhciRegistersShared, ring::SendRing, sync::IrqLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TransferId(pub(crate) BusAddr);

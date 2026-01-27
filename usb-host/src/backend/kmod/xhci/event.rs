@@ -3,7 +3,7 @@ use mbarrier::mb;
 use xhci::ring::trb::event::Allowed;
 
 use super::ring::Ring;
-use crate::{Kernel, err::*};
+use crate::{err::*, osal::Kernel};
 
 #[repr(C)]
 pub struct EventRingSte {

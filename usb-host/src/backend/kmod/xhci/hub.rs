@@ -9,12 +9,11 @@ use core::{
 };
 
 use futures::{FutureExt, future::BoxFuture, task::AtomicWaker};
-use usb_if::host::{USBError, hub::Speed};
+use usb_if::{err::USBError, host::hub::Speed};
 
-use crate::{
-    backend::{ty::HubOp, xhci::reg::XhciRegisters},
-    hub::{PortChangeInfo, PortState},
-};
+use crate::backend::kmod::hub::{HubOp, PortChangeInfo, PortState};
+
+use super::reg::XhciRegisters;
 
 pub struct PortChangeWaker {
     ports: Arc<UnsafeCell<Vec<Port>>>,

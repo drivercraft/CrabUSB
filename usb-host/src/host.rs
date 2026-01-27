@@ -1,36 +1,25 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::backend::{CoreOp, ty::*};
+use crate::backend::BackendOp;
+use crate::backend::ty::*;
 use crate::err::Result;
-use crate::{KernelOp, kcore::*};
-use crate::{Mmio, backend::BackendOp};
 
-pub use super::backend::{
-    dwc::{
-        CruOp, Dwc, DwcNewParams, DwcParams, UdphyParam, Usb2PhyParam, Usb2PhyPortId,
-        UsbPhyInterfaceMode,
-    },
-    ty::ep::*,
-    xhci::Xhci,
-};
+#[cfg(kmod)]
+pub use super::backend::kmod::*;
+
+#[cfg(umod)]
+pub use super::backend::umod::*;
+
 pub use crate::device::{Device, DeviceInfo};
 
 /// USB 主机控制器
 pub struct USBHost {
-    backend: Box<dyn BackendOp>,
+    pub(crate) backend: Box<dyn BackendOp>,
 }
 
 impl USBHost {
-    pub fn new_xhci(mmio: Mmio, kernel: &'static dyn KernelOp) -> Result<USBHost> {
-        Ok(USBHost::new(Xhci::new(mmio, kernel)?))
-    }
-
-    pub fn new_dwc(params: DwcNewParams<'_, impl CruOp>) -> Result<USBHost> {
-        Ok(USBHost::new(Dwc::new(params)?))
-    }
-
-    #[cfg(libusb)]
+    #[cfg(umod)]
     pub fn new_libusb() -> Result<USBHost> {
         let host = USBHost::new_user(crate::backend::libusb::Libusb::new());
         Ok(host)
@@ -38,14 +27,7 @@ impl USBHost {
 }
 
 impl USBHost {
-    pub(crate) fn new(backend: impl CoreOp) -> Self {
-        let b = Core::new(backend);
-        Self {
-            backend: Box::new(b),
-        }
-    }
-
-    #[cfg(libusb)]
+    #[cfg(umod)]
     pub(crate) fn new_user(backend: impl BackendOp) -> Self {
         Self {
             backend: Box::new(backend),

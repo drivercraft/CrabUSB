@@ -2,8 +2,9 @@ use dma_api::{DArray, DmaDirection};
 use xhci::ring::trb::{Link, command, transfer};
 
 use crate::{
-    BusAddr, Kernel,
+    BusAddr,
     err::*,
+    osal::Kernel,
     queue::{Finished, TWaiter},
 };
 
