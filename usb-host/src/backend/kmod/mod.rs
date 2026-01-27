@@ -4,6 +4,7 @@ mod dwc;
 mod hub;
 mod kcore;
 pub mod osal;
+pub(crate) mod queue;
 mod transfer;
 mod xhci;
 

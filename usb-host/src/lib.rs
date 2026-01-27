@@ -19,7 +19,6 @@ pub(crate) mod backend;
 pub mod device;
 pub mod err;
 mod host;
-pub(crate) mod queue;
 
 pub use crate::backend::ty::Event;
 pub use host::*;
