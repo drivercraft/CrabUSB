@@ -10,39 +10,23 @@ use bare_test::{
     fdt_parser::{PciSpace, Status},
     globals::{PlatformInfoKind, global_val},
     irq::{IrqHandleResult, IrqInfo, IrqParam},
-    mem::{iomap, page_size},
+    mem::iomap,
     platform::fdt::GetPciIrqConfig,
     println,
-    time::spin_delay,
 };
 use core::time::Duration;
 use crab_usb::device::DeviceInfo;
-use crab_usb::{impl_trait, *};
-
-struct KernelImpl;
-impl_trait! {
-    impl Kernel for KernelImpl {
-        fn page_size() -> usize {
-            page_size()
-        }
-
-        fn delay(duration: Duration) {
-            spin_delay(duration);
-        }
-    }
-}
+use crab_usb::*;
 
 #[bare_test::tests]
 mod tests {
-    use core::{
-        hint::spin_loop,
-        sync::atomic::{AtomicBool, Ordering},
-    };
+    use core::sync::atomic::{AtomicBool, Ordering};
 
     use alloc::{boxed::Box, vec::Vec};
 
     use bare_test::time::spin_delay;
     use crab_uvc::{UvcDevice, VideoControlEvent, VideoFormatType};
+    use ktest_helper::KernelImpl;
     use log::*;
     use pcie::*;
 
@@ -264,8 +248,7 @@ mod tests {
                 let irq = node.irq_info();
 
                 return XhciInfo {
-                    usb: USBHost::new_xhci(addr, u32::MAX as usize)
-                        .expect("Failed to create xhci host"),
+                    usb: USBHost::new_xhci(addr, &KernelImpl).expect("Failed to create xhci host"),
                     irq,
                 };
             }
@@ -376,7 +359,7 @@ mod tests {
                     println!("irq: {irq:?}");
 
                     return Some(XhciInfo {
-                        usb: USBHost::new_xhci(addr, u32::MAX as usize)
+                        usb: USBHost::new_xhci(addr, &KernelImpl)
                             .expect("Failed to create xhci host"),
                         irq,
                     });
