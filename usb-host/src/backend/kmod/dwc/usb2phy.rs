@@ -53,10 +53,11 @@ impl Usb2PhyPortId {
 ///
 /// 对应 U-Boot 的 `struct rockchip_usb2phy_port_cfg`
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct Usb2PhyPortCfg {
     /// PHY 挂起控制
     pub phy_sus: Usb2PhyGrfReg,
-    /// UTMI 线路状态
+    /// UTMI 线路状态（OTG 模式使用）
     pub utmi_ls: Usb2PhyGrfReg,
     /// UTMI IDDIG 状态（OTG 模式，HOST 模式为 None）
     pub utmi_iddig: Usb2PhyGrfReg,
@@ -72,8 +73,10 @@ impl Usb2PhyPortCfg {
 ///
 /// 对应 U-Boot 的 `struct rockchip_usb2phy_cfg`
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct Usb2PhyCfg {
     pub reg: usize,
+    /// 时钟输出控制（预留字段）
     pub clkout_ctl: Usb2PhyGrfReg,
     /// 端口配置
     pub port_cfg: [Usb2PhyPortCfg; Usb2PhyPortId::Ports as usize],

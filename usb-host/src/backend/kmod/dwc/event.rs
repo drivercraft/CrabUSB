@@ -4,7 +4,6 @@ use crate::osal::Kernel;
 
 pub struct EventBuffer {
     pub buffer: DArray<u8>,
-    pub lpos: usize,
 }
 
 impl EventBuffer {
@@ -16,7 +15,7 @@ impl EventBuffer {
             .array_zero_with_align(size, 0x1000, DmaDirection::FromDevice)
             .map_err(|_| crate::err::USBError::NoMemory)?;
 
-        Ok(Self { buffer, lpos: 0 })
+        Ok(Self { buffer })
     }
 
     pub fn dma_addr(&self) -> u64 {

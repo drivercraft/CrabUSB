@@ -41,12 +41,6 @@ impl Regmap {
             self.reg_write(reg.reg, reg.def);
         }
     }
-
-    pub fn update_bits(&self, offset: u32, mask: u32, val: u32) {
-        let current = self.reg_read(offset);
-        let new = (current & !mask) | val;
-        self.reg_write(offset, new);
-    }
 }
 
 /// 寄存器配置项

@@ -151,6 +151,7 @@ register_structs! {
 
 /// GRF 类型标识
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum GrfType {
     /// USBDP PHY GRF (用于 PHY 配置)
     UsbdpPhy,
@@ -161,6 +162,7 @@ pub enum GrfType {
 }
 
 /// GRF 驱动实例
+#[allow(dead_code)]
 pub struct Grf {
     /// GRF 寄存器基址
     base: usize,
@@ -168,6 +170,7 @@ pub struct Grf {
     grf_type: GrfType,
 }
 
+#[allow(dead_code)]
 impl Grf {
     /// 创建新的 GRF 实例
     ///

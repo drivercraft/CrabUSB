@@ -22,8 +22,8 @@ mod host;
 
 pub use crate::backend::ty::Event;
 pub use crate::backend::ty::ep::{
-    EndpointBulkIn, EndpointBulkOut, EndpointControl, EndpointInterruptIn,
-    EndpointInterruptOut, EndpointIsoIn, EndpointIsoOut, EndpointKind,
+    EndpointBulkIn, EndpointBulkOut, EndpointControl, EndpointInterruptIn, EndpointInterruptOut,
+    EndpointIsoIn, EndpointIsoOut, EndpointKind,
 };
 pub use host::*;
 

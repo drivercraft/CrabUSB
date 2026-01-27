@@ -43,7 +43,6 @@ bitflags::bitflags! {
 
 /// USBDP PHY 寄存器偏移
 pub const UDPHY_PMA: usize = 0x8000;
-pub const UDPHY_PCS: usize = 0x4000;
 
 pub struct UdphyParam<'a> {
     pub id: usize,
@@ -91,7 +90,7 @@ impl Udphy {
         let mut dp_lane_sel = [0u32; 4];
 
         // 完全按照 U-Boot 的逻辑：udphy_parse_lane_mux_data()
-        let mut mode = UdphyMode::DP;
+        let mut mode;
         let mut flip = false;
 
         if param.dp_lane_mux.is_empty() {

@@ -37,8 +37,11 @@ pub struct UdphyCfg {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct UdphyGrfCfg {
+    /// Bvalid PHY 控制（设备模式使用）
     pub bvalid_phy_con: UdphyGrfReg,
+    /// Bvalid GRF 控制（设备模式使用）
     pub bvalid_grf_con: UdphyGrfReg,
 
     pub usb3otg0_cfg: UdphyGrfReg,

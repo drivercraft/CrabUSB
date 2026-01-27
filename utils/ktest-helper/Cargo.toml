@@ -6,7 +6,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+
 [dependencies]
-bare-test = {workspace = true}
 crab-usb = {workspace = true}
 log = {workspace = true}
+
+[target.'cfg(target_os = "none")'.dependencies]
+bare-test = {workspace = true}

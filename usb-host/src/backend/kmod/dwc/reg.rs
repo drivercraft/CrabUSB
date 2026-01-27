@@ -856,16 +856,6 @@ impl Dwc3Regs {
         unsafe { &*(addr as *const Dwc3Registers) }
     }
 
-    fn reg_offset(&self, offset: usize) -> *mut u32 {
-        (self.base + DWC3_GLOBALS_REGS_START + offset) as *mut u32
-    }
-
-    /// 获取可变的全局寄存器
-    fn globals_mut(&mut self) -> &'static mut Dwc3Registers {
-        let addr = self.base + DWC3_GLOBALS_REGS_START;
-        unsafe { &mut *(addr as *mut Dwc3Registers) }
-    }
-
     // ==================== 寄存器操作封装 ====================
 
     // pub fn hwparams(&self) -> Dwc3Hwparams {
