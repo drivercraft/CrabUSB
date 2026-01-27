@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.5.0...crab-usb-v0.6.0) - 2026-01-27
+
+### Added
+
+- update DMA API usage and improve alignment handling in transfer operations
+- *(transfer)* make Transfer::new_in and Transfer::new_out methods crate-private and improve DMA mapping logic
+- *(endpoint)* 根据 xHCI 规范调整传输长度计算逻辑 ([#49](https://github.com/drivercraft/CrabUSB/pull/49))
+
+### Other
+
+- ♻️ refactor(uvc): clean up code and improve cargo aliases ([#58](https://github.com/drivercraft/CrabUSB/pull/58))
+- ♻️ refactor(libusb): remove unused extra field extraction from InterfaceDescriptor ([#57](https://github.com/drivercraft/CrabUSB/pull/57))
+- simplify route string handling in Device::address method
+- clean up Cargo.toml dependencies and remove unused constants in DWC3
+- improve error handling in VideoStream and update endpoint imports
+- add queue module and update module visibility in backend
+- clean up imports and improve error handling in USB backend
+- update transfer length check and add cache invalidation comment in Endpoint
+- update import paths and improve transfer handling in USB backend
+- Refactor USB Host Backend and Implement LibUSB Support
+- update DMA API version and improve memory handling in device descriptor
+- update DMA API usage and improve memory allocation logic across modules
+- update DMA API path and improve coherent memory allocation logic
+- update error handling to use anyhow for better error context and simplify imports across modules
+- rename DeviceSpeed to Speed for consistency across modules
+- update DeviceSpeed enum and simplify its usage across modules
+- remove unused DeviceDma imports and simplify code structure
+- Refactor USB host crate dependencies and features
+- *(transfer)* update mapping to use Option and simplify DMA handling
+- Refactor USB host backend to use Kernel abstraction for DMA operations
+- Refactor USB host driver to integrate DMA API
+- ✨ feat(xhci): add DMA address range validation for transfers
+- 移除 dma_mask 参数并根据控制器能力自动调整
+- 删除 usb-host/bare-test.toml 配置文件
+- 移除多余的 Multi-TT 支持字段
+- [fix] hub on real world works ([#52](https://github.com/drivercraft/CrabUSB/pull/52))
+- [feat] add hub support ([#51](https://github.com/drivercraft/CrabUSB/pull/51))
+
 ## [0.5.0](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.3.10...crab-usb-v0.5.0) - 2025-11-19
 
 ### Other

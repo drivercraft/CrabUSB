@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.4.0...usb-if-v0.5.0) - 2026-01-27
+
+### Other
+
+- ♻️ refactor(uvc): improve error handling and simplify UVC implementation
+- Refactor USB Host Backend and Implement LibUSB Support
+- update error handling to use anyhow for better error context and simplify imports across modules
+- rename DeviceSpeed to Speed for consistency across modules
+- update DeviceSpeed enum and simplify its usage across modules
+- [fix] hub on real world works ([#52](https://github.com/drivercraft/CrabUSB/pull/52))
+- [feat] add hub support ([#51](https://github.com/drivercraft/CrabUSB/pull/51))
+
 ## [0.4.0](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.3.2...usb-if-v0.4.0) - 2026-01-16
 
 ### Other
