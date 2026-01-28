@@ -15,7 +15,7 @@ use crate::{
     Device, DeviceAddressInfo,
     backend::{
         BackendOp,
-        kmod::hub::{Hub, HubDevice, HubOp, PortChangeInfo, RouteString},
+        kmod::hub::{Hub, HubDevice, HubInfo, HubOp, PortChangeInfo, RouteString},
         ty::{DeviceInfoOp, DeviceOp, EventHandlerOp},
     },
 };
@@ -53,6 +53,15 @@ impl Core {
         }
     }
 
+    fn hub_infos(&self) -> BTreeMap<Id<Hub>, HubInfo> {
+        let mut out = BTreeMap::new();
+        for (id, hub) in self.hubs.iter() {
+            let info = hub.info.clone();
+            out.insert(id, info);
+        }
+        out
+    }
+
     async fn _probe_devices(&mut self) -> Result<(bool, Vec<Box<dyn DeviceInfoOp>>), USBError> {
         let mut is_have_new_hub = false;
         let mut out = Vec::new();
@@ -63,27 +72,12 @@ impl Core {
             let addr_infos = self.hub_changed_ports(id).await?;
             let parent_hub_id = self.hubs.get(id).unwrap().backend.slot_id();
             for addr_info in addr_infos {
-                let route_string = if let Some(route) = &self.hubs.get(id).unwrap().route_string {
-                    let mut rs = *route;
-                    rs.push_hub(addr_info.port_id);
-                    rs
-                } else {
-                    RouteString::follow_root()
-                };
-
-                let port_path = route_string.to_port_path_string(addr_info.root_port_id);
-
-                info!(
-                    "Found device at port={port_path}, speed={:?}",
-                    addr_info.port_speed
-                );
-
                 let info = DeviceAddressInfo {
                     root_port_id: addr_info.root_port_id,
-                    route_string,
                     port_speed: addr_info.port_speed,
-                    parent_hub_slot_id: parent_hub_id,
-                    tt_port_on_hub: addr_info.tt_port_on_hub,
+                    parent_hub: Some(id),
+                    port_id: addr_info.port_id,
+                    infos: self.hub_infos(),
                 };
 
                 let device = self.backend.new_addressed_device(info).await?;
@@ -93,7 +87,6 @@ impl Core {
                 if let Some(hub_settings) =
                     HubDevice::is_hub(device.descriptor(), device.configuration_descriptors())
                 {
-                    info!("Device({port_path}) is a hub, creating HubDevice instance");
                     let device_inner: Device = device.into();
 
                     let hub_device = HubDevice::new(
@@ -104,9 +97,14 @@ impl Core {
                         self.backend.kernel(),
                     )
                     .await?;
-                    let mut hub = Hub::new(Box::new(hub_device), Some(route_string));
-                    hub.parent = Some(id);
-                    hub.backend.init().await?;
+                    let mut hub = Hub::new(
+                        Box::new(hub_device),
+                        &self.hub_infos(),
+                        addr_info.port_id,
+                        Some(id),
+                    );
+                    let info = hub.backend.init(hub.info.clone()).await?;
+                    hub.info = info;
 
                     let hub_id = self.hubs.alloc(hub);
                     is_have_new_hub = true;
@@ -155,8 +153,9 @@ impl BackendOp for Core {
     fn init<'a>(&'a mut self) -> BoxFuture<'a, Result<(), USBError>> {
         async {
             self.backend.init().await?;
-            let mut root_hub = Hub::new(self.backend.root_hub(), None);
-            root_hub.backend.init().await?;
+            let mut root_hub = Hub::new(self.backend.root_hub(), &self.hub_infos(), 0, None);
+            let info = root_hub.backend.init(root_hub.info.clone()).await?;
+            root_hub.info = info;
 
             let id = self.hubs.alloc(root_hub);
             self.root_hub = Some(id);

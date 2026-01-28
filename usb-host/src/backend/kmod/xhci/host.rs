@@ -180,11 +180,9 @@ impl Xhci {
     }
 
     async fn new_device(&mut self, info: DeviceAddressInfo) -> Result<Box<dyn DeviceOp>> {
-        debug!("New device on route {:?}", info.route_string);
         let mut device = Device::new(self).await?;
         device.init(self, &info).await?;
-        // let id = device.slot_id();
-        // self.inited_devices.insert(id, device);
+
         Ok(Box::new(device))
     }
 
