@@ -175,8 +175,7 @@ impl Device {
         // 直接使用 DeviceSpeed 枚举计算默认 max packet size
         let max_packet_size = parse_default_max_packet_size_from_port_speed(info.port_speed);
 
-        // let route_string = info.route_string.raw();
-
+        // Route String 由拓扑决定（root hub 端口不计入）
         let mut route_string = 0u32;
         let mut parent_id = info.parent_hub;
         let mut port_id = info.port_id;
@@ -230,6 +229,8 @@ impl Device {
             if matches!(info.port_speed, Speed::Low | Speed::Full) {
                 let mut parent_id = info.parent_hub;
                 let mut tt_port = info.port_id;
+                let mut hs_parent = None;
+
                 while let Some(p) = parent_id {
                     let parent_hub = info.infos.get(&p).unwrap();
                     tt_port = parent_hub.port_id;
@@ -237,23 +238,26 @@ impl Device {
                         break;
                     }
                     if matches!(parent_hub.speed, Speed::High) {
+                        hs_parent = Some(p);
                         break;
                     }
                     parent_id = parent_hub.parent;
                 }
 
-                let parent = info.infos.get(&parent_id.unwrap()).unwrap();
-                let slot_id = parent.slot_id;
-                if parent.tt.multi {
-                    slot_context.set_multi_tt();
-                }
+                if let Some(hs_id) = hs_parent {
+                    let parent = info.infos.get(&hs_id).unwrap();
+                    let slot_id = parent.slot_id;
+                    if parent.tt.multi {
+                        slot_context.set_multi_tt();
+                    }
 
-                slot_context.set_parent_hub_slot_id(slot_id);
-                slot_context.set_parent_port_number(tt_port);
-                debug!(
-                    "Setting parent_port_number (TT): {}, parent_hub_slot_id: {}",
-                    tt_port, slot_id
-                );
+                    slot_context.set_parent_hub_slot_id(slot_id);
+                    slot_context.set_parent_port_number(tt_port);
+                    debug!(
+                        "Setting parent_port_number (TT): {}, parent_hub_slot_id: {}",
+                        tt_port, slot_id
+                    );
+                }
             }
 
             slot_context.set_tt_think_time(0);

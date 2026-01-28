@@ -255,11 +255,15 @@ impl HubDevice {
         let device_protocol = self.data.dev.descriptor().protocol;
 
         match device_protocol {
-            HUB_PR_FS => {}
+            HUB_PR_FS => {
+                info.speed = Speed::Full;
+            }
             HUB_PR_HS_SINGLE_TT => {
+                info.speed = Speed::High;
                 debug!("Hub is High Speed with Single TT");
             }
             HUB_PR_HS_MULTI_TT => {
+                info.speed = Speed::High;
                 debug!("Hub is High Speed with Multiple TTs");
                 match self.data.dev.claim_interface(0, 1).await {
                     Ok(_) => {
@@ -271,7 +275,9 @@ impl HubDevice {
                     }
                 }
             }
-            HUB_PR_SS => {}
+            HUB_PR_SS => {
+                info.speed = Speed::SuperSpeed;
+            }
             _ => {
                 warn!("Unknown hub protocol: {}", device_protocol);
             }
@@ -756,7 +762,8 @@ impl HubDevice {
                 return Err(USBError::from("Device disconnected during enable wait"));
             }
 
-            // self.kernel.delay(Duration::from_millis(CHECK_INTERVAL_MS));
+            self.kernel
+                .delay(Duration::from_millis(CHECK_INTERVAL_MS));
         }
 
         warn!("Port {} enable timeout after {}ms", port_id, MAX_WAIT_MS);
