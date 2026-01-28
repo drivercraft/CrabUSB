@@ -276,7 +276,7 @@ impl Speed {
             Speed::Low
         } else if (raw & 0x0400) != 0 {
             Speed::High
-        } else if (raw & 0x0800) != 0 {
+        } else if (raw & 0x0600) != 0 {
             Speed::SuperSpeed
         } else {
             Speed::Full
@@ -311,8 +311,8 @@ impl Speed {
     /// - 4 = Super Speed
     pub fn to_xhci_slot_value(&self) -> u8 {
         match self {
-            Speed::Low => 2,
             Speed::Full => 1,
+            Speed::Low => 2,
             Speed::High => 3,
             Speed::SuperSpeed => 4,
             Speed::SuperSpeedPlus => 5,

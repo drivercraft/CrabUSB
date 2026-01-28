@@ -50,7 +50,7 @@ pub struct Device {
     kernel: Kernel,
     current_config_value: Option<u8>,
     config_desc: Vec<ConfigurationDescriptor>,
-    port_speed: u8,
+    port_speed: Speed,
     eps: BTreeMap<Dci, EndpointBase>,
     cmd: CommandRing,
 }
@@ -81,7 +81,7 @@ impl Device {
             transfer_result_handler: host.transfer_result_handler.clone(),
             current_config_value: None,
             config_desc: vec![],
-            port_speed: 0,
+            port_speed: Speed::Full,
             eps: BTreeMap::new(),
             cmd: host.cmd.clone(),
         })
@@ -97,7 +97,8 @@ impl Device {
 
     pub(crate) async fn init(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
         // Keep the raw PORTSC.PortSpeed encoding for interval calculations
-        self.port_speed = info.port_speed.to_xhci_portsc_value();
+        self.port_speed = info.port_speed;
+        // let speed = info.port_speed.to_xhci_portsc_value();
 
         let ep = self.new_ep(Dci::CTRL)?;
         self.ctrl_ep = Some(EndpointControl::new(ep));
@@ -224,14 +225,34 @@ impl Device {
             slot_context.set_parent_hub_slot_id(0);
 
             // TT info is only valid for LS/FS devices behind a HS hub.
-            // if let Some(tt_port) = info.tt_port_on_hub {
-            //     slot_context.set_parent_hub_slot_id(info.parent_hub_slot_id);
-            //     slot_context.set_parent_port_number(tt_port);
-            //     debug!(
-            //         "Setting parent_port_number (TT): {}, parent_hub_slot_id: {}",
-            //         tt_port, info.parent_hub_slot_id
-            //     );
-            // }
+            if matches!(info.port_speed, Speed::Low | Speed::Full) {
+                let mut parent_id = info.parent_hub;
+                let mut tt_port = info.port_id;
+                while let Some(p) = parent_id {
+                    let parent_hub = info.infos.get(&p).unwrap();
+                    tt_port = parent_hub.port_id;
+                    if parent_hub.hub_depth == -1 {
+                        break;
+                    }
+                    if matches!(parent_hub.speed, Speed::High) {
+                        break;
+                    }
+                    parent_id = parent_hub.parent;
+                }
+
+                let parent = info.infos.get(&parent_id.unwrap()).unwrap();
+                let slot_id = parent.slot_id;
+                if parent.tt.multi {
+                    slot_context.set_multi_tt();
+                }
+
+                slot_context.set_parent_hub_slot_id(slot_id);
+                slot_context.set_parent_port_number(tt_port);
+                debug!(
+                    "Setting parent_port_number (TT): {}, parent_hub_slot_id: {}",
+                    tt_port, slot_id
+                );
+            }
 
             slot_context.set_tt_think_time(0);
             slot_context.set_interrupter_target(0);
@@ -476,7 +497,7 @@ impl Device {
         match transfer_type {
             EndpointType::Isochronous => {
                 match self.port_speed {
-                    3..=5 => {
+                    Speed::High | Speed::SuperSpeed | Speed::SuperSpeedPlus => {
                         // HighSpeed, SuperSpeed, SuperSpeedPlus ISO 端点
                         // Interval = max(1, min(16, bInterval))
                         let interval = binterval.clamp(1, 16);
@@ -506,7 +527,7 @@ impl Device {
             }
             EndpointType::Interrupt => {
                 match self.port_speed {
-                    3..=5 => {
+                    Speed::High | Speed::SuperSpeed | Speed::SuperSpeedPlus => {
                         // HighSpeed, SuperSpeed, SuperSpeedPlus 中断端点
                         // Interval = max(1, min(16, bInterval))
                         let interval = binterval.clamp(1, 16);
@@ -543,14 +564,14 @@ impl Device {
 
     async fn update_hub_inner(&mut self, params: HubParams) -> Result<()> {
         debug!(
-            "Updating hub context for slot {}: ports={}, multi_tt={}, tt_time={}ns, speed={:?}",
+            "Updating hub context for slot {}: ports={}, multi_tt={}, tt_time={}ns",
             self.id.as_u8(),
             params.num_ports,
             params.multi_tt,
             params.tt_think_time_ns,
-            params.port_speed
         );
 
+        self.ctx.input_clean_change();
         // 1. 设置 Input Control Context（参考 U-Boot xhci_update_hub_device）
         self.ctx.with_input(|input| {
             let control_ctx = input.control_mut();
@@ -570,7 +591,7 @@ impl Device {
             // 对于 Full Speed Hub，必须清除 MTT（xHCI 规范 6.2.2）
             if params.multi_tt {
                 slot_ctx.set_multi_tt();
-            } else if matches!(params.port_speed, Speed::Full) {
+            } else if matches!(self.port_speed, Speed::Full) {
                 slot_ctx.clear_multi_tt();
             }
 
@@ -581,7 +602,7 @@ impl Device {
             // xHCI spec: TT_THINK_TIME (Bits[16:17] of DWORD 2)
             // 0 = 8 FS bit times, 1 = 16 FS bit times, 2 = 24 FS bit times, 3 = 32 FS bit times
             // 只对 High Speed Hub 设置 TT 思考时间
-            if matches!(params.port_speed, Speed::High) {
+            if matches!(self.port_speed, Speed::High) {
                 // params.tt_think_time_ns 已经是转换后的值 (0, 666, 1333, 1999)
                 // 需要转换为 xHCI 寄存器值
                 let think_time = if params.tt_think_time_ns > 0 {

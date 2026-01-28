@@ -5,7 +5,6 @@ use core::fmt::Debug;
 
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
-use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use futures::future::BoxFuture;
 use usb_if::err::USBError;
@@ -27,67 +26,6 @@ pub struct PortChangeInfo {
     pub port_speed: Speed,
     /// 设备在 Hub 上的端口号（如果需要 Transaction Translator）
     pub tt_port_on_hub: Option<u8>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct RouteString(u32);
-
-impl RouteString {
-    /// 创建新的 Route String
-    pub fn follow_root() -> Self {
-        Self(0)
-    }
-
-    /// 获取 Route String 的原始值
-    pub fn raw(&self) -> u32 {
-        self.0
-    }
-
-    pub fn push_hub(&mut self, hub_port: u8) {
-        assert!(hub_port <= 15);
-        let mut target_depth = None;
-        for depth in 1..=5 {
-            let shift = (depth - 1) * 4;
-            let port = (self.0 >> shift) & 0x0F;
-            if port == 0 {
-                target_depth = Some(depth);
-                break;
-            }
-        }
-
-        let depth = target_depth.expect("route string is full");
-        let shift = (depth - 1) * 4;
-        let mask = 0x0F << shift;
-        self.0 = (self.0 & !mask) | (((hub_port as u32) & 0x0F) << shift);
-    }
-
-    pub fn route_port_ids(&self) -> impl Iterator<Item = u8> + '_ {
-        (0..5).filter_map(move |depth| {
-            let port = ((self.0 >> (depth * 4)) & 0x0F) as u8;
-            if port == 0 { None } else { Some(port) }
-        })
-    }
-
-    pub fn to_port_path_string(self, root_hub_port: u8) -> String {
-        let mut parts = vec![root_hub_port.to_string()];
-        for port in self.route_port_ids() {
-            parts.push(port.to_string());
-        }
-        parts.join(".")
-    }
-}
-
-impl Debug for RouteString {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut iter = self.route_port_ids();
-        if let Some(first) = iter.next() {
-            write!(f, "{first}")?;
-            for port in iter {
-                write!(f, ".{port}")?;
-            }
-        }
-        Ok(())
-    }
 }
 
 pub struct Hub {
@@ -150,8 +88,8 @@ pub struct HubInfo {
 
 #[derive(Debug, Clone, Copy)]
 pub struct UsbTt {
-    multi: bool,
-    think_time_ns: usize,
+    pub multi: bool,
+    pub think_time_ns: usize,
 }
 
 #[cfg(test)]

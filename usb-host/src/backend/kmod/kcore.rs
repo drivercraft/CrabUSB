@@ -15,7 +15,7 @@ use crate::{
     Device, DeviceAddressInfo,
     backend::{
         BackendOp,
-        kmod::hub::{Hub, HubDevice, HubInfo, HubOp, PortChangeInfo, RouteString},
+        kmod::hub::{Hub, HubDevice, HubInfo, HubOp, PortChangeInfo},
         ty::{DeviceInfoOp, DeviceOp, EventHandlerOp},
     },
 };

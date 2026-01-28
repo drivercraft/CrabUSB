@@ -189,7 +189,6 @@ impl XhciRootHub {
             self.ports_mut()[i].state = PortState::Probed;
 
             out.push(PortChangeInfo {
-                // route_string: RouteString::follow_root(),
                 root_port_id: id,
                 port_id: id,
                 port_speed: speed,

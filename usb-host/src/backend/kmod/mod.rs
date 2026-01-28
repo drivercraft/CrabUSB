@@ -15,7 +15,6 @@ use alloc::boxed::Box;
 
 use alloc::collections::btree_map::BTreeMap;
 use dwc::Dwc;
-use hub::RouteString;
 use id_arena::Id;
 use kcore::*;
 use usb_if::Speed;
