@@ -172,7 +172,24 @@ impl Device {
         // 直接使用 DeviceSpeed 枚举计算默认 max packet size
         let max_packet_size = parse_default_max_packet_size_from_port_speed(info.port_speed);
 
-        let route_string = info.route_string.raw();
+        // let route_string = info.route_string.raw();
+
+        let mut route_string = 0u32;
+        let mut parent_id = info.parent_hub;
+        let mut port_id = info.port_id;
+
+        while let Some(pid) = parent_id {
+            let parent_hub = info.infos.get(&pid).unwrap();
+            if parent_hub.hub_depth == -1 {
+                break;
+            }
+            if port_id > 15 {
+                port_id = 15;
+            }
+            route_string |= (port_id as u32) << (parent_hub.hub_depth * 4);
+            port_id = parent_hub.port_id;
+            parent_id = parent_hub.parent;
+        }
 
         let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
         // ctrl dci
@@ -207,14 +224,14 @@ impl Device {
             slot_context.set_parent_hub_slot_id(0);
 
             // TT info is only valid for LS/FS devices behind a HS hub.
-            if let Some(tt_port) = info.tt_port_on_hub {
-                slot_context.set_parent_hub_slot_id(info.parent_hub_slot_id);
-                slot_context.set_parent_port_number(tt_port);
-                debug!(
-                    "Setting parent_port_number (TT): {}, parent_hub_slot_id: {}",
-                    tt_port, info.parent_hub_slot_id
-                );
-            }
+            // if let Some(tt_port) = info.tt_port_on_hub {
+            //     slot_context.set_parent_hub_slot_id(info.parent_hub_slot_id);
+            //     slot_context.set_parent_port_number(tt_port);
+            //     debug!(
+            //         "Setting parent_port_number (TT): {}, parent_hub_slot_id: {}",
+            //         tt_port, info.parent_hub_slot_id
+            //     );
+            // }
 
             slot_context.set_tt_think_time(0);
             slot_context.set_interrupter_target(0);

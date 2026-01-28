@@ -11,7 +11,7 @@ use core::{
 use futures::{FutureExt, future::BoxFuture, task::AtomicWaker};
 use usb_if::{err::USBError, host::hub::Speed};
 
-use crate::backend::kmod::hub::{HubOp, PortChangeInfo, PortState};
+use crate::backend::kmod::hub::{HubInfo, HubOp, PortChangeInfo, PortState};
 
 use super::reg::XhciRegisters;
 
@@ -82,8 +82,10 @@ impl HubOp for XhciRootHub {
         self._changed_ports().boxed()
     }
 
-    fn init(&mut self) -> BoxFuture<'_, Result<(), USBError>> {
+    fn init(&mut self, info: HubInfo) -> BoxFuture<'_, Result<HubInfo, USBError>> {
         async {
+            let mut info = info;
+            info.speed = Speed::SuperSpeedPlus;
             debug!("Resetting all ports of xHCI Root Hub");
 
             for idx in 0..self.reg.port_register_set.len() {
@@ -102,7 +104,7 @@ impl HubOp for XhciRootHub {
                 });
             }
 
-            Ok(())
+            Ok(info)
         }
         .boxed()
     }

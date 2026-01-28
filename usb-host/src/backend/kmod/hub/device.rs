@@ -18,7 +18,11 @@ use usb_if::{
 };
 
 use super::HubOp;
-use crate::{Device, backend::kmod::hub::PortChangeInfo, osal::Kernel};
+use crate::{
+    Device,
+    backend::kmod::hub::{HubInfo, PortChangeInfo, UsbTt},
+    osal::Kernel,
+};
 
 // Hub 枚举常量 (参照 Linux 内核)
 
@@ -30,6 +34,16 @@ const HUB_DEBOUNCE_STEP: u64 = 25;
 
 /// 防抖动稳定时间 (100ms)
 const HUB_DEBOUNCE_STABLE: u64 = 100;
+
+/*
+ * Hub Device descriptor
+ * USB Hub class device protocols
+ */
+const HUB_PR_FS: u8 = 0; /* Full speed hub */
+const HUB_PR_HS_NO_TT: u8 = 0; /* Hi-speed hub without TT */
+const HUB_PR_HS_SINGLE_TT: u8 = 1; /* Hi-speed hub with single TT */
+const HUB_PR_HS_MULTI_TT: u8 = 2; /* Hi-speed hub with multiple TT */
+const HUB_PR_SS: u8 = 3; /* Super speed hub */
 
 /// Hub 设备
 ///
@@ -71,8 +85,8 @@ impl HubOp for HubDevice {
         self.data.dev.slot_id()
     }
 
-    fn init(&mut self) -> BoxFuture<'_, Result<(), USBError>> {
-        self.configure().boxed()
+    fn init(&mut self, info: HubInfo) -> BoxFuture<'_, Result<HubInfo, USBError>> {
+        self.configure(info).boxed()
     }
 
     fn changed_ports<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<PortChangeInfo>, USBError>> {
@@ -202,9 +216,11 @@ impl HubDevice {
         self.data.dev.descriptor().protocol == 3
     }
 
-    pub async fn configure(&mut self) -> Result<(), USBError> {
+    pub async fn configure(&mut self, info: HubInfo) -> Result<HubInfo, USBError> {
         // 第二阶段：获取 Hub 描述符（带重试）
-        debug!("Configuring hub device...");
+        debug!("Configuring hub device, depth={}...", info.hub_depth);
+        let mut info = info;
+
         trace!(
             "settings: config_value={}, interface_number={}, alt_setting={}",
             self.settings.config_value, self.settings.interface_number, self.settings.alt_setting
@@ -224,7 +240,7 @@ impl HubDevice {
 
         // 解析 TT 思考时间（Bits[6:5]，参考 USB 2.0 规范）
         let ttt_bits = (characteristics >> 5) & 0x03;
-        let tt_think_time_ns = match ttt_bits {
+        info.tt.think_time_ns = match ttt_bits {
             0 => 0,       // No TT
             1 => 666,     // 8 FS bit times
             2 => 666 * 2, // 16 FS bit times
@@ -238,11 +254,33 @@ impl HubDevice {
         // protocol = 2: High Speed Multi TT
         // protocol = 3: SuperSpeed Hub (no TT)
         let device_protocol = self.data.dev.descriptor().protocol;
-        let multi_tt = device_protocol == 2;
+
+        match device_protocol {
+            HUB_PR_FS => {}
+            HUB_PR_HS_SINGLE_TT => {
+                debug!("Hub is High Speed with Single TT");
+            }
+            HUB_PR_HS_MULTI_TT => {
+                debug!("Hub is High Speed with Multiple TTs");
+                match self.data.dev.claim_interface(0, 1).await {
+                    Ok(_) => {
+                        debug!("TT per port");
+                        info.tt.multi = true;
+                    }
+                    Err(e) => {
+                        debug!("Using single TT due to claim interface failure: {e}");
+                    }
+                }
+            }
+            HUB_PR_SS => {}
+            _ => {
+                warn!("Unknown hub protocol: {}", device_protocol);
+            }
+        }
 
         debug!(
             "Hub parameters: ports={}, protocol={}, multi_tt={}, tt_think_time={}ns",
-            self.data.num_ports, device_protocol, multi_tt, tt_think_time_ns
+            self.data.num_ports, device_protocol, info.tt.multi, info.tt.think_time_ns
         );
 
         let status = self.get_hub_status().await?;
@@ -274,9 +312,9 @@ impl HubDevice {
         // 构造 HubParams
         let params = crate::backend::ty::HubParams {
             num_ports: self.data.num_ports,
-            multi_tt,
-            tt_think_time_ns: tt_think_time_ns as u16,
-            parent_hub_slot_id: self.data.parent_hub_slot_id, // TODO: 从 RouteString 提取
+            multi_tt: info.tt.multi,
+            tt_think_time_ns: info.tt.think_time_ns as _,
+            parent_hub_slot_id: self.data.parent_hub_slot_id,
             root_hub_port_number: self.data.root_port_id,
             port_speed: hub_speed,
         };
@@ -284,27 +322,45 @@ impl HubDevice {
         // 更新 xHCI Slot Context（如果后端支持）
         self.data.dev.update_hub(params).await?;
 
+        if info.hub_depth > -1 && self.is_superspeed() {
+            assert!(
+                info.hub_depth < 5,
+                "Hub depth too large: {}",
+                info.hub_depth
+            );
+
+            // 外部 SuperSpeed Hub 需要设置 Hub 深度
+            self.set_hub_depth(info.hub_depth as _).await?;
+            debug!("Set hub depth to {}", info.hub_depth);
+        }
+
         // 第三阶段：初始化端口状态（参考 Linux hub_activate）
         // 初始化所有端口为 Disconnected 状态
         self.data.ports = (1..=self.data.num_ports).map(Port::new).collect();
 
         self.hub_power_on().await?;
 
-        // self.data
-        //     .dev
-        //     .set_configuration(self.settings.config_value)
-        //     .await?;
-
-        // debug!("Set configuration to {}", self.settings.config_value);
-
-        // self.data
-        //     .dev
-        //     .claim_interface(self.settings.interface_number, self.settings.alt_setting)
-        //     .await?;
-
         // 标记 Hub 为运行状态
         self.data.state = HubState::Running;
         debug!("Hub initialized with {} ports", self.data.num_ports);
+        Ok(info)
+    }
+
+    async fn set_hub_depth(&mut self, depth: u8) -> Result<(), USBError> {
+        self.data
+            .dev
+            .ep_ctrl()
+            .control_out(
+                ControlSetup {
+                    request_type: RequestType::Class,
+                    recipient: Recipient::Device,
+                    request: Request::Other(0x0c),
+                    value: depth as _,
+                    index: 0,
+                },
+                &[],
+            )
+            .await?;
         Ok(())
     }
 

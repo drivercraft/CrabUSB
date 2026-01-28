@@ -1,3 +1,4 @@
+use crate::backend::kmod::hub::{Hub, HubInfo};
 use crate::{Mmio, USBHost};
 
 mod dwc;
@@ -12,8 +13,10 @@ use crate::err::*;
 
 use alloc::boxed::Box;
 
+use alloc::collections::btree_map::BTreeMap;
 use dwc::Dwc;
 use hub::RouteString;
+use id_arena::Id;
 use kcore::*;
 use usb_if::Speed;
 use xhci::Xhci;
@@ -42,10 +45,9 @@ impl USBHost {
 }
 
 pub struct DeviceAddressInfo {
-    pub route_string: RouteString,
     pub root_port_id: u8,
-    pub parent_hub_slot_id: u8,
+    pub parent_hub: Option<Id<Hub>>,
     pub port_speed: Speed,
-    /// TT 信息：设备在 Hub 上的端口号（LS/FS 设备需要）
-    pub tt_port_on_hub: Option<u8>,
+    pub port_id: u8,
+    pub infos: BTreeMap<Id<Hub>, HubInfo>,
 }
