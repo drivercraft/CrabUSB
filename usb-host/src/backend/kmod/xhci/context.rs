@@ -99,7 +99,7 @@ impl ContextData {
         .as_u64()
     }
 
-    pub fn input_clean_change(&mut self) {
+    pub fn perper_change(&mut self) {
         self.with_input(|input| {
             let control_context = input.control_mut();
             for i in 0..32 {
