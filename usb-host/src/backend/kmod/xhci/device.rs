@@ -134,7 +134,6 @@ impl Device {
     }
 
     async fn evaluate(&mut self) -> Result {
-        self.ctx.input_clean_change();
         mb();
         debug!("Evaluating context for slot {}", self.id.as_u8());
         let _result = self
@@ -150,6 +149,7 @@ impl Device {
     }
 
     async fn setup_max_packet(&mut self, desc: DeviceDescriptorBase) -> Result {
+        self.ctx.perper_change();
         // USB 设备描述符的 bMaxPacketSize0 字段（偏移 7）
         // 对于控制端点，这是直接的字节数值，不需要解码
         let packet_size = if desc.max_packet_size_0 == 0 {
@@ -160,6 +160,8 @@ impl Device {
 
         let dci = Dci::CTRL;
         self.ctx.with_input(|input| {
+            let _ = input.control_mut().add_context_flag(1); // Endpoint 0 Context
+
             let endpoint = input.device_mut().endpoint_mut(dci.as_usize());
             endpoint.set_max_packet_size(packet_size);
         });
@@ -346,6 +348,7 @@ impl Device {
     }
 
     async fn _set_configuration(&mut self, configuration_value: u8) -> Result {
+        self.ctx.perper_change();
         self.ep_ctrl()
             .set_configuration(configuration_value)
             .await?;
@@ -362,6 +365,7 @@ impl Device {
     }
 
     async fn _claim_interface(&mut self, interface: u8, alternate: u8) -> Result {
+        self.ctx.perper_change();
         self.ctx.with_input(|input| {
             let c = input.control_mut();
             c.set_interface_number(interface);
@@ -387,7 +391,7 @@ impl Device {
 
     async fn setup_all_endpoints(&mut self, interface: u8, alternate: u8) -> Result {
         let mut max_dci = 1;
-        self.ctx.input_clean_change();
+        self.ctx.perper_change();
         self.eps.clear();
 
         for desc in self
@@ -571,14 +575,7 @@ impl Device {
             params.tt_think_time_ns,
         );
 
-        self.ctx.input_clean_change();
-        // 1. 设置 Input Control Context（参考 U-Boot xhci_update_hub_device）
-        self.ctx.with_input(|input| {
-            let control_ctx = input.control_mut();
-            // 只更新 Slot Context (flag 0)
-            control_ctx.set_add_context_flag(0);
-        });
-
+        self.ctx.perper_change();
         // 2. 设置 Slot Context Hub 参数
         self.ctx.with_input(|input| {
             let slot_ctx = input.device_mut().slot_mut();
