@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.6.1...crab-usb-v0.6.2) - 2026-01-28
+
+### Other
+
+- ♻️ refactor(device): update hub speed assignment logic and clean up comments
+- ♻️ refactor(device): rename input_clean_change to perper_change for clarity
+
 ## [0.6.1](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.6.0...crab-usb-v0.6.1) - 2026-01-28
 
 ### Other
