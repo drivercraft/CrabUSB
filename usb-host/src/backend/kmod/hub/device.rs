@@ -20,7 +20,7 @@ use usb_if::{
 use super::HubOp;
 use crate::{
     Device,
-    backend::kmod::hub::{HubInfo, PortChangeInfo, UsbTt},
+    backend::kmod::hub::{HubInfo, PortChangeInfo},
     osal::Kernel,
 };
 
@@ -40,7 +40,6 @@ const HUB_DEBOUNCE_STABLE: u64 = 100;
  * USB Hub class device protocols
  */
 const HUB_PR_FS: u8 = 0; /* Full speed hub */
-const HUB_PR_HS_NO_TT: u8 = 0; /* Hi-speed hub without TT */
 const HUB_PR_HS_SINGLE_TT: u8 = 1; /* Hi-speed hub with single TT */
 const HUB_PR_HS_MULTI_TT: u8 = 2; /* Hi-speed hub with multiple TT */
 const HUB_PR_SS: u8 = 3; /* Super speed hub */
@@ -299,16 +298,6 @@ impl HubDevice {
             if status.over_current() { "" } else { "no " }
         );
 
-        // 将 Hub 协议值转换为 DeviceSpeed
-        // protocol = 0: Full Speed Hub
-        // protocol = 1/2: High Speed Hub
-        // protocol = 3: SuperSpeed Hub
-        let hub_speed = match device_protocol {
-            1 | 2 => Speed::High,
-            3 => Speed::SuperSpeed,
-            _ => Speed::Full,
-        };
-
         // 构造 HubParams
         let params = crate::backend::ty::HubParams {
             num_ports: self.data.num_ports,
@@ -316,7 +305,6 @@ impl HubDevice {
             tt_think_time_ns: info.tt.think_time_ns as _,
             parent_hub_slot_id: self.data.parent_hub_slot_id,
             root_hub_port_number: self.data.root_port_id,
-            port_speed: hub_speed,
         };
 
         // 更新 xHCI Slot Context（如果后端支持）
