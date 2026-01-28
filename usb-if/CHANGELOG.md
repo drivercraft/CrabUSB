@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.5.0...usb-if-v0.5.1) - 2026-01-28
+
+### Other
+
+- ♻️ refactor(hub): remove unused RouteString and clean up HubParams structure
+
 ## [0.5.0](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.4.0...usb-if-v0.5.0) - 2026-01-27
 
 ### Other

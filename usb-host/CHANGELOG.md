@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.6.0...crab-usb-v0.6.1) - 2026-01-28
+
+### Other
+
+- ♻️ refactor(hub): remove unused RouteString and clean up HubParams structure
+- ♻️ refactor(hub): enhance HubInfo structure and update initialization logic
+
 ## [0.6.0](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.5.0...crab-usb-v0.6.0) - 2026-01-27
 
 ### Added
