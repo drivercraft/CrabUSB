@@ -7,7 +7,7 @@ keywords = ["os", "usb", "xhci", "driver"]
 license = "MIT"
 name = "crab-usb"
 repository = "https://github.com/drivercraft/CrabUSB"
-version = "0.6.1"
+version = "0.6.2"
 
 [features]
 aggressive_usb_reset = []
