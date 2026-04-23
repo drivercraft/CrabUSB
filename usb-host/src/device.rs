@@ -22,6 +22,10 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
+    pub fn id(&self) -> usize {
+        self.inner.id()
+    }
+
     pub fn descriptor(&self) -> &DeviceDescriptor {
         self.inner.descriptor()
     }

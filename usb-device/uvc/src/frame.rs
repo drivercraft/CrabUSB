@@ -1,8 +1,8 @@
 use crate::descriptors::payload_header_flags as flags;
 use alloc::vec::Vec;
-use usb_if::err::TransferError;
 use core::fmt::Debug;
 use log::{debug, warn};
+use usb_if::err::TransferError;
 
 /// UVC 载荷头（2.4.3.3）
 #[derive(Debug, Clone, Default)]

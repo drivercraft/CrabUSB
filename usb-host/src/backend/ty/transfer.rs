@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use usb_if::host::ControlSetup;
 
 #[derive(Clone)]
@@ -5,13 +7,20 @@ pub enum TransferKind {
     Control(ControlSetup),
     Bulk,
     Interrupt,
-    Isochronous { num_pkgs: usize },
+    Isochronous { packet_lengths: Vec<usize> },
 }
 
 impl TransferKind {
     pub fn get_control(&self) -> Option<&ControlSetup> {
         match self {
             TransferKind::Control(setup) => Some(setup),
+            _ => None,
+        }
+    }
+
+    pub fn iso_packet_lengths(&self) -> Option<&[usize]> {
+        match self {
+            TransferKind::Isochronous { packet_lengths } => Some(packet_lengths),
             _ => None,
         }
     }

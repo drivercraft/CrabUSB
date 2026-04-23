@@ -762,8 +762,7 @@ impl HubDevice {
                 return Err(USBError::from("Device disconnected during enable wait"));
             }
 
-            self.kernel
-                .delay(Duration::from_millis(CHECK_INTERVAL_MS));
+            self.kernel.delay(Duration::from_millis(CHECK_INTERVAL_MS));
         }
 
         warn!("Port {} enable timeout after {}ms", port_id, MAX_WAIT_MS);
