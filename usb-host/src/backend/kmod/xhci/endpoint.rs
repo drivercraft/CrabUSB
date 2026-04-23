@@ -113,11 +113,11 @@ impl Endpoint {
         TransferId(self.ring.enque_transfer(trb))
     }
 
-    fn enque_iso(&mut self, bus_addr: u64, buff_len: usize, num_iso_packets: usize) -> TransferId {
-        if buff_len == 0 || num_iso_packets < 2 {
-            self.enque_iso_trb(bus_addr, buff_len)
+    fn enque_iso(&mut self, bus_addr: u64, packet_lengths: &[usize]) -> TransferId {
+        if packet_lengths.len() <= 1 {
+            self.enque_iso_trb(bus_addr, packet_lengths.first().copied().unwrap_or(0))
         } else {
-            self.enque_iso_multi(bus_addr, buff_len, num_iso_packets)
+            self.enque_iso_multi(bus_addr, packet_lengths)
         }
     }
 
@@ -136,34 +136,18 @@ impl Endpoint {
         let trb = transfer::Allowed::Isoch(trb);
         self.enque_trb(trb)
     }
-    fn enque_iso_multi(&mut self, bus_addr: u64, len: usize, num_iso_packets: usize) -> TransferId {
-        let len = len as u64;
-        let packet_size = if len == 0 {
-            0
-        } else {
-            len.div_ceil(num_iso_packets as u64)
-        };
-
+    fn enque_iso_multi(&mut self, bus_addr: u64, packet_lengths: &[usize]) -> TransferId {
         let mut id = TransferId(BusAddr(0));
+        let mut offset = 0u64;
 
-        for i in 0..num_iso_packets {
-            let i = i as u64;
-            let offset = i * packet_size;
-            if offset >= len {
-                break; // 避免越界
-            }
-            let remaining = len - offset;
-            let current_size = if remaining >= packet_size {
-                packet_size
-            } else {
-                remaining
-            };
+        for (index, packet_length) in packet_lengths.iter().copied().enumerate() {
+            let current_size = packet_length as u64;
 
             if current_size > 0 {
                 let current_addr = bus_addr + offset;
-                let is_last = (i == num_iso_packets as u64 - 1) || (offset + current_size >= len);
+                let is_last = index + 1 == packet_lengths.len();
 
-                if i == 0 {
+                if index == 0 {
                     // 第一个TRB必须是Isoch TRB
                     id = self.enque_iso_trb(current_addr, current_size as _);
                 } else {
@@ -180,6 +164,8 @@ impl Endpoint {
                     id = self.enque_trb(trb);
                 }
             }
+
+            offset += current_size;
         }
 
         id
@@ -294,8 +280,8 @@ impl EndpointOp for Endpoint {
                 );
                 handle.0 = self.ring.enque_transfer(trb);
             }
-            TransferKind::Isochronous { num_pkgs } => {
-                handle = self.enque_iso(data_bus_addr, data_len, *num_pkgs);
+            TransferKind::Isochronous { packet_lengths } => {
+                handle = self.enque_iso(data_bus_addr, packet_lengths);
             }
         }
         self.transfers.insert(handle, transfer);

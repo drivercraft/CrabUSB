@@ -43,7 +43,7 @@ impl EndpointImpl {
     ) -> Result<Arc<TransferHandleRaw>, TransferError> {
         // 对于 ISO transfer，需要指定 iso_packets 数量
         let iso_packets = match &transfer.kind {
-            TransferKind::Isochronous { num_pkgs } => *num_pkgs as i32,
+            TransferKind::Isochronous { packet_lengths } => packet_lengths.len() as i32,
             _ => 0,
         };
 
@@ -150,8 +150,8 @@ impl EndpointImpl {
                     )
                 };
             }
-            TransferKind::Isochronous { num_pkgs } => {
-                let num_pkgs = *num_pkgs;
+            TransferKind::Isochronous { packet_lengths } => {
+                let num_pkgs = packet_lengths.len();
                 trace!(
                     "Filling ISO transfer: buff@{:p} num_pkgs={}, data_len={}",
                     buffer, num_pkgs, data_len
@@ -170,11 +170,9 @@ impl EndpointImpl {
                     )
                 };
 
-                // 设置每个 ISO packet 的长度，防止溢出
-                let packet_size = data_len as i32 / num_pkgs as i32;
-                for i in 0..num_pkgs {
+                for (i, packet_length) in packet_lengths.iter().copied().enumerate() {
                     let packet = unsafe { &mut *(*trans_ptr).iso_packet_desc.as_mut_ptr().add(i) };
-                    packet.length = packet_size as u32;
+                    packet.length = packet_length as u32;
                 }
             }
         }
