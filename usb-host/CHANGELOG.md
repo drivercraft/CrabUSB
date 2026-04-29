@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.6.3...crab-usb-v0.6.4) - 2026-04-29
+
+### Other
+
+- ♻️ refactor(device): introduce ProbedDevice enum to distinguish hubs from devices ([#66](https://github.com/drivercraft/CrabUSB/pull/66))
+
 ## [0.6.3](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.6.2...crab-usb-v0.6.3) - 2026-04-23
 
 ### Other
