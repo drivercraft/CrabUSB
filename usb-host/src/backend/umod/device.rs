@@ -163,6 +163,7 @@ fn libusb_get_configuration_descriptors(
         string_index: NonZero::new(desc.iConfiguration),
         string: None,
         interfaces,
+        raw: Vec::new(),
     };
     unsafe { libusb_free_config_descriptor(desc) };
     Ok(out)

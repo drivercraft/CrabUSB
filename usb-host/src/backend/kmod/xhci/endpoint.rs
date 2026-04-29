@@ -115,22 +115,35 @@ impl Endpoint {
 
     fn enque_iso(&mut self, bus_addr: u64, packet_lengths: &[usize]) -> TransferId {
         if packet_lengths.len() <= 1 {
-            self.enque_iso_trb(bus_addr, packet_lengths.first().copied().unwrap_or(0))
+            self.enque_iso_trb(
+                bus_addr,
+                packet_lengths.first().copied().unwrap_or(0),
+                false,
+                true,
+            )
         } else {
             self.enque_iso_multi(bus_addr, packet_lengths)
         }
     }
 
-    fn enque_iso_trb(&mut self, bus_addr: u64, buff_len: usize) -> TransferId {
+    fn enque_iso_trb(
+        &mut self,
+        bus_addr: u64,
+        buff_len: usize,
+        chain: bool,
+        ioc: bool,
+    ) -> TransferId {
         let mut trb = Isoch::new();
         trb.set_data_buffer_pointer(bus_addr as _)
             .set_trb_transfer_length(buff_len as _)
             .set_interrupter_target(0)
-            .set_interrupt_on_completion();
-
-        // if use_sia {
-        //     trb.set_start_isoch_asap(); // 启用SIA
-        // }
+            .set_start_isoch_asap();
+        if chain {
+            trb.set_chain_bit();
+        }
+        if ioc {
+            trb.set_interrupt_on_completion();
+        }
 
         // 创建Isoch TRB
         let trb = transfer::Allowed::Isoch(trb);
@@ -149,7 +162,7 @@ impl Endpoint {
 
                 if index == 0 {
                     // 第一个TRB必须是Isoch TRB
-                    id = self.enque_iso_trb(current_addr, current_size as _);
+                    id = self.enque_iso_trb(current_addr, current_size as _, !is_last, is_last);
                 } else {
                     // 后续TRB使用Normal TRB
                     let mut trb = Normal::new();
@@ -159,6 +172,8 @@ impl Endpoint {
 
                     if is_last {
                         trb.set_interrupt_on_completion();
+                    } else {
+                        trb.set_chain_bit();
                     }
                     let trb = transfer::Allowed::Normal(trb);
                     id = self.enque_trb(trb);
