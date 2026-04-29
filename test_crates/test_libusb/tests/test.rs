@@ -16,8 +16,11 @@ async fn test() {
 
     let mut info: Option<DeviceInfo> = None;
 
-    for device in ls {
-        println!("{device:?}");
+    'devices: for probed in ls {
+        println!("{probed:?}");
+        let Some(device) = probed.into_device_info() else {
+            continue;
+        };
 
         for iface in device.interface_descriptors().cloned().collect::<Vec<_>>() {
             println!("  Interface: {:?}", iface.class());
@@ -30,7 +33,7 @@ async fn test() {
             if matches!(iface.class(), Class::Video | Class::AudioVideo(_)) {
                 info!("Found video interface: {iface:?}");
                 info = Some(device);
-                break;
+                break 'devices;
             }
         }
     }

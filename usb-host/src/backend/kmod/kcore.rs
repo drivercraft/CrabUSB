@@ -16,7 +16,7 @@ use crate::{
     backend::{
         BackendOp,
         kmod::hub::{Hub, HubDevice, HubInfo, HubOp, PortChangeInfo},
-        ty::{DeviceInfoOp, DeviceOp, EventHandlerOp},
+        ty::{DeviceInfoOp, DeviceOp, EventHandlerOp, ProbedDeviceInfoOp},
     },
 };
 
@@ -62,7 +62,7 @@ impl Core {
         out
     }
 
-    async fn _probe_devices(&mut self) -> Result<(bool, Vec<Box<dyn DeviceInfoOp>>), USBError> {
+    async fn _probe_devices(&mut self) -> Result<(bool, Vec<ProbedDeviceInfoOp>), USBError> {
         let mut is_have_new_hub = false;
         let mut out = Vec::new();
 
@@ -87,6 +87,8 @@ impl Core {
                 if let Some(hub_settings) =
                     HubDevice::is_hub(device.descriptor(), device.configuration_descriptors())
                 {
+                    let desc = device.descriptor().clone();
+                    let configs = device.configuration_descriptors().to_vec();
                     let device_inner: Device = device.into();
 
                     let hub_device = HubDevice::new(
@@ -109,6 +111,10 @@ impl Core {
                     let hub_id = self.hubs.alloc(hub);
                     is_have_new_hub = true;
 
+                    let hub_info = Box::new(DeviceInfo::new(device_id, desc, &configs))
+                        as Box<dyn DeviceInfoOp>;
+                    out.push(ProbedDeviceInfoOp::Hub(hub_info));
+
                     info!("Added new hub with id {:?}", hub_id);
                 } else {
                     let desc = device.descriptor().clone();
@@ -119,7 +125,7 @@ impl Core {
                     let device_info = Box::new(DeviceInfo::new(device_id, desc, &configs))
                         as Box<dyn DeviceInfoOp>;
 
-                    out.push(device_info);
+                    out.push(ProbedDeviceInfoOp::Device(device_info));
                 }
             }
         }
@@ -135,7 +141,7 @@ impl Core {
         hub.backend.changed_ports().await
     }
 
-    async fn probe_devices(&mut self) -> Result<Vec<Box<dyn DeviceInfoOp>>, USBError> {
+    async fn probe_devices(&mut self) -> Result<Vec<ProbedDeviceInfoOp>, USBError> {
         let mut result = Vec::new();
 
         loop {
@@ -164,9 +170,7 @@ impl BackendOp for Core {
         .boxed()
     }
 
-    fn device_list<'a>(
-        &'a mut self,
-    ) -> BoxFuture<'a, Result<Vec<Box<dyn DeviceInfoOp>>, USBError>> {
+    fn device_list<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<ProbedDeviceInfoOp>, USBError>> {
         self.probe_devices().boxed()
     }
 

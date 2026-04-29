@@ -3,7 +3,13 @@ use std::{sync::Arc, thread};
 use futures::FutureExt;
 use usb_if::err::USBError;
 
-use crate::{USBHost, backend::BackendOp};
+use crate::{
+    USBHost,
+    backend::{
+        BackendOp,
+        ty::{DeviceInfoOp, ProbedDeviceInfoOp},
+    },
+};
 
 #[macro_use]
 mod err;
@@ -44,13 +50,20 @@ impl Libusb {
         Self { ctx }
     }
 
-    async fn device_list(&mut self) -> Result<Vec<Box<dyn super::ty::DeviceInfoOp>>, USBError> {
+    async fn device_list(&mut self) -> Result<Vec<ProbedDeviceInfoOp>, USBError> {
         let ctx = self.ctx.clone();
         let devices = ctx.device_list()?;
         let mut infos = Vec::new();
         for dev in devices {
             let info = device::DeviceInfo::new(dev)?;
-            infos.push(Box::new(info) as Box<dyn super::ty::DeviceInfoOp>);
+            let is_hub = info.descriptor().class == 0x09;
+            let info = Box::new(info) as Box<dyn super::ty::DeviceInfoOp>;
+            let info = if is_hub {
+                ProbedDeviceInfoOp::Hub(info)
+            } else {
+                ProbedDeviceInfoOp::Device(info)
+            };
+            infos.push(info);
         }
         Ok(infos)
     }
@@ -81,8 +94,7 @@ impl BackendOp for Libusb {
 
     fn device_list<'a>(
         &'a mut self,
-    ) -> futures::future::BoxFuture<'a, Result<Vec<Box<dyn super::ty::DeviceInfoOp>>, USBError>>
-    {
+    ) -> futures::future::BoxFuture<'a, Result<Vec<ProbedDeviceInfoOp>, USBError>> {
         self.device_list().boxed()
     }
 

@@ -11,7 +11,7 @@ pub use super::backend::kmod::*;
 #[cfg(umod)]
 pub use super::backend::umod::*;
 
-pub use crate::device::{Device, DeviceInfo};
+pub use crate::device::{Device, DeviceInfo, HubDeviceInfo, ProbedDevice};
 
 /// USB 主机控制器
 pub struct USBHost {
@@ -25,11 +25,14 @@ impl USBHost {
         Ok(())
     }
 
-    pub async fn probe_devices(&mut self) -> Result<Vec<DeviceInfo>> {
+    pub async fn probe_devices(&mut self) -> Result<Vec<ProbedDevice>> {
         let device_infos = self.backend.device_list().await?;
         let mut devices = Vec::new();
         for dev in device_infos {
-            let dev_info = DeviceInfo { inner: dev };
+            let dev_info = match dev {
+                ProbedDeviceInfoOp::Device(inner) => ProbedDevice::Device(DeviceInfo { inner }),
+                ProbedDeviceInfoOp::Hub(inner) => ProbedDevice::Hub(HubDeviceInfo { inner }),
+            };
             devices.push(dev_info);
         }
         Ok(devices)

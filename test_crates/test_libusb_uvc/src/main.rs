@@ -26,7 +26,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 查找 UVC 设备
     let mut uvc_device = None;
-    for device_info in devices {
+    for probed in devices {
+        let Some(device_info) = probed.into_device_info() else {
+            continue;
+        };
         info!(
             "Checking device: VID={:04x}, PID={:04x}",
             device_info.vendor_id(),
