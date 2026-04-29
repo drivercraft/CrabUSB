@@ -1,6 +1,8 @@
 use core::ptr::NonNull;
 
+use alloc::vec::Vec;
 use dma_api::DmaDirection;
+use usb_if::queue::TransferRequest;
 use usb_if::transfer::Direction;
 
 use crate::{
@@ -21,7 +23,7 @@ impl Transfer {
             Direction::In => DmaDirection::FromDevice,
             Direction::Out => DmaDirection::ToDevice,
         };
-        let mapping = if let Some((ptr, len)) = buff {
+        let mapping = if let Some((ptr, len)) = buff.filter(|(_, len)| *len > 0) {
             let slice = unsafe { core::slice::from_raw_parts_mut(ptr.as_ptr(), len) };
             Some(
                 dma.map_single_array(slice, ALIGN, dma_direction)
@@ -36,7 +38,14 @@ impl Transfer {
             direction,
             mapping,
             transfer_len: 0,
+            iso_packet_actual_lengths: Vec::new(),
         }
+    }
+
+    pub(crate) fn from_request(dma: &Kernel, request: TransferRequest) -> Self {
+        let (kind, direction, buffer) = request.into();
+        let buff = buffer.map(|buffer| (buffer.ptr, buffer.len));
+        Self::new(dma, kind, direction, buff)
     }
 
     // pub(crate) fn new_in(dma: &Kernel, kind: TransferKind, buff: Pin<&mut [u8]>) -> Self {

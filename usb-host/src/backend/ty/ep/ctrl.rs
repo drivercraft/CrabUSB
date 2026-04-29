@@ -1,14 +1,12 @@
-use core::ptr::NonNull;
-
 use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
 use usb_if::err::{TransferError, USBError};
 use usb_if::host::ControlSetup;
-use usb_if::transfer::{Direction, Recipient, Request, RequestType};
+use usb_if::queue::{QueueConfig, TransferRequest};
+use usb_if::transfer::{Recipient, Request, RequestType};
 
-use crate::backend::ty::transfer::TransferKind;
+use super::{EndpointBase, EndpointOp, EndpointQueue};
 
-use super::{EndpointBase, EndpointOp};
-
+#[derive(Clone)]
 pub struct EndpointControl {
     pub(crate) raw: EndpointBase,
 }
@@ -20,23 +18,21 @@ impl EndpointControl {
         }
     }
 
+    pub fn queue(&self) -> EndpointQueue {
+        self.raw.queue(QueueConfig::control())
+    }
+
     pub async fn control_in(
         &mut self,
         param: usb_if::host::ControlSetup,
         buff: &mut [u8],
     ) -> Result<usize, TransferError> {
-        let buff = if buff.is_empty() {
-            None
-        } else {
-            Some((NonNull::new(buff.as_mut_ptr()).unwrap(), buff.len()))
-        };
-
-        let transfer = self
+        let t = self
             .raw
-            .new_transfer(TransferKind::Control(param), Direction::In, buff);
-
-        let t = self.raw.submit_and_wait(transfer).await?;
-        let n = t.transfer_len;
+            .queue(QueueConfig::control())
+            .wait(TransferRequest::control_in(param, buff))
+            .await?;
+        let n = t.actual_length;
         Ok(n)
     }
 
@@ -45,21 +41,12 @@ impl EndpointControl {
         param: usb_if::host::ControlSetup,
         buff: &[u8],
     ) -> Result<usize, TransferError> {
-        let buff = if buff.is_empty() {
-            None
-        } else {
-            Some((
-                NonNull::new(buff.as_ptr() as usize as *mut u8).unwrap(),
-                buff.len(),
-            ))
-        };
-
-        let transfer = self
+        let t = self
             .raw
-            .new_transfer(TransferKind::Control(param), Direction::Out, buff);
-
-        let t = self.raw.submit_and_wait(transfer).await?;
-        let n = t.transfer_len;
+            .queue(QueueConfig::control())
+            .wait(TransferRequest::control_out(param, buff))
+            .await?;
+        let n = t.actual_length;
         Ok(n)
     }
 

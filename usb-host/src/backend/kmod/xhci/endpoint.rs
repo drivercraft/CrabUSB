@@ -1,6 +1,4 @@
-use core::ptr::NonNull;
-
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
 
 use dma_api::DmaDirection;
 use mbarrier::mb;
@@ -8,6 +6,7 @@ use spin::Mutex;
 use usb_if::{
     descriptor::{self, EndpointDescriptor},
     err::TransferError,
+    queue::{RequestId, TransferCompletion, TransferRequest},
     transfer::{BmRequestType, Direction},
 };
 use xhci::{
@@ -24,7 +23,7 @@ use crate::{
     backend::{
         Dci,
         ty::{
-            ep::{EndpointOp, TransferHandle},
+            ep::{EndpointOp, transfer_to_completion},
             transfer::{Transfer, TransferKind},
         },
     },
@@ -37,7 +36,12 @@ pub struct Endpoint {
     pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
     transfers: BTreeMap<TransferId, Transfer>,
+    iso_packet_ids: BTreeMap<TransferId, Vec<TransferId>>,
+    trb_counts: BTreeMap<TransferId, usize>,
+    outstanding_trbs: usize,
     kernel: Kernel,
+    max_packet_size: usize,
+    max_burst_size: usize,
 }
 
 unsafe impl Send for Endpoint {}
@@ -52,8 +56,18 @@ impl Endpoint {
             ring,
             bell,
             transfers: BTreeMap::new(),
+            iso_packet_ids: BTreeMap::new(),
+            trb_counts: BTreeMap::new(),
+            outstanding_trbs: 0,
             kernel: kernel.clone(),
+            max_packet_size: 0,
+            max_burst_size: 0,
         })
+    }
+
+    pub fn configure_periodic(&mut self, max_packet_size: usize, max_burst_size: usize) {
+        self.max_packet_size = max_packet_size;
+        self.max_burst_size = max_burst_size;
     }
 
     pub fn bus_addr(&self) -> BusAddr {
@@ -72,10 +86,14 @@ impl Endpoint {
 
     fn handle_transfer_completion(
         &mut self,
-        c: &TransferEvent,
+        c: TransferEvent,
         handle: BusAddr,
     ) -> Result<Transfer, TransferError> {
-        let mut t = self.transfers.remove(&TransferId(handle)).unwrap();
+        let handle = TransferId(handle);
+        if let Some(count) = self.trb_counts.remove(&handle) {
+            self.outstanding_trbs = self.outstanding_trbs.saturating_sub(count);
+        }
+        let mut t = self.transfers.remove(&handle).unwrap();
         match c.completion_code() {
             Ok(code) => match code.to_result() {
                 Ok(_) => Ok(()),
@@ -85,24 +103,58 @@ impl Endpoint {
         }?;
 
         let transfer_len;
+        if let TransferKind::Isochronous { packet_lengths } = &t.kind {
+            let packet_ids = self
+                .iso_packet_ids
+                .remove(&handle)
+                .unwrap_or_else(|| vec![handle]);
+            if packet_ids.len() != packet_lengths.len() {
+                return Err(TransferError::Other(anyhow!(
+                    "ISO completion count mismatch: ids={}, packets={}",
+                    packet_ids.len(),
+                    packet_lengths.len()
+                )));
+            }
 
-        // xHCI 规范：trb_transfer_length 字段根据端点方向有不同的含义
-        // - IN 端点（设备到主机）：表示未传输的剩余字节数
-        // - OUT 端点（主机到设备）：表示实际传输的字节数
-        if matches!(t.direction, Direction::In) {
-            // 对于 IN 端点，实际传输长度 = 请求长度 - 剩余长度
-            transfer_len = t
-                .buffer_len()
-                .saturating_sub(c.trb_transfer_length() as usize);
+            let mut actual_lengths = Vec::with_capacity(packet_ids.len());
+            for (index, packet_id) in packet_ids.iter().copied().enumerate() {
+                let event = if packet_id == handle {
+                    c
+                } else {
+                    self.ring.get_finished(packet_id.0).ok_or_else(|| {
+                        TransferError::Other(anyhow!(
+                            "missing ISO packet completion for {:?}",
+                            packet_id
+                        ))
+                    })?
+                };
+                match event.completion_code() {
+                    Ok(code) => code.to_result()?,
+                    Err(_e) => return Err(TransferError::Other(anyhow!("Transfer failed"))),
+                }
 
-            if transfer_len > 0 {
-                // 刷新/失效缓存，确保从 DMA 缓冲读取到有效数据
-                // t.dma_slice().prepare_read_all();
+                let requested = packet_lengths[index];
+                let remaining = event.trb_transfer_length() as usize;
+                actual_lengths.push(requested.saturating_sub(remaining));
+            }
+
+            transfer_len = actual_lengths.iter().sum();
+            t.iso_packet_actual_lengths = actual_lengths;
+            if transfer_len > 0 && matches!(t.direction, Direction::In) {
                 t.prepare_read_all();
             }
-        } else {
-            // 对于 OUT 端点，trb_transfer_length 就是实际传输长度
-            transfer_len = c.trb_transfer_length() as usize;
+            t.transfer_len = transfer_len;
+            trace!("ISO transfer data length: {}", t.transfer_len);
+            return Ok(t);
+        }
+
+        let remaining = c.trb_transfer_length() as usize;
+        transfer_len = t.buffer_len().saturating_sub(remaining);
+
+        if transfer_len > 0 && matches!(t.direction, Direction::In) {
+            // 刷新/失效缓存，确保从 DMA 缓冲读取到有效数据
+            // t.dma_slice().prepare_read_all();
+            t.prepare_read_all();
         }
         t.transfer_len = transfer_len;
         trace!("Transfer data length: {}", t.transfer_len);
@@ -113,16 +165,23 @@ impl Endpoint {
         TransferId(self.ring.enque_transfer(trb))
     }
 
-    fn enque_iso(&mut self, bus_addr: u64, packet_lengths: &[usize]) -> TransferId {
+    fn enque_iso(
+        &mut self,
+        bus_addr: u64,
+        packet_lengths: &[usize],
+        interrupt_on_short_packet: bool,
+    ) -> (TransferId, Vec<TransferId>) {
         if packet_lengths.len() <= 1 {
-            self.enque_iso_trb(
+            let id = self.enque_iso_trb(
                 bus_addr,
                 packet_lengths.first().copied().unwrap_or(0),
                 false,
                 true,
-            )
+                interrupt_on_short_packet,
+            );
+            (id, vec![id])
         } else {
-            self.enque_iso_multi(bus_addr, packet_lengths)
+            self.enque_iso_multi(bus_addr, packet_lengths, interrupt_on_short_packet)
         }
     }
 
@@ -132,12 +191,29 @@ impl Endpoint {
         buff_len: usize,
         chain: bool,
         ioc: bool,
+        interrupt_on_short_packet: bool,
     ) -> TransferId {
         let mut trb = Isoch::new();
         trb.set_data_buffer_pointer(bus_addr as _)
             .set_trb_transfer_length(buff_len as _)
             .set_interrupter_target(0)
             .set_start_isoch_asap();
+        if interrupt_on_short_packet {
+            trb.set_interrupt_on_short_packet();
+        }
+        let total_packets = if self.max_packet_size == 0 {
+            1
+        } else {
+            buff_len.div_ceil(self.max_packet_size).max(1)
+        };
+        let packets_per_burst = self.max_burst_size.saturating_add(1).max(1);
+        let burst_count = total_packets.div_ceil(packets_per_burst).saturating_sub(1);
+        let last_burst_packet_count = match total_packets % packets_per_burst {
+            0 => packets_per_burst.saturating_sub(1),
+            residue => residue.saturating_sub(1),
+        };
+        trb.set_td_size_or_tbc(burst_count.min(0x1f) as u8)
+            .set_transfer_last_burst_packet_count(last_burst_packet_count.min(0xf) as u8);
         if chain {
             trb.set_chain_bit();
         }
@@ -149,49 +225,63 @@ impl Endpoint {
         let trb = transfer::Allowed::Isoch(trb);
         self.enque_trb(trb)
     }
-    fn enque_iso_multi(&mut self, bus_addr: u64, packet_lengths: &[usize]) -> TransferId {
-        let mut id = TransferId(BusAddr(0));
+    fn enque_iso_multi(
+        &mut self,
+        bus_addr: u64,
+        packet_lengths: &[usize],
+        interrupt_on_short_packet: bool,
+    ) -> (TransferId, Vec<TransferId>) {
+        let mut ids = Vec::with_capacity(packet_lengths.len());
         let mut offset = 0u64;
 
-        for (index, packet_length) in packet_lengths.iter().copied().enumerate() {
+        for packet_length in packet_lengths.iter().copied() {
             let current_size = packet_length as u64;
+            let current_addr = bus_addr + offset;
 
-            if current_size > 0 {
-                let current_addr = bus_addr + offset;
-                let is_last = index + 1 == packet_lengths.len();
-
-                if index == 0 {
-                    // 第一个TRB必须是Isoch TRB
-                    id = self.enque_iso_trb(current_addr, current_size as _, !is_last, is_last);
-                } else {
-                    // 后续TRB使用Normal TRB
-                    let mut trb = Normal::new();
-                    trb.set_data_buffer_pointer(current_addr as _);
-                    trb.set_trb_transfer_length(current_size as _);
-                    trb.set_interrupter_target(0);
-
-                    if is_last {
-                        trb.set_interrupt_on_completion();
-                    } else {
-                        trb.set_chain_bit();
-                    }
-                    let trb = transfer::Allowed::Normal(trb);
-                    id = self.enque_trb(trb);
-                }
-            }
+            ids.push(self.enque_iso_trb(
+                current_addr,
+                current_size as _,
+                false,
+                true,
+                interrupt_on_short_packet,
+            ));
 
             offset += current_size;
         }
 
-        id
+        let id = ids.last().copied().unwrap_or(TransferId(BusAddr(0)));
+        (id, ids)
+    }
+
+    fn required_trbs(transfer: &Transfer) -> usize {
+        match &transfer.kind {
+            TransferKind::Control(_) => {
+                if transfer.buffer_len() > 0 {
+                    3
+                } else {
+                    2
+                }
+            }
+            TransferKind::Bulk | TransferKind::Interrupt => 1,
+            TransferKind::Isochronous { packet_lengths } => packet_lengths.len().max(1),
+        }
+    }
+
+    fn ensure_ring_capacity(&self, required: usize) -> Result<(), TransferError> {
+        let usable = self.ring.usable_capacity().saturating_sub(1);
+        if self.outstanding_trbs.saturating_add(required) > usable {
+            return Err(TransferError::QueueFull);
+        }
+        Ok(())
     }
 }
 
 impl EndpointOp for Endpoint {
-    fn submit(
-        &mut self,
-        transfer: crate::backend::ty::transfer::Transfer,
-    ) -> Result<crate::backend::ty::ep::TransferHandle<'_>, TransferError> {
+    fn submit_request(&mut self, request: TransferRequest) -> Result<RequestId, TransferError> {
+        let transfer = Transfer::from_request(&self.kernel, request);
+        let required_trbs = Self::required_trbs(&transfer);
+        self.ensure_ring_capacity(required_trbs)?;
+
         let mut data_bus_addr = 0;
         if transfer.buffer_len() > 0 {
             // let data_slice = transfer.dma_slice();
@@ -236,6 +326,7 @@ impl EndpointOp for Endpoint {
         let dir = transfer.direction;
 
         let mut handle = TransferId(BusAddr(0));
+        let mut iso_packet_ids = Vec::new();
 
         match &transfer.kind {
             TransferKind::Control(t) => {
@@ -296,37 +387,41 @@ impl EndpointOp for Endpoint {
                 handle.0 = self.ring.enque_transfer(trb);
             }
             TransferKind::Isochronous { packet_lengths } => {
-                handle = self.enque_iso(data_bus_addr, packet_lengths);
+                let ids = self.enque_iso(
+                    data_bus_addr,
+                    packet_lengths,
+                    matches!(transfer.direction, Direction::In),
+                );
+                handle = ids.0;
+                iso_packet_ids = ids.1;
             }
         }
+        if !iso_packet_ids.is_empty() {
+            self.iso_packet_ids.insert(handle, iso_packet_ids);
+        }
+        self.trb_counts.insert(handle, required_trbs);
+        self.outstanding_trbs += required_trbs;
         self.transfers.insert(handle, transfer);
         mb();
         self.doorbell();
 
-        Ok(TransferHandle::new(handle.0.raw(), self))
+        Ok(RequestId::new(handle.0.raw()))
     }
 
-    fn query_transfer(
+    fn reclaim_request(
         &mut self,
-        id: u64,
-    ) -> Option<Result<crate::backend::ty::transfer::Transfer, TransferError>> {
-        let id = BusAddr(id);
-        let c = self.ring.get_finished(id)?;
-        let res = self.handle_transfer_completion(&c, id);
+        id: RequestId,
+    ) -> Option<Result<TransferCompletion, TransferError>> {
+        let raw_id = BusAddr(id.raw());
+        let c = self.ring.get_finished(raw_id)?;
+        let res = self
+            .handle_transfer_completion(c, raw_id)
+            .map(|transfer| transfer_to_completion(id, transfer));
         Some(res)
     }
 
-    fn register_cx(&self, id: u64, cx: &mut core::task::Context<'_>) {
-        self.ring.register_cx(BusAddr(id), cx);
-    }
-
-    fn new_transfer(
-        &mut self,
-        kind: TransferKind,
-        direction: Direction,
-        buff: Option<(NonNull<u8>, usize)>,
-    ) -> Transfer {
-        Transfer::new(&self.kernel, kind, direction, buff)
+    fn register_waker(&self, id: RequestId, cx: &mut core::task::Context<'_>) {
+        self.ring.register_cx(BusAddr(id.raw()), cx);
     }
 }
 

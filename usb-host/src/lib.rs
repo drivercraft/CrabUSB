@@ -1,6 +1,4 @@
 #![cfg_attr(target_os = "none", no_std)]
-#![feature(iterator_try_collect)]
-
 #[macro_use]
 extern crate alloc;
 #[macro_use]
@@ -21,10 +19,7 @@ pub mod err;
 mod host;
 
 pub use crate::backend::ty::Event;
-pub use crate::backend::ty::ep::{
-    EndpointBulkIn, EndpointBulkOut, EndpointControl, EndpointInterruptIn, EndpointInterruptOut,
-    EndpointIsoIn, EndpointIsoOut, EndpointKind,
-};
+pub use crate::backend::ty::ep::EndpointQueue;
 pub use host::*;
 
 #[allow(unused_imports)]

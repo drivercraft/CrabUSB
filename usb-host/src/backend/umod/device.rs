@@ -276,7 +276,7 @@ impl DeviceOp for Device {
         .boxed()
     }
 
-    fn get_endpoint(
+    fn endpoint_queue(
         &mut self,
         desc: &usb_if::descriptor::EndpointDescriptor,
     ) -> std::result::Result<crate::backend::ty::ep::EndpointBase, USBError> {

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
-use crab_usb::EndpointIsoIn;
+use crab_usb::EndpointQueue;
 use log::debug;
-use usb_if::{descriptor::EndpointDescriptor, err::USBError};
+use usb_if::{descriptor::EndpointDescriptor, err::USBError, queue::TransferRequest};
 
 use crate::{
     VideoFormat,
@@ -9,7 +9,7 @@ use crate::{
 };
 
 pub struct VideoStream {
-    ep: EndpointIsoIn,
+    ep: EndpointQueue,
     frame_parser: FrameParser,
     pub vedio_format: VideoFormat,
     packets_per_transfer: usize,
@@ -20,7 +20,7 @@ pub struct VideoStream {
 unsafe impl Send for VideoStream {}
 
 impl VideoStream {
-    pub fn new(ep: EndpointIsoIn, desc: EndpointDescriptor, vfmt: VideoFormat) -> Self {
+    pub fn new(ep: EndpointQueue, desc: EndpointDescriptor, vfmt: VideoFormat) -> Self {
         let max_packet_size = desc.max_packet_size;
         // 参考libusb计算逻辑:
         // packets_per_transfer = (dwMaxVideoFrameSize + endpoint_bytes_per_packet - 1) / endpoint_bytes_per_packet
@@ -48,8 +48,9 @@ impl VideoStream {
     pub async fn recv(&mut self) -> Result<Vec<FrameEvent>, USBError> {
         self.buffer.fill(0);
 
+        let packet_lengths = alloc::vec![self.packet_size; self.packets_per_transfer];
         self.ep
-            .submit(&mut self.buffer, self.packets_per_transfer)?
+            .wait(TransferRequest::iso_in(&mut self.buffer, &packet_lengths))
             .await?;
 
         let mut events = Vec::new();

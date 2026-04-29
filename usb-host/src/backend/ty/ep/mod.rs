@@ -1,116 +1,175 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::any::Any;
-use core::ptr::NonNull;
 use core::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
-use usb_if::transfer::Direction;
 
-use crate::backend::ty::transfer::TransferKind;
+use usb_if::{
+    err::TransferError,
+    queue::{
+        IsoPacketResult, QueueConfig, QueueEvent, RequestId, TransferCompletion, TransferRequest,
+        TransferStatus,
+    },
+};
 
 use super::transfer::Transfer;
-use usb_if::err::TransferError;
+use spin::Mutex;
 
-mod bulk;
 mod ctrl;
-mod int;
-mod iso;
 
-pub use bulk::*;
 pub use ctrl::*;
-pub use int::*;
-pub use iso::*;
 
-pub enum EndpointKind {
-    Control(EndpointControl),
-    IsochronousIn(EndpointIsoIn),
-    IsochronousOut(EndpointIsoOut),
-    BulkIn(EndpointBulkIn),
-    BulkOut(EndpointBulkOut),
-    InterruptIn(EndpointInterruptIn),
-    InterruptOut(EndpointInterruptOut),
-}
-
+#[derive(Clone)]
 pub(crate) struct EndpointBase {
-    raw: Box<dyn EndpointOp>,
+    raw: Arc<Mutex<Box<dyn EndpointOp>>>,
 }
 
 impl EndpointBase {
     pub fn new(raw: impl EndpointOp) -> Self {
-        Self { raw: Box::new(raw) }
-    }
-
-    pub fn new_transfer(
-        &mut self,
-        kind: TransferKind,
-        direction: Direction,
-        buff: Option<(NonNull<u8>, usize)>,
-    ) -> Transfer {
-        self.raw.new_transfer(kind, direction, buff)
-    }
-
-    pub fn submit_and_wait(
-        &mut self,
-        transfer: Transfer,
-    ) -> impl Future<Output = Result<Transfer, TransferError>> {
-        let handle = self.submit(transfer);
-        async move {
-            let handle = handle?;
-            handle.await
+        Self {
+            raw: Arc::new(Mutex::new(Box::new(raw))),
         }
     }
 
-    pub fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle<'_>, TransferError> {
-        self.raw.submit(transfer)
+    pub fn queue(&self, config: QueueConfig) -> EndpointQueue {
+        EndpointQueue {
+            config,
+            endpoint: self.raw.clone(),
+        }
     }
 
     #[allow(unused)]
-    pub(crate) fn as_raw_mut<T: EndpointOp>(&mut self) -> &mut T {
-        let d = self.raw.as_mut() as &mut dyn Any;
-        d.downcast_mut::<T>()
-            .expect("EndpointBase downcast_mut failed")
+    pub(crate) fn with_raw_mut<T: EndpointOp, R>(&mut self, f: impl FnOnce(&mut T) -> R) -> R {
+        let mut raw = self.raw.lock();
+        let d = raw.as_mut() as &mut dyn Any;
+        f(d.downcast_mut::<T>()
+            .expect("EndpointBase downcast_mut failed"))
     }
 }
 
 pub(crate) trait EndpointOp: Send + Any + 'static {
-    fn new_transfer(
+    fn submit_request(&mut self, request: TransferRequest) -> Result<RequestId, TransferError>;
+
+    fn reclaim_request(
         &mut self,
-        kind: TransferKind,
-        direction: Direction,
-        buff: Option<(NonNull<u8>, usize)>,
-    ) -> Transfer;
+        id: RequestId,
+    ) -> Option<Result<TransferCompletion, TransferError>>;
 
-    fn submit(&mut self, transfer: Transfer) -> Result<TransferHandle<'_>, TransferError>;
+    fn register_waker(&self, id: RequestId, cx: &mut Context<'_>);
 
-    fn query_transfer(&mut self, id: u64) -> Option<Result<Transfer, TransferError>>;
+    fn cancel_request(&mut self, _id: RequestId) -> Result<(), TransferError> {
+        Err(TransferError::NotSupported)
+    }
 
-    fn register_cx(&self, id: u64, cx: &mut Context<'_>);
-}
-
-pub struct TransferHandle<'a> {
-    pub(crate) id: u64,
-    pub(crate) endpoint: &'a mut dyn EndpointOp,
-}
-
-impl<'a> TransferHandle<'a> {
-    pub(crate) fn new(id: u64, endpoint: &'a mut dyn EndpointOp) -> Self {
-        Self { id, endpoint }
+    fn handle_queue_event(&mut self, _event: QueueEvent) -> Result<(), TransferError> {
+        Ok(())
     }
 }
 
-impl<'a> Future for TransferHandle<'a> {
-    type Output = Result<Transfer, TransferError>;
+#[derive(Clone)]
+pub struct EndpointQueue {
+    config: QueueConfig,
+    pub(crate) endpoint: Arc<Mutex<Box<dyn EndpointOp>>>,
+}
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let id = self.id;
-        match self.endpoint.query_transfer(id) {
+impl EndpointQueue {
+    pub(crate) fn new(config: QueueConfig, base: EndpointBase) -> Self {
+        base.queue(config)
+    }
+
+    pub fn config(&self) -> QueueConfig {
+        self.config
+    }
+
+    pub fn submit(&self, request: TransferRequest) -> Result<RequestId, TransferError> {
+        self.endpoint.lock().submit_request(request)
+    }
+
+    pub fn reclaim(&self, id: RequestId) -> Result<Option<TransferCompletion>, TransferError> {
+        match self.endpoint.lock().reclaim_request(id) {
+            Some(result) => result.map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub fn poll_request(
+        &self,
+        id: RequestId,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<TransferCompletion, TransferError>> {
+        let mut endpoint = self.endpoint.lock();
+        match endpoint.reclaim_request(id) {
             Some(res) => Poll::Ready(res),
             None => {
-                self.endpoint.register_cx(id, cx);
+                endpoint.register_waker(id, cx);
                 Poll::Pending
             }
         }
+    }
+
+    pub fn cancel(&self, id: RequestId) -> Result<(), TransferError> {
+        self.endpoint.lock().cancel_request(id)
+    }
+
+    pub fn handle_queue_event(&self, event: QueueEvent) -> Result<(), TransferError> {
+        self.endpoint.lock().handle_queue_event(event)
+    }
+
+    pub async fn wait(
+        &self,
+        request: TransferRequest,
+    ) -> Result<TransferCompletion, TransferError> {
+        let id = self.submit(request)?;
+        QueueRequestFuture {
+            id,
+            endpoint: self.endpoint.clone(),
+        }
+        .await
+    }
+}
+
+struct QueueRequestFuture {
+    id: RequestId,
+    endpoint: Arc<Mutex<Box<dyn EndpointOp>>>,
+}
+
+impl Future for QueueRequestFuture {
+    type Output = Result<TransferCompletion, TransferError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let id = self.id;
+        let mut endpoint = self.endpoint.lock();
+        match endpoint.reclaim_request(id) {
+            Some(res) => Poll::Ready(res),
+            None => {
+                endpoint.register_waker(id, cx);
+                Poll::Pending
+            }
+        }
+    }
+}
+
+pub(crate) fn transfer_to_completion(id: RequestId, transfer: Transfer) -> TransferCompletion {
+    let iso_packets = match &transfer.kind {
+        usb_if::queue::TransferKind::Isochronous { packet_lengths } => packet_lengths
+            .iter()
+            .copied()
+            .zip(transfer.iso_packet_actual_lengths.iter().copied())
+            .map(|(requested_length, actual_length)| IsoPacketResult {
+                requested_length,
+                actual_length,
+                status: TransferStatus::Completed,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    TransferCompletion {
+        request_id: id,
+        status: TransferStatus::Completed,
+        actual_length: transfer.transfer_len,
+        iso_packets,
     }
 }

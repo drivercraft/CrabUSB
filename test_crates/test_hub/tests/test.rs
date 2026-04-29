@@ -23,7 +23,10 @@ mod tests {
         sync::atomic::{AtomicBool, Ordering},
         time::Duration,
     };
-    use crab_usb::{usb_if::descriptor::ConfigurationDescriptor, *};
+    use crab_usb::{
+        usb_if::{descriptor::ConfigurationDescriptor, queue::TransferRequest},
+        *,
+    };
     use ktest_helper::*;
 
     use log::info;
@@ -120,29 +123,30 @@ mod tests {
 
                 for ep_desc in &interface_desc.endpoints {
                     info!("endpoint: {ep_desc:?}");
-                    let ep = device.get_endpoint(ep_desc.address).await.unwrap();
+                    if matches!(
+                        (ep_desc.transfer_type, ep_desc.direction),
+                        (
+                            usb_if::descriptor::EndpointType::Bulk,
+                            usb_if::transfer::Direction::In
+                        )
+                    ) {
+                        let ep = device.endpoint_queue(ep_desc.address).await.unwrap();
+                        let mut buff = alloc::vec![0u8; 64];
 
-                    match ep {
-                        EndpointKind::BulkIn(mut bulk_in) => {
-                            let mut buff = alloc::vec![0u8; 64];
-
-                            match bulk_in.submit_and_wait(&mut buff).await {
-                                Ok(n) => {
-                                    let data = &buff[..n];
-                                    info!("bulk in data: {data:?}",);
-                                }
-                                Err(e) => {
-                                    info!("bulk in error: {:?}", e);
-                                }
+                        match ep.wait(TransferRequest::bulk_in(&mut buff)).await {
+                            Ok(completion) => {
+                                let data = &buff[..completion.actual_length.min(buff.len())];
+                                info!("bulk in data: {data:?}",);
+                            }
+                            Err(e) => {
+                                info!("bulk in error: {:?}", e);
                             }
                         }
-
-                        _ => {
-                            info!(
-                                "unsupported {:?} {:?}",
-                                ep_desc.transfer_type, ep_desc.direction
-                            );
-                        }
+                    } else {
+                        info!(
+                            "unsupported {:?} {:?}",
+                            ep_desc.transfer_type, ep_desc.direction
+                        );
                     }
                 }
 

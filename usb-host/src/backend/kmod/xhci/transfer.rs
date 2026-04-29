@@ -34,6 +34,13 @@ impl TransferResultHandler {
         self.inner.lock().insert(id, handle);
     }
 
+    /// Marks a queue completion from the xHCI interrupt path.
+    ///
+    /// This runs while handling an interrupt, so it must not acquire OS-facing
+    /// locks or call into device/file managers. Queue registration is protected
+    /// by `IrqLock::lock`, which disables this interrupt source before mutating
+    /// the map. The IRQ hot path uses `force_use` and only touches the
+    /// pre-registered queue completion slot, then wakes queue-local waiters.
     pub unsafe fn set_finished(&self, slot_id: u8, ep_id: u8, ptr: BusAddr, res: TransferEvent) {
         let queue_id = TransQueueId { slot_id, ep_id };
         if let Some(q) = unsafe { self.inner.force_use().get(&queue_id) } {

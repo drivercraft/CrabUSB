@@ -193,7 +193,10 @@ impl Device {
             parent_id = parent_hub.parent;
         }
 
-        let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
+        let ctrl_ring_addr = self
+            .ep_ctrl()
+            .raw
+            .with_raw_mut::<Endpoint, _>(|ep| ep.bus_addr());
         // ctrl dci
         let dci = Dci::CTRL;
         // 1. Allocate an Input Context data structure (6.2.5) and initialize all fields to
@@ -406,7 +409,19 @@ impl Device {
             if dci > max_dci {
                 max_dci = dci;
             }
-            let ep_raw = self.new_ep(dci.into())?;
+            let mut ep_raw = self.new_ep(dci.into())?;
+            let periodic_burst_size = match self.port_speed {
+                Speed::High
+                    if matches!(
+                        desc.transfer_type,
+                        EndpointType::Isochronous | EndpointType::Interrupt
+                    ) =>
+                {
+                    desc.packets_per_microframe.saturating_sub(1)
+                }
+                _ => 0,
+            };
+            ep_raw.configure_periodic(desc.max_packet_size as usize, periodic_burst_size);
             let ring_addr = ep_raw.bus_addr();
             self.eps.insert(dci.into(), EndpointBase::new(ep_raw));
 
@@ -439,12 +454,16 @@ impl Device {
                 match desc.transfer_type {
                     EndpointType::Isochronous | EndpointType::Interrupt => {
                         //init for isoch/interrupt
-                        ep_mut.set_max_packet_size(desc.max_packet_size & 0x7ff); //refer xhci page 162
-                        ep_mut.set_max_burst_size(
-                            ((desc.max_packet_size & 0x1800) >> 11).try_into().unwrap(),
-                        );
+                        ep_mut.set_max_packet_size(desc.max_packet_size);
+                        ep_mut.set_max_burst_size(periodic_burst_size.try_into().unwrap());
                         ep_mut.set_mult(0); //always 0 for interrupt
-                        ep_mut.set_max_endpoint_service_time_interval_payload_low(4);
+                        let max_esit_payload =
+                            desc.max_packet_size as usize * (periodic_burst_size + 1);
+                        ep_mut
+                            .set_average_trb_length(max_esit_payload.min(u16::MAX as usize) as u16);
+                        ep_mut.set_max_endpoint_service_time_interval_payload_low(
+                            max_esit_payload.min(u16::MAX as usize) as u16,
+                        );
                     }
                     _ => {}
                 }
@@ -655,7 +674,7 @@ impl DeviceOp for Device {
         &self.config_desc
     }
 
-    fn get_endpoint(
+    fn endpoint_queue(
         &mut self,
         desc: &usb_if::descriptor::EndpointDescriptor,
     ) -> Result<EndpointBase> {

@@ -14,8 +14,8 @@ use usb_if::{
     host::ControlSetup,
 };
 
-use crate::backend::ty::ep::EndpointKind;
-use crate::backend::ty::{DeviceInfoOp, DeviceOp, ep::EndpointControl};
+use crate::backend::ty::ep::{EndpointControl, EndpointQueue};
+use crate::backend::ty::{DeviceInfoOp, DeviceOp};
 
 pub struct DeviceInfo {
     pub(crate) inner: Box<dyn DeviceInfoOp>,
@@ -274,6 +274,10 @@ impl Device {
         self.inner.ep_ctrl()
     }
 
+    pub fn control_queue(&mut self) -> EndpointQueue {
+        self.ep_ctrl().queue()
+    }
+
     async fn read_manufacturer(&mut self) -> Option<String> {
         let idx = self.descriptor().manufacturer_string_index?;
         self.string_descriptor(idx.get()).await.ok()
@@ -335,32 +339,10 @@ impl Device {
         Err(USBError::NotFound)
     }
 
-    pub async fn get_endpoint(&mut self, address: u8) -> Result<EndpointKind, USBError> {
+    pub async fn endpoint_queue(&mut self, address: u8) -> Result<EndpointQueue, USBError> {
         let ep_desc = self.find_ep_desc(address)?.clone();
-        let base = self.inner.get_endpoint(&ep_desc)?;
-        match (ep_desc.transfer_type, ep_desc.direction) {
-            (usb_if::descriptor::EndpointType::Control, _) => {
-                Ok(EndpointKind::Control(base.into()))
-            }
-            (usb_if::descriptor::EndpointType::Isochronous, usb_if::transfer::Direction::In) => {
-                Ok(EndpointKind::IsochronousIn(base.into()))
-            }
-            (usb_if::descriptor::EndpointType::Isochronous, usb_if::transfer::Direction::Out) => {
-                Ok(EndpointKind::IsochronousOut(base.into()))
-            }
-            (usb_if::descriptor::EndpointType::Bulk, usb_if::transfer::Direction::In) => {
-                Ok(EndpointKind::BulkIn(base.into()))
-            }
-            (usb_if::descriptor::EndpointType::Bulk, usb_if::transfer::Direction::Out) => {
-                Ok(EndpointKind::BulkOut(base.into()))
-            }
-            (usb_if::descriptor::EndpointType::Interrupt, usb_if::transfer::Direction::In) => {
-                Ok(EndpointKind::InterruptIn(base.into()))
-            }
-            (usb_if::descriptor::EndpointType::Interrupt, usb_if::transfer::Direction::Out) => {
-                Ok(EndpointKind::InterruptOut(base.into()))
-            }
-        }
+        let base = self.inner.endpoint_queue(&ep_desc)?;
+        Ok(EndpointQueue::new((&ep_desc).into(), base))
     }
 
     #[allow(unused)]

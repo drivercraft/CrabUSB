@@ -4,8 +4,14 @@ use alloc::{boxed::Box, string::String};
 pub enum TransferError {
     #[error("Stall")]
     Stall,
-    #[error("Request queue full")]
-    RequestQueueFull,
+    #[error("Queue full")]
+    QueueFull,
+    #[error("Invalid endpoint")]
+    InvalidEndpoint,
+    #[error("No device")]
+    NoDevice,
+    #[error("Not supported")]
+    NotSupported,
     #[error("Timeout")]
     Timeout,
     #[error("Cancelled")]

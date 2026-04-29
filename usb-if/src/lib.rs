@@ -5,6 +5,7 @@ extern crate alloc;
 pub mod descriptor;
 pub mod err;
 pub mod host;
+pub mod queue;
 pub mod transfer;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]

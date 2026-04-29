@@ -54,7 +54,7 @@ pub(crate) trait DeviceOp: Send + Any + 'static {
         configuration_value: u8,
     ) -> BoxFuture<'a, Result<(), USBError>>;
 
-    fn get_endpoint(
+    fn endpoint_queue(
         &mut self,
         desc: &usb_if::descriptor::EndpointDescriptor,
     ) -> Result<ep::EndpointBase, USBError>;

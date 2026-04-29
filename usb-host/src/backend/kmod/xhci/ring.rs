@@ -209,6 +209,10 @@ impl<R> SendRing<R> {
         self.ring.bus_addr()
     }
 
+    pub fn usable_capacity(&self) -> usize {
+        self.ring.len().saturating_sub(1)
+    }
+
     pub fn cycle(&self) -> bool {
         self.ring.cycle
     }
