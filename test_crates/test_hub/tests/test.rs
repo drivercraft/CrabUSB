@@ -68,8 +68,11 @@ mod tests {
                 sleep(Duration::from_millis(100)).await;
             }
 
-            for info in ls {
-                info!("{info:#x?}");
+            for probed in ls {
+                info!("{probed:#x?}");
+                let Some(info) = probed.into_device_info() else {
+                    continue;
+                };
 
                 let mut interface_desc = None;
                 let mut config_desc: Option<ConfigurationDescriptor> = None;

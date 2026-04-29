@@ -52,7 +52,10 @@ mod tests {
                 let ls2 = host.probe_devices().await.unwrap();
                 if !ls2.is_empty() {
                     info!("found {} devices", ls2.len());
-                    devices = ls2;
+                    devices = ls2
+                        .into_iter()
+                        .filter_map(|device| device.into_device_info())
+                        .collect();
                     break;
                 }
                 spin_delay(Duration::from_millis(100));

@@ -21,6 +21,78 @@ pub struct DeviceInfo {
     pub(crate) inner: Box<dyn DeviceInfoOp>,
 }
 
+pub struct HubDeviceInfo {
+    pub(crate) inner: Box<dyn DeviceInfoOp>,
+}
+
+pub enum ProbedDevice {
+    Device(DeviceInfo),
+    Hub(HubDeviceInfo),
+}
+
+impl ProbedDevice {
+    pub fn id(&self) -> usize {
+        match self {
+            Self::Device(info) => info.id(),
+            Self::Hub(info) => info.id(),
+        }
+    }
+
+    pub fn descriptor(&self) -> &DeviceDescriptor {
+        match self {
+            Self::Device(info) => info.descriptor(),
+            Self::Hub(info) => info.descriptor(),
+        }
+    }
+
+    pub fn configurations(&self) -> &[ConfigurationDescriptor] {
+        match self {
+            Self::Device(info) => info.configurations(),
+            Self::Hub(info) => info.configurations(),
+        }
+    }
+
+    pub fn product_id(&self) -> u16 {
+        self.descriptor().product_id
+    }
+
+    pub fn vendor_id(&self) -> u16 {
+        self.descriptor().vendor_id
+    }
+
+    pub fn as_device_info(&self) -> Option<&DeviceInfo> {
+        match self {
+            Self::Device(info) => Some(info),
+            Self::Hub(_) => None,
+        }
+    }
+
+    pub fn into_device_info(self) -> Option<DeviceInfo> {
+        match self {
+            Self::Device(info) => Some(info),
+            Self::Hub(_) => None,
+        }
+    }
+}
+
+impl Debug for ProbedDevice {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Device(info) => f.debug_tuple("ProbedDevice::Device").field(info).finish(),
+            Self::Hub(info) => f.debug_tuple("ProbedDevice::Hub").field(info).finish(),
+        }
+    }
+}
+
+impl Display for ProbedDevice {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Device(info) => Display::fmt(info, f),
+            Self::Hub(info) => Display::fmt(info, f),
+        }
+    }
+}
+
 impl DeviceInfo {
     pub fn id(&self) -> usize {
         self.inner.id()
@@ -54,6 +126,28 @@ impl DeviceInfo {
     }
 }
 
+impl HubDeviceInfo {
+    pub fn id(&self) -> usize {
+        self.inner.id()
+    }
+
+    pub fn descriptor(&self) -> &DeviceDescriptor {
+        self.inner.descriptor()
+    }
+
+    pub fn configurations(&self) -> &[ConfigurationDescriptor] {
+        self.inner.configuration_descriptors()
+    }
+
+    pub fn product_id(&self) -> u16 {
+        self.descriptor().product_id
+    }
+
+    pub fn vendor_id(&self) -> u16 {
+        self.descriptor().vendor_id
+    }
+}
+
 impl Debug for DeviceInfo {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("DeviceInfo")
@@ -64,7 +158,28 @@ impl Debug for DeviceInfo {
     }
 }
 
+impl Debug for HubDeviceInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HubDeviceInfo")
+            .field("backend", &self.inner.backend_name())
+            .field("vender_id", &self.inner.descriptor().vendor_id)
+            .field("product_id", &self.inner.descriptor().product_id)
+            .finish()
+    }
+}
+
 impl Display for DeviceInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{:04x}:{:04x}",
+            self.inner.descriptor().vendor_id,
+            self.inner.descriptor().product_id
+        )
+    }
+}
+
+impl Display for HubDeviceInfo {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,

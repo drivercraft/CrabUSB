@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use core::any::Any;
 use core::fmt::Debug;
 
@@ -26,6 +27,11 @@ pub(crate) trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
     fn backend_name(&self) -> &str;
     fn descriptor(&self) -> &DeviceDescriptor;
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
+}
+
+pub(crate) enum ProbedDeviceInfoOp {
+    Device(Box<dyn DeviceInfoOp>),
+    Hub(Box<dyn DeviceInfoOp>),
 }
 
 /// USB 设备特征（高层抽象）
