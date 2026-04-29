@@ -178,6 +178,7 @@ pub struct ConfigurationDescriptor {
     pub string_index: Option<NonZero<u8>>,
     pub string: Option<String>,
     pub interfaces: Vec<InterfaceDescriptors>,
+    pub raw: Vec<u8>,
 }
 
 impl ConfigurationDescriptor {
@@ -230,6 +231,7 @@ impl From<parser::ConfigurationDescriptor<'_>> for ConfigurationDescriptor {
             string_index: desc.string_index(),
             interfaces: desc.interfaces().map(InterfaceDescriptors::from).collect(),
             string: None,
+            raw: desc.as_bytes().to_vec(),
         }
     }
 }
