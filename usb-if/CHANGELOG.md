@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.5.1...usb-if-v0.6.0) - 2026-04-29
+
+### Fixed
+
+- *(xhci)* set chain bit on ISO TRBs and preserve raw config descriptor ([#69](https://github.com/drivercraft/CrabUSB/pull/69))
+
 ## [0.5.1](https://github.com/drivercraft/CrabUSB/compare/usb-if-v0.5.0...usb-if-v0.5.1) - 2026-01-28
 
 ### Other
