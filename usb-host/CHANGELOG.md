@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.7.1...crab-usb-v0.8.0) - 2026-04-30
+
+### Other
+
+- Introduce Queue-Based Transfer API and Unified Endpoint Model ([#71](https://github.com/drivercraft/CrabUSB/pull/71))
+
 ## [0.7.1](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.7.0...crab-usb-v0.7.1) - 2026-04-29
 
 ### Fixed
