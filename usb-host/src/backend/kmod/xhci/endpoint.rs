@@ -276,13 +276,28 @@ impl Endpoint {
         }
         Ok(())
     }
+
+    fn required_trbs_for_request(request: &TransferRequest) -> usize {
+        match request {
+            TransferRequest::Control { buffer, .. } => {
+                if buffer.is_some_and(|buffer| buffer.len > 0) {
+                    3
+                } else {
+                    2
+                }
+            }
+            TransferRequest::Bulk { .. } | TransferRequest::Interrupt { .. } => 1,
+            TransferRequest::Isochronous { packets, .. } => packets.len().max(1),
+        }
+    }
 }
 
 impl EndpointOp for Endpoint {
     fn submit_request(&mut self, request: TransferRequest) -> Result<RequestId, TransferError> {
-        let transfer = Transfer::from_request(&self.kernel, request);
-        let required_trbs = Self::required_trbs(&transfer);
+        let required_trbs = Self::required_trbs_for_request(&request);
         self.ensure_ring_capacity(required_trbs)?;
+        let transfer = Transfer::from_request(&self.kernel, request)?;
+        debug_assert_eq!(required_trbs, Self::required_trbs(&transfer));
 
         let mut data_bus_addr = 0;
         if transfer.buffer_len() > 0 {
