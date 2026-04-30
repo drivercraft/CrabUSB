@@ -240,7 +240,7 @@ impl EndpointOp for EndpointImpl {
             .get(&id.raw())
             .ok_or(TransferError::InvalidEndpoint)?;
         let res = unsafe { libusb_cancel_transfer(trans.transfer) };
-        if res == libusb1_sys::LIBUSB_SUCCESS as i32 {
+        if res == libusb1_sys::constants::LIBUSB_SUCCESS as i32 {
             Ok(())
         } else {
             Err(TransferError::Other(anyhow!(
