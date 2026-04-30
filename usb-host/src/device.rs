@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, string::String};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, vec::Vec};
 use anyhow::anyhow;
 use core::{
     any::Any,
@@ -14,7 +14,7 @@ use usb_if::{
     host::ControlSetup,
 };
 
-use crate::backend::ty::ep::{EndpointControl, EndpointQueue};
+use crate::backend::ty::ep::Endpoint;
 use crate::backend::ty::{DeviceInfoOp, DeviceOp};
 
 pub struct DeviceInfo {
@@ -267,15 +267,19 @@ impl Device {
     }
 
     pub async fn set_configuration(&mut self, configuration_value: u8) -> crate::err::Result {
-        self.inner.set_configuration(configuration_value).await
+        let result = self.inner.set_configuration(configuration_value).await;
+        if result.is_ok() {
+            self.current_interface = None;
+        }
+        result
     }
 
-    pub fn ep_ctrl(&mut self) -> &mut EndpointControl {
-        self.inner.ep_ctrl()
+    pub fn ctrl_ep_ref(&self) -> &Endpoint {
+        self.inner.ctrl_ep_ref()
     }
 
-    pub fn control_queue(&mut self) -> EndpointQueue {
-        self.ep_ctrl().queue()
+    pub fn ctrl_ep_mut(&mut self) -> &mut Endpoint {
+        self.inner.ctrl_ep_mut()
     }
 
     async fn read_manufacturer(&mut self) -> Option<String> {
@@ -294,7 +298,7 @@ impl Device {
     pub async fn string_descriptor(&mut self, index: u8) -> Result<String, USBError> {
         let mut data = alloc::vec![0u8; 256];
         let lang_id = self.lang_id();
-        self.ep_ctrl()
+        self.ctrl_ep_mut()
             .get_descriptor(DescriptorType::STRING, index, lang_id.into(), &mut data)
             .await?;
         let res = decode_string_descriptor(&data)?;
@@ -306,7 +310,7 @@ impl Device {
         param: ControlSetup,
         buff: &mut [u8],
     ) -> Result<usize, TransferError> {
-        self.ep_ctrl().control_in(param, buff).await
+        self.ctrl_ep_mut().control_in(param, buff).await
     }
 
     pub async fn control_out(
@@ -314,7 +318,7 @@ impl Device {
         param: ControlSetup,
         buff: &[u8],
     ) -> Result<usize, TransferError> {
-        self.ep_ctrl().control_out(param, buff).await
+        self.ctrl_ep_mut().control_out(param, buff).await
     }
 
     pub async fn update_hub(
@@ -327,7 +331,7 @@ impl Device {
     pub async fn current_configuration_descriptor(
         &mut self,
     ) -> Result<ConfigurationDescriptor, USBError> {
-        let value = self.ep_ctrl().get_configuration().await?;
+        let value = self.ctrl_ep_mut().get_configuration().await?;
         if value == 0 {
             return Err(USBError::NotFound);
         }
@@ -339,10 +343,22 @@ impl Device {
         Err(USBError::NotFound)
     }
 
-    pub async fn endpoint_queue(&mut self, address: u8) -> Result<EndpointQueue, USBError> {
+    pub fn endpoint(&mut self, address: u8) -> Result<Endpoint, USBError> {
+        if address == 0 {
+            return Err(USBError::NotFound);
+        }
         let ep_desc = self.find_ep_desc(address)?.clone();
-        let base = self.inner.endpoint_queue(&ep_desc)?;
-        Ok(EndpointQueue::new((&ep_desc).into(), base))
+        self.inner.endpoint(&ep_desc)
+    }
+
+    pub fn take_endpoints(&mut self) -> Result<BTreeMap<u8, Endpoint>, USBError> {
+        let descriptors = self.current_endpoint_descriptors()?;
+        let mut endpoints = BTreeMap::new();
+        for desc in descriptors {
+            let address = desc.address;
+            endpoints.insert(address, self.inner.endpoint(&desc)?);
+        }
+        Ok(endpoints)
     }
 
     #[allow(unused)]
@@ -363,6 +379,21 @@ impl Device {
         &self,
         address: u8,
     ) -> core::result::Result<&usb_if::descriptor::EndpointDescriptor, USBError> {
+        self.current_endpoint_descriptors_ref()?
+            .iter()
+            .find(|ep| ep.address == address)
+            .ok_or(USBError::NotFound)
+    }
+
+    fn current_endpoint_descriptors(
+        &self,
+    ) -> core::result::Result<Vec<usb_if::descriptor::EndpointDescriptor>, USBError> {
+        Ok(self.current_endpoint_descriptors_ref()?.to_vec())
+    }
+
+    fn current_endpoint_descriptors_ref(
+        &self,
+    ) -> core::result::Result<&[usb_if::descriptor::EndpointDescriptor], USBError> {
         let (interface_number, alternate_setting) = match self.current_interface {
             Some((i, a)) => (i, a),
             None => Err(anyhow!("Interface not claim"))?,
@@ -372,11 +403,7 @@ impl Device {
                 if interface.interface_number == interface_number {
                     for alt in &interface.alt_settings {
                         if alt.alternate_setting == alternate_setting {
-                            for ep in &alt.endpoints {
-                                if ep.address == address {
-                                    return Ok(ep);
-                                }
-                            }
+                            return Ok(&alt.endpoints);
                         }
                     }
                 }

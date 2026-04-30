@@ -5,8 +5,8 @@ use mbarrier::mb;
 use spin::Mutex;
 use usb_if::{
     descriptor::{self, EndpointDescriptor},
+    endpoint::{RequestId, TransferCompletion, TransferRequest},
     err::TransferError,
-    queue::{RequestId, TransferCompletion, TransferRequest},
     transfer::{BmRequestType, Direction},
 };
 use xhci::{
@@ -36,6 +36,7 @@ pub struct Endpoint {
     pub ring: SendRing<TransferEvent>,
     bell: Arc<Mutex<SlotBell>>,
     transfers: BTreeMap<TransferId, Transfer>,
+    cancelled: BTreeMap<TransferId, ()>,
     iso_packet_ids: BTreeMap<TransferId, Vec<TransferId>>,
     trb_counts: BTreeMap<TransferId, usize>,
     outstanding_trbs: usize,
@@ -56,6 +57,7 @@ impl Endpoint {
             ring,
             bell,
             transfers: BTreeMap::new(),
+            cancelled: BTreeMap::new(),
             iso_packet_ids: BTreeMap::new(),
             trb_counts: BTreeMap::new(),
             outstanding_trbs: 0,
@@ -414,14 +416,27 @@ impl EndpointOp for Endpoint {
     ) -> Option<Result<TransferCompletion, TransferError>> {
         let raw_id = BusAddr(id.raw());
         let c = self.ring.get_finished(raw_id)?;
+        let cancelled = self.cancelled.remove(&TransferId(raw_id)).is_some();
         let res = self
             .handle_transfer_completion(c, raw_id)
             .map(|transfer| transfer_to_completion(id, transfer));
+        if cancelled {
+            return Some(Err(TransferError::Cancelled));
+        }
         Some(res)
     }
 
     fn register_waker(&self, id: RequestId, cx: &mut core::task::Context<'_>) {
         self.ring.register_cx(BusAddr(id.raw()), cx);
+    }
+
+    fn cancel_request(&mut self, id: RequestId) -> Result<(), TransferError> {
+        let transfer_id = TransferId(BusAddr(id.raw()));
+        if !self.transfers.contains_key(&transfer_id) {
+            return Err(TransferError::InvalidEndpoint);
+        }
+        self.cancelled.insert(transfer_id, ());
+        Ok(())
     }
 }
 

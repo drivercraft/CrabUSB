@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-pub use usb_if::queue::TransferKind;
+pub use usb_if::endpoint::TransferKind;
 
 #[cfg_attr(umod, derive(Clone))]
 pub struct Transfer {

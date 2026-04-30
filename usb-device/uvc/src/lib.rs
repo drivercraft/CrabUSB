@@ -876,7 +876,7 @@ impl UvcDevice {
         }
 
         let ep_desc = ep.ok_or(anyhow!("No isochronous IN endpoint found"))?;
-        let ep = self.device.endpoint_queue(ep_desc.address).await?;
+        let ep = self.device.endpoint(ep_desc.address)?;
 
         debug!("Starting video streaming");
         self.state = UvcDeviceState::Streaming;

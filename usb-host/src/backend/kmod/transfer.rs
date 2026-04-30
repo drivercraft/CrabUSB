@@ -2,7 +2,7 @@ use core::ptr::NonNull;
 
 use alloc::vec::Vec;
 use dma_api::DmaDirection;
-use usb_if::queue::TransferRequest;
+use usb_if::endpoint::TransferRequest;
 use usb_if::transfer::Direction;
 
 use crate::{

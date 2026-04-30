@@ -19,7 +19,7 @@ pub mod err;
 mod host;
 
 pub use crate::backend::ty::Event;
-pub use crate::backend::ty::ep::EndpointQueue;
+pub use crate::backend::ty::ep::Endpoint;
 pub use host::*;
 
 #[allow(unused_imports)]

@@ -3,9 +3,9 @@ use core::any::Any;
 use core::fmt::Debug;
 
 use futures::future::BoxFuture;
-use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor};
+use usb_if::descriptor::{ConfigurationDescriptor, DeviceDescriptor, EndpointDescriptor};
 
-use crate::{backend::ty::ep::EndpointControl, err::USBError};
+use crate::{backend::ty::ep::Endpoint, err::USBError};
 
 pub mod ep;
 pub mod transfer;
@@ -41,23 +41,22 @@ pub(crate) trait DeviceOp: Send + Any + 'static {
     fn descriptor(&self) -> &DeviceDescriptor;
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
 
+    fn ctrl_ep_ref(&self) -> &Endpoint;
+
+    fn ctrl_ep_mut(&mut self) -> &mut Endpoint;
+
     fn claim_interface<'a>(
         &'a mut self,
         interface: u8,
         alternate: u8,
     ) -> BoxFuture<'a, Result<(), USBError>>;
 
-    fn ep_ctrl(&mut self) -> &mut EndpointControl;
-
     fn set_configuration<'a>(
         &'a mut self,
         configuration_value: u8,
     ) -> BoxFuture<'a, Result<(), USBError>>;
 
-    fn endpoint_queue(
-        &mut self,
-        desc: &usb_if::descriptor::EndpointDescriptor,
-    ) -> Result<ep::EndpointBase, USBError>;
+    fn endpoint(&mut self, desc: &EndpointDescriptor) -> Result<ep::Endpoint, USBError>;
 
     fn update_hub(&mut self, params: HubParams) -> BoxFuture<'_, Result<(), USBError>>;
 }

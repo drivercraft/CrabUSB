@@ -1,39 +1,19 @@
 use usb_if::descriptor::{ConfigurationDescriptor, DescriptorType, DeviceDescriptor};
+use usb_if::endpoint::TransferRequest;
 use usb_if::err::{TransferError, USBError};
 use usb_if::host::ControlSetup;
-use usb_if::queue::{QueueConfig, TransferRequest};
 use usb_if::transfer::{Recipient, Request, RequestType};
 
-use super::{EndpointBase, EndpointOp, EndpointQueue};
+use super::Endpoint;
 
-#[derive(Clone)]
-pub struct EndpointControl {
-    pub(crate) raw: EndpointBase,
-}
-
-impl EndpointControl {
-    pub(crate) fn new(raw: impl EndpointOp) -> Self {
-        Self {
-            raw: EndpointBase::new(raw),
-        }
-    }
-
-    pub fn queue(&self) -> EndpointQueue {
-        self.raw.queue(QueueConfig::control())
-    }
-
+impl Endpoint {
     pub async fn control_in(
         &mut self,
         param: usb_if::host::ControlSetup,
         buff: &mut [u8],
     ) -> Result<usize, TransferError> {
-        let t = self
-            .raw
-            .queue(QueueConfig::control())
-            .wait(TransferRequest::control_in(param, buff))
-            .await?;
-        let n = t.actual_length;
-        Ok(n)
+        let t = self.wait(TransferRequest::control_in(param, buff)).await?;
+        Ok(t.actual_length)
     }
 
     pub async fn control_out(
@@ -41,13 +21,8 @@ impl EndpointControl {
         param: usb_if::host::ControlSetup,
         buff: &[u8],
     ) -> Result<usize, TransferError> {
-        let t = self
-            .raw
-            .queue(QueueConfig::control())
-            .wait(TransferRequest::control_out(param, buff))
-            .await?;
-        let n = t.actual_length;
-        Ok(n)
+        let t = self.wait(TransferRequest::control_out(param, buff)).await?;
+        Ok(t.actual_length)
     }
 
     pub async fn set_configuration(
@@ -112,35 +87,24 @@ impl EndpointControl {
             &mut buff,
         )
         .await?;
-        let config_value = buff[0];
-
-        Ok(config_value)
+        Ok(buff[0])
     }
 
     pub async fn get_configuration_descriptor(
         &mut self,
         index: u8,
     ) -> Result<ConfigurationDescriptor, USBError> {
-        let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN]; // 配置描述符头部固定为9字节
+        let mut header = alloc::vec![0u8; ConfigurationDescriptor::LEN];
         self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut header)
             .await?;
 
         let total_length = u16::from_le_bytes(header[2..4].try_into().unwrap()) as usize;
-        // 获取完整的配置描述符（包括接口和端点描述符）
         let mut full_data = alloc::vec![0u8; total_length];
         debug!("Reading configuration descriptor for index {index}, total length: {total_length}");
         self.get_descriptor(DescriptorType::CONFIGURATION, index, 0, &mut full_data)
             .await?;
 
-        let parsed_config = ConfigurationDescriptor::parse(&full_data)
-            .ok_or(anyhow!("config descriptor parse err"))?;
-
-        Ok(parsed_config)
-    }
-}
-
-impl From<EndpointBase> for EndpointControl {
-    fn from(raw: EndpointBase) -> Self {
-        Self { raw }
+        ConfigurationDescriptor::parse(&full_data)
+            .ok_or_else(|| anyhow!("config descriptor parse err").into())
     }
 }

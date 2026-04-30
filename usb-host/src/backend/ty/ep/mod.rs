@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use core::any::Any;
 use core::{
     future::Future,
@@ -7,47 +7,17 @@ use core::{
 };
 
 use usb_if::{
-    err::TransferError,
-    queue::{
-        IsoPacketResult, QueueConfig, QueueEvent, RequestId, TransferCompletion, TransferRequest,
+    descriptor::EndpointType,
+    endpoint::{
+        EndpointInfo, IsoPacketResult, RequestId, TransferCompletion, TransferRequest,
         TransferStatus,
     },
+    err::TransferError,
 };
 
 use super::transfer::Transfer;
-use spin::Mutex;
 
 mod ctrl;
-
-pub use ctrl::*;
-
-#[derive(Clone)]
-pub(crate) struct EndpointBase {
-    raw: Arc<Mutex<Box<dyn EndpointOp>>>,
-}
-
-impl EndpointBase {
-    pub fn new(raw: impl EndpointOp) -> Self {
-        Self {
-            raw: Arc::new(Mutex::new(Box::new(raw))),
-        }
-    }
-
-    pub fn queue(&self, config: QueueConfig) -> EndpointQueue {
-        EndpointQueue {
-            config,
-            endpoint: self.raw.clone(),
-        }
-    }
-
-    #[allow(unused)]
-    pub(crate) fn with_raw_mut<T: EndpointOp, R>(&mut self, f: impl FnOnce(&mut T) -> R) -> R {
-        let mut raw = self.raw.lock();
-        let d = raw.as_mut() as &mut dyn Any;
-        f(d.downcast_mut::<T>()
-            .expect("EndpointBase downcast_mut failed"))
-    }
-}
 
 pub(crate) trait EndpointOp: Send + Any + 'static {
     fn submit_request(&mut self, request: TransferRequest) -> Result<RequestId, TransferError>;
@@ -62,98 +32,101 @@ pub(crate) trait EndpointOp: Send + Any + 'static {
     fn cancel_request(&mut self, _id: RequestId) -> Result<(), TransferError> {
         Err(TransferError::NotSupported)
     }
-
-    fn handle_queue_event(&mut self, _event: QueueEvent) -> Result<(), TransferError> {
-        Ok(())
-    }
 }
 
-#[derive(Clone)]
-pub struct EndpointQueue {
-    config: QueueConfig,
-    pub(crate) endpoint: Arc<Mutex<Box<dyn EndpointOp>>>,
+pub struct Endpoint {
+    info: EndpointInfo,
+    raw: Box<dyn EndpointOp>,
 }
 
-impl EndpointQueue {
-    pub(crate) fn new(config: QueueConfig, base: EndpointBase) -> Self {
-        base.queue(config)
+impl Endpoint {
+    pub(crate) fn new(info: EndpointInfo, raw: impl EndpointOp) -> Self {
+        Self {
+            info,
+            raw: Box::new(raw),
+        }
     }
 
-    pub fn config(&self) -> QueueConfig {
-        self.config
+    pub fn info(&self) -> EndpointInfo {
+        self.info
     }
 
-    pub fn submit(&self, request: TransferRequest) -> Result<RequestId, TransferError> {
-        self.endpoint.lock().submit_request(request)
+    pub fn submit(&mut self, request: TransferRequest) -> Result<RequestId, TransferError> {
+        self.validate_request(&request)?;
+        self.raw.submit_request(request)
     }
 
-    pub fn reclaim(&self, id: RequestId) -> Result<Option<TransferCompletion>, TransferError> {
-        match self.endpoint.lock().reclaim_request(id) {
+    pub fn reclaim(&mut self, id: RequestId) -> Result<Option<TransferCompletion>, TransferError> {
+        match self.raw.reclaim_request(id) {
             Some(result) => result.map(Some),
             None => Ok(None),
         }
     }
 
     pub fn poll_request(
-        &self,
+        &mut self,
         id: RequestId,
         cx: &mut Context<'_>,
     ) -> Poll<Result<TransferCompletion, TransferError>> {
-        let mut endpoint = self.endpoint.lock();
-        match endpoint.reclaim_request(id) {
+        match self.raw.reclaim_request(id) {
             Some(res) => Poll::Ready(res),
             None => {
-                endpoint.register_waker(id, cx);
+                self.raw.register_waker(id, cx);
                 Poll::Pending
             }
         }
     }
 
-    pub fn cancel(&self, id: RequestId) -> Result<(), TransferError> {
-        self.endpoint.lock().cancel_request(id)
-    }
-
-    pub fn handle_queue_event(&self, event: QueueEvent) -> Result<(), TransferError> {
-        self.endpoint.lock().handle_queue_event(event)
+    pub fn cancel(&mut self, id: RequestId) -> Result<(), TransferError> {
+        self.raw.cancel_request(id)
     }
 
     pub async fn wait(
-        &self,
+        &mut self,
         request: TransferRequest,
     ) -> Result<TransferCompletion, TransferError> {
         let id = self.submit(request)?;
-        QueueRequestFuture {
-            id,
-            endpoint: self.endpoint.clone(),
+        EndpointRequestFuture { id, endpoint: self }.await
+    }
+
+    #[allow(unused)]
+    pub(crate) fn with_raw_mut<T: EndpointOp, R>(&mut self, f: impl FnOnce(&mut T) -> R) -> R {
+        let d = self.raw.as_mut() as &mut dyn Any;
+        f(d.downcast_mut::<T>().expect("Endpoint downcast_mut failed"))
+    }
+
+    fn validate_request(&self, request: &TransferRequest) -> Result<(), TransferError> {
+        let request_type = match request {
+            TransferRequest::Control { .. } => EndpointType::Control,
+            TransferRequest::Bulk { .. } => EndpointType::Bulk,
+            TransferRequest::Interrupt { .. } => EndpointType::Interrupt,
+            TransferRequest::Isochronous { .. } => EndpointType::Isochronous,
+        };
+        if request_type == self.info.transfer_type {
+            Ok(())
+        } else {
+            Err(TransferError::InvalidEndpoint)
         }
-        .await
     }
 }
 
-struct QueueRequestFuture {
+struct EndpointRequestFuture<'a> {
     id: RequestId,
-    endpoint: Arc<Mutex<Box<dyn EndpointOp>>>,
+    endpoint: &'a mut Endpoint,
 }
 
-impl Future for QueueRequestFuture {
+impl Future for EndpointRequestFuture<'_> {
     type Output = Result<TransferCompletion, TransferError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let id = self.id;
-        let mut endpoint = self.endpoint.lock();
-        match endpoint.reclaim_request(id) {
-            Some(res) => Poll::Ready(res),
-            None => {
-                endpoint.register_waker(id, cx);
-                Poll::Pending
-            }
-        }
+        let this = self.get_mut();
+        this.endpoint.poll_request(this.id, cx)
     }
 }
 
 pub(crate) fn transfer_to_completion(id: RequestId, transfer: Transfer) -> TransferCompletion {
     let iso_packets = match &transfer.kind {
-        usb_if::queue::TransferKind::Isochronous { packet_lengths } => packet_lengths
+        usb_if::endpoint::TransferKind::Isochronous { packet_lengths } => packet_lengths
             .iter()
             .copied()
             .zip(transfer.iso_packet_actual_lengths.iter().copied())

@@ -24,7 +24,7 @@ mod tests {
         time::Duration,
     };
     use crab_usb::{
-        usb_if::{descriptor::ConfigurationDescriptor, queue::TransferRequest},
+        usb_if::{descriptor::ConfigurationDescriptor, endpoint::TransferRequest},
         *,
     };
     use ktest_helper::*;
@@ -130,7 +130,7 @@ mod tests {
                             usb_if::transfer::Direction::In
                         )
                     ) {
-                        let ep = device.endpoint_queue(ep_desc.address).await.unwrap();
+                        let mut ep = device.endpoint(ep_desc.address).unwrap();
                         let mut buff = alloc::vec![0u8; 64];
 
                         match ep.wait(TransferRequest::bulk_in(&mut buff)).await {

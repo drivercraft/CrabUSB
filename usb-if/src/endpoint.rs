@@ -37,19 +37,6 @@ impl From<EndpointAddress> for u8 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct QueueId(u64);
-
-impl QueueId {
-    pub const fn new(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RequestId(u64);
 
 impl RequestId {
@@ -63,8 +50,7 @@ impl RequestId {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct QueueConfig {
-    pub queue_id: QueueId,
+pub struct EndpointInfo {
     pub address: EndpointAddress,
     pub transfer_type: EndpointType,
     pub direction: Direction,
@@ -73,10 +59,9 @@ pub struct QueueConfig {
     pub interval: u8,
 }
 
-impl QueueConfig {
+impl EndpointInfo {
     pub const fn control() -> Self {
         Self {
-            queue_id: QueueId::new(0),
             address: EndpointAddress::CONTROL,
             transfer_type: EndpointType::Control,
             direction: Direction::Out,
@@ -87,10 +72,9 @@ impl QueueConfig {
     }
 }
 
-impl From<&EndpointDescriptor> for QueueConfig {
+impl From<&EndpointDescriptor> for EndpointInfo {
     fn from(desc: &EndpointDescriptor) -> Self {
         Self {
-            queue_id: QueueId::new(desc.dci() as u64),
             address: EndpointAddress::new(desc.address),
             transfer_type: desc.transfer_type,
             direction: desc.direction,
@@ -342,27 +326,4 @@ pub struct TransferCompletion {
     pub status: TransferStatus,
     pub actual_length: usize,
     pub iso_packets: Vec<IsoPacketResult>,
-}
-
-#[derive(Clone, Debug)]
-pub enum QueueEvent {
-    Completed(TransferCompletion),
-    Error {
-        request_id: Option<RequestId>,
-        status: TransferStatus,
-    },
-    NeedsReset,
-}
-
-/// IRQ handlers use this queue contract only to synchronize hardware state.
-///
-/// An interrupt handler must not block, wait on futures, run upper-layer callbacks,
-/// or acquire locks owned by OS glue, device managers, files, or submit/reclaim
-/// paths. It should only extract stable hardware events, mark request completion
-/// for the affected queue, and wake queue-local waiters. If the completion path
-/// needs mutual exclusion, use queue-local IRQ-safe state such as atomics,
-/// a preallocated completion ring, or a short critical section with interrupts
-/// disabled.
-pub trait IrqQueueNotifier {
-    fn notify_queue_event(&self, event: QueueEvent);
 }

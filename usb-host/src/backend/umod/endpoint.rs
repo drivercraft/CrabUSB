@@ -6,14 +6,14 @@ use std::{
 
 use futures::task::AtomicWaker;
 use libusb1_sys::{
-    libusb_control_transfer_get_data, libusb_fill_bulk_transfer, libusb_fill_control_setup,
-    libusb_fill_control_transfer, libusb_fill_iso_transfer, libusb_submit_transfer,
-    libusb_transfer,
+    libusb_cancel_transfer, libusb_control_transfer_get_data, libusb_fill_bulk_transfer,
+    libusb_fill_control_setup, libusb_fill_control_transfer, libusb_fill_iso_transfer,
+    libusb_submit_transfer, libusb_transfer,
 };
 use log::trace;
 use usb_if::{
+    endpoint::{RequestId, TransferCompletion, TransferRequest},
     err::TransferError,
-    queue::{RequestId, TransferCompletion, TransferRequest},
     transfer::{BmRequestType, Direction},
 };
 
@@ -231,6 +231,21 @@ impl EndpointOp for EndpointImpl {
     fn register_waker(&self, id: RequestId, cx: &mut std::task::Context<'_>) {
         if let Some(trans) = self.transfers.get(&id.raw()) {
             trans.register_waker(cx);
+        }
+    }
+
+    fn cancel_request(&mut self, id: RequestId) -> Result<(), usb_if::err::TransferError> {
+        let trans = self
+            .transfers
+            .get(&id.raw())
+            .ok_or(TransferError::InvalidEndpoint)?;
+        let res = unsafe { libusb_cancel_transfer(trans.transfer) };
+        if res == libusb1_sys::LIBUSB_SUCCESS as i32 {
+            Ok(())
+        } else {
+            Err(TransferError::Other(anyhow!(
+                "Failed to cancel transfer: libusb error {res}"
+            )))
         }
     }
 }
