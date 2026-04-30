@@ -343,7 +343,7 @@ impl HubDevice {
     async fn set_hub_depth(&mut self, depth: u8) -> Result<(), USBError> {
         self.data
             .dev
-            .ep_ctrl()
+            .ctrl_ep_mut()
             .control_out(
                 ControlSetup {
                     request_type: RequestType::Class,
@@ -391,7 +391,7 @@ impl HubDevice {
         let n = self
             .data
             .dev
-            .ep_ctrl()
+            .ctrl_ep_mut()
             .control_in(
                 ControlSetup {
                     request_type: RequestType::Class,
@@ -423,7 +423,7 @@ impl HubDevice {
 
         self.data
             .dev
-            .ep_ctrl()
+            .ctrl_ep_mut()
             .control_in(
                 ControlSetup {
                     request_type: RequestType::Class,
@@ -455,7 +455,7 @@ impl HubDevice {
 
         self.data
             .dev
-            .ep_ctrl()
+            .ctrl_ep_mut()
             .control_in(
                 ControlSetup {
                     request_type: RequestType::Class,
@@ -524,7 +524,7 @@ impl HubDevice {
     ) -> Result<(), USBError> {
         self.data
             .dev
-            .ep_ctrl()
+            .ctrl_ep_mut()
             .control_out(
                 ControlSetup {
                     request_type: RequestType::Class,
@@ -548,7 +548,7 @@ impl HubDevice {
     ) -> Result<(), USBError> {
         self.data
             .dev
-            .ep_ctrl()
+            .ctrl_ep_mut()
             .control_out(
                 ControlSetup {
                     request_type: RequestType::Class,

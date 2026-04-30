@@ -210,11 +210,11 @@ pub trait Device {
     // Control 传输...
 }
 
-// Interface: 接口和端点访问
-pub trait Interface {
-    fn endpoint_bulk_in(&mut self, endpoint: u8) -> Result<Box<dyn EndpointBulkIn>, USBError>;
-    fn endpoint_bulk_out(&mut self, endpoint: u8) -> ...;
-    // 其他端点类型...
+// EndpointQueue: endpoint 的运行时队列
+pub trait EndpointQueue {
+    fn submit(&self, request: TransferRequest) -> Result<RequestId, TransferError>;
+    fn reclaim(&self, id: RequestId) -> Result<Option<TransferCompletion>, TransferError>;
+    fn poll_request(&self, id: RequestId, cx: &mut Context<'_>) -> Poll<...>;
 }
 ```
 

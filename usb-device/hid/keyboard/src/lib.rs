@@ -5,7 +5,7 @@ use alloc::{string::ToString, vec::Vec};
 
 use anyhow::bail;
 use crab_usb::{
-    EndpointKind,
+    Endpoint,
     device::{Device, DeviceInfo},
     err::USBError,
 };
@@ -13,6 +13,7 @@ use keyboard_types::{Key, Modifiers, NamedKey};
 use log::debug;
 use usb_if::{
     descriptor::{Class, EndpointType},
+    endpoint::TransferRequest,
     transfer::Direction,
 };
 
@@ -123,10 +124,9 @@ fn scancode_to_key(scancode: u8) -> Option<Key> {
 
 pub struct KeyBoard {
     _device: Device,
+    endpoint: Endpoint,
     /// 上一次按键状态，用于检测按键变化
     previous_state: [u8; 8],
-    /// 中断端点地址
-    endpoint_address: u8,
 }
 
 impl KeyBoard {
@@ -179,28 +179,23 @@ impl KeyBoard {
             .claim_interface(interface_number, alternate_setting)
             .await?;
 
+        let endpoint = device.endpoint(endpoint_address)?;
+
         Ok(Self {
             _device: device,
+            endpoint,
             previous_state: [0; 8],
-            endpoint_address,
         })
     }
 
     /// 接收并解析键盘事件
     pub async fn recv_events(&mut self) -> Result<Vec<KeyEvent>, anyhow::Error> {
-        // 每次接收时获取端点
-        let endpoint_kind = self._device.get_endpoint(self.endpoint_address).await?;
-
         let mut buf = [0u8; 8];
-        let n = match endpoint_kind {
-            EndpointKind::InterruptIn(mut ep) => {
-                // 使用 submit_and_wait 方法进行同步等待
-                ep.submit_and_wait(&mut buf).await?
-            }
-            _ => {
-                bail!("Invalid endpoint kind for keyboard")
-            }
-        };
+        let n = self
+            .endpoint
+            .wait(TransferRequest::interrupt_in(&mut buf))
+            .await?
+            .actual_length;
 
         if n == 0 {
             bail!("No data received from keyboard");

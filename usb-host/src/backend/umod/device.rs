@@ -6,9 +6,10 @@ use libusb1_sys::*;
 use usb_if::descriptor::{
     ConfigurationDescriptor, DeviceDescriptor, InterfaceDescriptor, InterfaceDescriptors,
 };
+use usb_if::endpoint::EndpointInfo;
 
 use super::{context::Context, endpoint::EndpointImpl};
-use crate::backend::ty::ep::{EndpointBase, EndpointControl};
+use crate::backend::ty::ep::Endpoint;
 use crate::backend::ty::{DeviceInfoOp, DeviceOp};
 use crate::err::*;
 
@@ -173,7 +174,7 @@ pub struct Device {
     handle: Arc<DeviceHandle>,
     desc: DeviceDescriptor,
     configs: Vec<ConfigurationDescriptor>,
-    ctrl_ep: EndpointControl,
+    ctrl_ep: Endpoint,
 }
 
 unsafe impl Send for Device {}
@@ -194,7 +195,7 @@ impl Device {
 
         // 创建控制端点（endpoint address 0）
         let ctrl_ep_impl = EndpointImpl::new(handle.clone(), 0);
-        let ctrl_ep = EndpointControl::new(ctrl_ep_impl);
+        let ctrl_ep = Endpoint::new(EndpointInfo::control(), ctrl_ep_impl);
 
         Ok(Self {
             handle,
@@ -250,16 +251,20 @@ impl DeviceOp for Device {
         &self.configs
     }
 
+    fn ctrl_ep_ref(&self) -> &Endpoint {
+        &self.ctrl_ep
+    }
+
+    fn ctrl_ep_mut(&mut self) -> &mut Endpoint {
+        &mut self.ctrl_ep
+    }
+
     fn claim_interface<'a>(
         &'a mut self,
         interface: u8,
         alternate: u8,
     ) -> futures::future::BoxFuture<'a, std::result::Result<(), USBError>> {
         async move { self._claim_interface(interface, alternate).await }.boxed()
-    }
-
-    fn ep_ctrl(&mut self) -> &mut EndpointControl {
-        &mut self.ctrl_ep
     }
 
     fn set_configuration<'a>(
@@ -276,12 +281,12 @@ impl DeviceOp for Device {
         .boxed()
     }
 
-    fn get_endpoint(
+    fn endpoint(
         &mut self,
         desc: &usb_if::descriptor::EndpointDescriptor,
-    ) -> std::result::Result<crate::backend::ty::ep::EndpointBase, USBError> {
+    ) -> std::result::Result<Endpoint, USBError> {
         let ep = EndpointImpl::new(self.handle.clone(), desc.address);
-        Ok(EndpointBase::new(ep))
+        Ok(Endpoint::new(EndpointInfo::from(desc), ep))
     }
 
     fn update_hub(

@@ -6,6 +6,7 @@ use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use spin::Mutex;
 use usb_if::descriptor::DeviceDescriptorBase;
+use usb_if::endpoint::EndpointInfo;
 use usb_if::err::USBError;
 use usb_if::{
     descriptor::{
@@ -20,7 +21,7 @@ use super::{
     SlotId, Xhci,
     cmd::CommandRing,
     context::ContextData,
-    endpoint::{Endpoint, EndpointDescriptorExt},
+    endpoint::{Endpoint as XhciEndpoint, EndpointDescriptorExt},
     parse_default_max_packet_size_from_port_speed,
     reg::SlotBell,
     transfer::TransferResultHandler,
@@ -32,10 +33,7 @@ use crate::osal::Kernel;
 use crate::{
     backend::{
         Dci,
-        ty::{
-            DeviceOp,
-            ep::{EndpointBase, EndpointControl},
-        },
+        ty::{DeviceOp, ep::Endpoint},
     },
     err::Result,
 };
@@ -44,14 +42,14 @@ pub struct Device {
     id: SlotId,
     ctx: ContextData,
     desc: DeviceDescriptor,
-    ctrl_ep: Option<EndpointControl>,
+    ctrl_ep: Option<Endpoint>,
     transfer_result_handler: TransferResultHandler,
     bell: Arc<Mutex<SlotBell>>,
     kernel: Kernel,
     current_config_value: Option<u8>,
     config_desc: Vec<ConfigurationDescriptor>,
     port_speed: Speed,
-    eps: BTreeMap<Dci, EndpointBase>,
+    eps: BTreeMap<u8, Endpoint>,
     cmd: CommandRing,
 }
 
@@ -87,12 +85,20 @@ impl Device {
         })
     }
 
-    fn new_ep(&mut self, dci: Dci) -> Result<Endpoint> {
-        let ep = Endpoint::new(dci, &self.kernel, self.bell.clone())?;
+    fn new_ep(&mut self, dci: Dci) -> Result<XhciEndpoint> {
+        let ep = XhciEndpoint::new(dci, &self.kernel, self.bell.clone())?;
         self.transfer_result_handler
             .register_queue(self.id.as_u8(), dci.as_u8(), ep.ring());
 
         Ok(ep)
+    }
+
+    fn control_endpoint(&self) -> &Endpoint {
+        self.ctrl_ep.as_ref().unwrap()
+    }
+
+    fn control_endpoint_mut(&mut self) -> &mut Endpoint {
+        self.ctrl_ep.as_mut().unwrap()
     }
 
     pub(crate) async fn init(&mut self, host: &mut Xhci, info: &DeviceAddressInfo) -> Result {
@@ -101,7 +107,7 @@ impl Device {
         // let speed = info.port_speed.to_xhci_portsc_value();
 
         let ep = self.new_ep(Dci::CTRL)?;
-        self.ctrl_ep = Some(EndpointControl::new(ep));
+        self.ctrl_ep = Some(Endpoint::new(EndpointInfo::control(), ep));
         self.address(host, info).await?;
         // self.dump_device_out();
         let base = self.get_device_descriptor_base().await?;
@@ -117,7 +123,10 @@ impl Device {
 
         // 读取所有配置描述符
         for i in 0..self.desc.num_configurations {
-            let config_desc = self.ep_ctrl().get_configuration_descriptor(i).await?;
+            let config_desc = self
+                .control_endpoint_mut()
+                .get_configuration_descriptor(i)
+                .await?;
             self.config_desc.push(config_desc);
         }
 
@@ -126,7 +135,7 @@ impl Device {
         if !self.config_desc.is_empty() {
             let config_value = self.config_desc[0].configuration_value;
             debug!("Setting device configuration to {}", config_value);
-            self.set_configuration(config_value).await?;
+            self._set_configuration(config_value).await?;
         }
 
         debug!("device descriptor ok");
@@ -193,7 +202,9 @@ impl Device {
             parent_id = parent_hub.parent;
         }
 
-        let ctrl_ring_addr = self.ep_ctrl().raw.as_raw_mut::<Endpoint>().bus_addr();
+        let ctrl_ring_addr = self
+            .control_endpoint_mut()
+            .with_raw_mut::<XhciEndpoint, _>(|ep| ep.bus_addr());
         // ctrl dci
         let dci = Dci::CTRL;
         // 1. Allocate an Input Context data structure (6.2.5) and initialize all fields to
@@ -329,14 +340,14 @@ impl Device {
     }
 
     async fn read_descriptor(&mut self) -> Result<()> {
-        self.desc = self.ep_ctrl().get_device_descriptor().await?;
+        self.desc = self.control_endpoint_mut().get_device_descriptor().await?;
         Ok(())
     }
     async fn get_device_descriptor_base(&mut self) -> Result<DeviceDescriptorBase> {
         let mut data = vec![0u8; 8];
 
         // DMA 传输
-        self.ep_ctrl()
+        self.control_endpoint_mut()
             .get_descriptor(DescriptorType::DEVICE, 0, 0, data.as_mut_slice())
             .await?;
 
@@ -346,14 +357,14 @@ impl Device {
     }
 
     async fn get_configuration(&mut self) -> Result<u8> {
-        let val = self.ep_ctrl().get_configuration().await?;
+        let val = self.control_endpoint_mut().get_configuration().await?;
         self.current_config_value = Some(val);
         Ok(val)
     }
 
     async fn _set_configuration(&mut self, configuration_value: u8) -> Result {
         self.ctx.perper_change();
-        self.ep_ctrl()
+        self.control_endpoint_mut()
             .set_configuration(configuration_value)
             .await?;
 
@@ -376,7 +387,7 @@ impl Device {
             c.set_alternate_setting(alternate);
         });
 
-        self.ep_ctrl()
+        self.control_endpoint_mut()
             .control_out(
                 ControlSetup {
                     request_type: RequestType::Standard,
@@ -397,6 +408,12 @@ impl Device {
         let mut max_dci = 1;
         self.ctx.perper_change();
         self.eps.clear();
+        self.ctx.with_input(|input| {
+            let control_context = input.control_mut();
+            for i in 2..32 {
+                control_context.set_drop_context_flag(i);
+            }
+        });
 
         for desc in self
             .find_interface_endpoints(interface, alternate)?
@@ -406,9 +423,22 @@ impl Device {
             if dci > max_dci {
                 max_dci = dci;
             }
-            let ep_raw = self.new_ep(dci.into())?;
+            let mut ep_raw = self.new_ep(dci.into())?;
+            let periodic_burst_size = match self.port_speed {
+                Speed::High
+                    if matches!(
+                        desc.transfer_type,
+                        EndpointType::Isochronous | EndpointType::Interrupt
+                    ) =>
+                {
+                    desc.packets_per_microframe.saturating_sub(1)
+                }
+                _ => 0,
+            };
+            ep_raw.configure_periodic(desc.max_packet_size as usize, periodic_burst_size);
             let ring_addr = ep_raw.bus_addr();
-            self.eps.insert(dci.into(), EndpointBase::new(ep_raw));
+            self.eps
+                .insert(desc.address, Endpoint::new((&desc).into(), ep_raw));
 
             let xhci_interval =
                 self.calculate_xhci_interval(desc.interval, desc.transfer_type, desc.interval);
@@ -417,6 +447,7 @@ impl Device {
                 let control_context = input.control_mut();
 
                 control_context.set_add_context_flag(dci as _);
+                control_context.clear_drop_context_flag(dci as _);
 
                 debug!(
                     "init ep addr {:#x}  dci {dci} {:?}",
@@ -439,12 +470,16 @@ impl Device {
                 match desc.transfer_type {
                     EndpointType::Isochronous | EndpointType::Interrupt => {
                         //init for isoch/interrupt
-                        ep_mut.set_max_packet_size(desc.max_packet_size & 0x7ff); //refer xhci page 162
-                        ep_mut.set_max_burst_size(
-                            ((desc.max_packet_size & 0x1800) >> 11).try_into().unwrap(),
-                        );
+                        ep_mut.set_max_packet_size(desc.max_packet_size);
+                        ep_mut.set_max_burst_size(periodic_burst_size.try_into().unwrap());
                         ep_mut.set_mult(0); //always 0 for interrupt
-                        ep_mut.set_max_endpoint_service_time_interval_payload_low(4);
+                        let max_esit_payload =
+                            desc.max_packet_size as usize * (periodic_burst_size + 1);
+                        ep_mut
+                            .set_average_trb_length(max_esit_payload.min(u16::MAX as usize) as u16);
+                        ep_mut.set_max_endpoint_service_time_interval_payload_low(
+                            max_esit_payload.min(u16::MAX as usize) as u16,
+                        );
                     }
                     _ => {}
                 }
@@ -636,6 +671,15 @@ impl DeviceOp for Device {
     fn descriptor(&self) -> &DeviceDescriptor {
         &self.desc
     }
+
+    fn ctrl_ep_ref(&self) -> &Endpoint {
+        self.control_endpoint()
+    }
+
+    fn ctrl_ep_mut(&mut self) -> &mut Endpoint {
+        self.control_endpoint_mut()
+    }
+
     fn claim_interface<'a>(
         &'a mut self,
         interface: u8,
@@ -643,23 +687,17 @@ impl DeviceOp for Device {
     ) -> BoxFuture<'a, Result<()>> {
         self._claim_interface(interface, alternate).boxed()
     }
+
     fn set_configuration<'a>(&'a mut self, configuration_value: u8) -> BoxFuture<'a, Result<()>> {
         self._set_configuration(configuration_value).boxed()
-    }
-
-    fn ep_ctrl(&mut self) -> &mut EndpointControl {
-        self.ctrl_ep.as_mut().unwrap()
     }
 
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
         &self.config_desc
     }
 
-    fn get_endpoint(
-        &mut self,
-        desc: &usb_if::descriptor::EndpointDescriptor,
-    ) -> Result<EndpointBase> {
-        let ep = self.eps.remove(&desc.dci().into());
+    fn endpoint(&mut self, desc: &usb_if::descriptor::EndpointDescriptor) -> Result<Endpoint> {
+        let ep = self.eps.remove(&desc.address);
         ep.ok_or(USBError::NotFound)
     }
 

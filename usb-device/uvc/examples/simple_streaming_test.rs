@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //             warn!("Attempt {}: Error: {:?}", attempt, e);
 
     //             // 如果是队列满，等待一下
-    //             if format!("{:?}", e).contains("RequestQueueFull") {
+    //             if format!("{:?}", e).contains("QueueFull") {
     //                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     //             }
     //         }

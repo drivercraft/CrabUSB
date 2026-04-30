@@ -578,6 +578,9 @@ impl EventHandler {
                     let ep_id = c.endpoint_id();
                     let ptr = c.trb_pointer();
 
+                    // Interrupts synchronize queue state only. Do not call
+                    // into OS glue or take manager/file/device locks here; the
+                    // waiter that owns the queue will advance the transfer flow.
                     unsafe {
                         self.transfer_result_handler
                             .set_finished(slot_id, ep_id, ptr.into(), c)

@@ -6,19 +6,20 @@ use std::{
 
 use futures::task::AtomicWaker;
 use libusb1_sys::{
-    libusb_control_transfer_get_data, libusb_fill_bulk_transfer, libusb_fill_control_setup,
-    libusb_fill_control_transfer, libusb_fill_iso_transfer, libusb_submit_transfer,
-    libusb_transfer,
+    libusb_cancel_transfer, libusb_control_transfer_get_data, libusb_fill_bulk_transfer,
+    libusb_fill_control_setup, libusb_fill_control_transfer, libusb_fill_iso_transfer,
+    libusb_submit_transfer, libusb_transfer,
 };
 use log::trace;
 use usb_if::{
+    endpoint::{RequestId, TransferCompletion, TransferRequest},
     err::TransferError,
     transfer::{BmRequestType, Direction},
 };
 
 use super::{device::DeviceHandle, err::transfer_status_to_result};
 use crate::backend::ty::{
-    ep::{EndpointOp, TransferHandle},
+    ep::{EndpointOp, transfer_to_completion},
     transfer::{Transfer, TransferKind},
 };
 
@@ -184,10 +185,18 @@ impl EndpointImpl {
 unsafe impl Send for EndpointImpl {}
 
 impl EndpointOp for EndpointImpl {
-    fn submit(
+    fn submit_request(
         &mut self,
-        transfer: Transfer,
-    ) -> Result<TransferHandle<'_>, usb_if::err::TransferError> {
+        request: TransferRequest,
+    ) -> Result<RequestId, usb_if::err::TransferError> {
+        let (kind, direction, buffer) = request.into();
+        let transfer = Transfer {
+            kind,
+            direction,
+            buffer: buffer.map(|buffer| (buffer.ptr, buffer.len)),
+            transfer_len: 0,
+            iso_packet_actual_lengths: Vec::new(),
+        };
         let trans = self.make_transfer(transfer)?;
         let id = trans.id();
         let ptr = trans.transfer;
@@ -200,38 +209,43 @@ impl EndpointOp for EndpointImpl {
             return Err(submit_result.err().unwrap());
         }
         trace!("Submitted libusb transfer id {:#x}, ptr{:p}", id, ptr);
-        Ok(TransferHandle::new(id, self))
+        Ok(RequestId::new(id))
     }
 
-    fn query_transfer(
+    fn reclaim_request(
         &mut self,
-        id: u64,
-    ) -> Option<Result<crate::backend::ty::transfer::Transfer, usb_if::err::TransferError>> {
-        let trans = self.transfers.get(&id)?;
+        id: RequestId,
+    ) -> Option<Result<TransferCompletion, usb_if::err::TransferError>> {
+        let trans = self.transfers.get(&id.raw())?;
         if !trans.ok.load(std::sync::atomic::Ordering::Acquire) {
             return None;
         }
-        let trans = self.transfers.remove(&id).unwrap();
-        Some(trans.to_result())
+        let trans = self.transfers.remove(&id.raw()).unwrap();
+        Some(
+            trans
+                .to_result()
+                .map(|transfer| transfer_to_completion(id, transfer)),
+        )
     }
 
-    fn register_cx(&self, id: u64, cx: &mut std::task::Context<'_>) {
-        if let Some(trans) = self.transfers.get(&id) {
+    fn register_waker(&self, id: RequestId, cx: &mut std::task::Context<'_>) {
+        if let Some(trans) = self.transfers.get(&id.raw()) {
             trans.register_waker(cx);
         }
     }
 
-    fn new_transfer(
-        &mut self,
-        kind: TransferKind,
-        direction: Direction,
-        buff: Option<(std::ptr::NonNull<u8>, usize)>,
-    ) -> Transfer {
-        Transfer {
-            kind,
-            direction,
-            buffer: buff,
-            transfer_len: 0,
+    fn cancel_request(&mut self, id: RequestId) -> Result<(), usb_if::err::TransferError> {
+        let trans = self
+            .transfers
+            .get(&id.raw())
+            .ok_or(TransferError::InvalidEndpoint)?;
+        let res = unsafe { libusb_cancel_transfer(trans.transfer) };
+        if res == libusb1_sys::constants::LIBUSB_SUCCESS as i32 {
+            Ok(())
+        } else {
+            Err(TransferError::Other(anyhow!(
+                "Failed to cancel transfer: libusb error {res}"
+            )))
         }
     }
 }
@@ -271,6 +285,14 @@ impl TransferHandleRaw {
 
         let mut out = self.origin.clone();
         out.transfer_len = trans_raw.actual_length as usize;
+        if let TransferKind::Isochronous { packet_lengths } = &self.origin.kind {
+            out.iso_packet_actual_lengths = Vec::with_capacity(packet_lengths.len());
+            for i in 0..trans_raw.num_iso_packets as usize {
+                let packet = unsafe { &*trans_raw.iso_packet_desc.as_ptr().add(i) };
+                out.iso_packet_actual_lengths
+                    .push(packet.actual_length as usize);
+            }
+        }
         Ok(out)
     }
 

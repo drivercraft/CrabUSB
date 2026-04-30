@@ -8,7 +8,7 @@ use alloc::{
     vec::Vec,
 };
 use anyhow::anyhow;
-use crab_usb::{Device, DeviceInfo, EndpointKind, err::USBError};
+use crab_usb::{Device, DeviceInfo, err::USBError};
 use log::*;
 use usb_if::descriptor::EndpointType;
 use usb_if::{
@@ -234,7 +234,6 @@ pub struct UvcDevice {
 
     video_streaming_interface_num: u8,
     processing_unit_id: Option<u8>, // 处理单元ID
-    // ep_in: Option<EndpointIsoIn>,
     current_format: Option<VideoFormat>,
     state: UvcDeviceState,
     descriptor_parser: DescriptorParser, // 新增描述符解析器
@@ -877,10 +876,7 @@ impl UvcDevice {
         }
 
         let ep_desc = ep.ok_or(anyhow!("No isochronous IN endpoint found"))?;
-        let ep = match self.device.get_endpoint(ep_desc.address).await? {
-            EndpointKind::IsochronousIn(e) => e,
-            _ => Err(anyhow!("Endpoint is not isochronous IN"))?,
-        };
+        let ep = self.device.endpoint(ep_desc.address)?;
 
         debug!("Starting video streaming");
         self.state = UvcDeviceState::Streaming;
