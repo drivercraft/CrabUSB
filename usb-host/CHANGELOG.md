@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.8.1...crab-usb-v0.8.2) - 2026-05-07
+
+### Fixed
+
+- *(ring)* adjust TRB length calculation to support multiple ring pages ([#75](https://github.com/drivercraft/CrabUSB/pull/75))
+
 ## [0.8.1](https://github.com/drivercraft/CrabUSB/compare/crab-usb-v0.8.0...crab-usb-v0.8.1) - 2026-04-30
 
 ### Fixed
