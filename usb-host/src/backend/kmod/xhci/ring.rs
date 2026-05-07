@@ -10,6 +10,7 @@ use crate::{
 
 const TRB_LEN: usize = 4;
 const TRB_SIZE: usize = size_of::<TrbData>();
+const DEFAULT_RING_PAGES: usize = 2;
 
 #[derive(Clone)]
 #[repr(transparent)]
@@ -63,7 +64,7 @@ impl Ring {
     }
 
     pub fn new(link: bool, direction: DmaDirection, dma: &Kernel) -> Result<Self> {
-        let len = dma.page_size() / TRB_SIZE;
+        let len = (dma.page_size() * DEFAULT_RING_PAGES) / TRB_SIZE;
         Ok(Self::new_with_len(len, link, direction, dma)?)
     }
 
